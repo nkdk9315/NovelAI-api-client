@@ -1,0 +1,27 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+*.log
+
+# Virtual environments
+.venv/
+venv/
+
+# Secret keys
+.env
+.env.example
+
+# Windows Zone Identifier files
+*.Zone.Identifier
+*mshield
+
+# Generated images (必要に応じて)
+*.png
+*.webp
+
+# Vibe files (必要に応じて)
+*.naiv4vibe
