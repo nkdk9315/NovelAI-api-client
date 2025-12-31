@@ -8,7 +8,9 @@ python example_unified_client.py
 
 from pathlib import Path
 from dotenv import load_dotenv
-from novelai_client import NovelAIClient, CharacterConfig, CharacterReferenceConfig
+from novelai import NovelAIClient, CharacterConfig, CharacterReferenceConfig
+
+load_dotenv()
 
 
 def example_simple_generate():
@@ -64,7 +66,7 @@ def example_img2img():
     
     client = NovelAIClient()
     
-    input_image = Path("input.png")
+    input_image = Path("reference/input.png")
     if not input_image.exists():
         print(f"入力画像が見つかりません: {input_image}")
         return None
@@ -89,7 +91,7 @@ def example_img2img_with_vibes():
     
     client = NovelAIClient()
     
-    input_image = Path("input.png")
+    input_image = Path("reference/input.png")
     vibe_file = Path("えのきっぷ1.naiv4vibe")
     
     if not input_image.exists():
@@ -134,10 +136,10 @@ def example_multi_character():
          ),
     ]
     vibe_files = [
-        Path("えのきっぷ1.naiv4vibe"),
-        Path("20251215_231647.naiv4vibe"),
-        Path("漆黒の性王.naiv4vibe"),
-        Path("vibes/890bc110faa4_20251228_172917.naiv4vibe"),
+        Path("vibes/えのきっぷ1.naiv4vibe"),
+        Path("vibes/20251215_231647.naiv4vibe"),
+        Path("vibes/漆黒の性王.naiv4vibe"),
+        Path("vibes/890bc110faa4_20251231_134734.naiv4vibe"),
     ]
     result = client.generate(
         "school classroom, sunny day, wide shot, detailed background, 2::face focus::, -3::multiple views::",
@@ -161,7 +163,7 @@ def example_img2img_multi_character_with_vibes():
     client = NovelAIClient()
     
     # 入力画像
-    input_image = Path("input.png")
+    input_image = Path("reference/input.png")
     if not input_image.exists():
         print(f"入力画像が見つかりません: {input_image}")
         return None
@@ -216,7 +218,7 @@ def example_encode_vibe():
     
     client = NovelAIClient()
     
-    image_path = Path("reference.png")
+    image_path = Path("reference/input.png")
     if not image_path.exists():
         print(f"参照画像が見つかりません: {image_path}")
         return None
@@ -286,7 +288,7 @@ def example_character_reference():
     client = NovelAIClient()
     
     # 参照画像のパス
-    reference_image = Path("reference.png")
+    reference_image = Path("reference/input.png")
     if not reference_image.exists():
         print(f"参照画像が見つかりません: {reference_image}")
         return None
@@ -328,7 +330,7 @@ def example_character_reference_style_off():
     
     client = NovelAIClient()
     
-    reference_image = Path("reference.png")
+    reference_image = Path("reference/input.png")
     if not reference_image.exists():
         print(f"参照画像が見つかりません: {reference_image}")
         return None
@@ -382,7 +384,7 @@ def main():
     # example_img2img_multi_character_with_vibes()
     
     # Vibeエンコード
-    example_encode_vibe()
+    # example_encode_vibe()
     
     # エンコード → 生成
     # example_encode_and_generate()
