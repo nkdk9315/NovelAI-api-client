@@ -24,4 +24,4 @@ venv/
 *.webp
 
 # Vibe files (必要に応じて)
-*.naiv4vibe
+*.naiv4vibet5_tokenizer.json
