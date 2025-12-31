@@ -36,6 +36,7 @@ from .constants import (
     DEFAULT_NOISE_SCHEDULE,
     DEFAULT_VIBE_STRENGTH,
     DEFAULT_IMG2IMG_STRENGTH,
+    MAX_IMAGE_SIZE_BYTES,
 )
 from .models import (
     CharacterConfigModel,
@@ -526,6 +527,14 @@ class NovelAIClient:
             with zipfile.ZipFile(io.BytesIO(content)) as zf:
                 for name in zf.namelist():
                     if name.endswith(('.png', '.webp', '.jpg', '.jpeg')):
+                        # Decompression Bomb protection
+                        file_info = zf.getinfo(name)
+                        if file_info.file_size > MAX_IMAGE_SIZE_BYTES:
+                            raise ValueError(
+                                f"Decompression bomb detected: {name} size {file_info.file_size} "
+                                f"exceeds limit {MAX_IMAGE_SIZE_BYTES}"
+                            )
+
                         image_data = zf.read(name)
                         break
         # 直接PNGデータかチェック
@@ -575,6 +584,14 @@ class NovelAIClient:
         with zipfile.ZipFile(io.BytesIO(content)) as zf:
             for name in zf.namelist():
                 if name.endswith(('.png', '.webp', '.jpg', '.jpeg')):
+                    # Decompression Bomb protection
+                    file_info = zf.getinfo(name)
+                    if file_info.file_size > MAX_IMAGE_SIZE_BYTES:
+                        raise ValueError(
+                            f"Decompression bomb detected: {name} size {file_info.file_size} "
+                            f"exceeds limit {MAX_IMAGE_SIZE_BYTES}"
+                        )
+
                     return zf.read(name)
         raise ValueError("No image found in response")
 
