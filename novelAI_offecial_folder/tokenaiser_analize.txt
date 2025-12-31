@@ -1,0 +1,56 @@
+Request URL
+https://novelai.net/tokenizer/compressed/clip_tokenizer.def?v=2&static=true
+Request Method
+GET
+Status Code
+200 OK (from disk cache)
+Remote Address
+172.66.159.133:443
+Referrer Policy
+strict-origin-when-cross-origin
+access-control-allow-origin
+*
+cache-control
+public, max-age=0, must-revalidate
+cf-cache-status
+DYNAMIC
+cf-ray
+9b51166d3b0bd543-NRT
+content-encoding
+gzip
+content-type
+text/plain; charset=utf-8
+date
+Sun, 28 Dec 2025 12:33:42 GMT
+etag
+W/"50f8782407878ccd6be53abae397cd78"
+nel
+{"success_fraction":0,"report_to":"cf-nel","max_age":604800}
+referrer-policy
+strict-origin-when-cross-origin
+report-to
+{"endpoints":[{"url":"https:\/\/a.nel.cloudflare.com\/report\/v4?s=OPZOAAjwESZmQJ%2BkYQrYxo8PaZ5ZHa1Qlp%2BtJbwE0wh6DyDVcEzQkFxezBYn%2F%2BCyB8HEXDu56aKiXFT%2BdUL6FOaJHVdgTnKWJFjhxt2nlLhpczfLf9Dnq%2FIa1HJUWQ%3D%3D"}],"group":"cf-nel","max_age":604800}
+
+server
+cloudflare
+vary
+Accept-Encoding
+x-content-type-options
+nosniff
+content-type
+application/json
+referer
+https://novelai.net/_next/static/chunks/9423.2de67be589ffa59d.js
+user-agent
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36
+
+Request call stack
+N.c.cache	@	9423.2de67be589ffa59d.js:1
+N	@	9423.2de67be589ffa59d.js:1
+(anonymous)	@	9423.2de67be589ffa59d.js:1
+E	@	9423.2de67be589ffa59d.js:1
+(anonymous)	@	9423.2de67be589ffa59d.js:1
+
+pyload
+
+v=2&static=true
