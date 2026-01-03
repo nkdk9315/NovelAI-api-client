@@ -34,6 +34,11 @@ export const DEFAULT_VIBE_STRENGTH = 0.7;
 export const DEFAULT_VIBE_INFO_EXTRACTED = 0.7;
 export const DEFAULT_IMG2IMG_STRENGTH = 0.62;
 
+// Inpaint defaults
+export const DEFAULT_INPAINT_STRENGTH = 0.7;
+export const DEFAULT_INPAINT_NOISE = 0;
+export const DEFAULT_INPAINT_COLOR_CORRECT = true;
+
 
 // =============================================================================
 // バリデーション定数
