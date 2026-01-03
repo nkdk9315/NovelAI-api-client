@@ -2,7 +2,6 @@
  * NovelAI Unified Image Generation Client
  * 統合されたVibe Transfer & Image2Image APIクライアント
  */
-
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -142,8 +141,16 @@ export class NovelAIClient {
         fs.mkdirSync(dir, { recursive: true });
       }
 
-      const timestamp = new Date().toISOString().replace(/[-:T.]/g, '_').slice(0, 15);
-      const filename = `${sourceHash.slice(0, 12)}_${timestamp}.naiv4vibe`;
+      let filename: string;
+      if (validatedParams.save_filename) {
+        // Use custom filename, ensure .naiv4vibe extension
+        const baseName = validatedParams.save_filename.replace(/\.naiv4vibe$/i, '');
+        filename = `${baseName}.naiv4vibe`;
+      } else {
+        // Auto-generate filename
+        const timestamp = new Date().toISOString().replace(/[-:T.]/g, '_').slice(0, 15);
+        filename = `${sourceHash.slice(0, 12)}_${timestamp}.naiv4vibe`;
+      }
       const savePath = path.join(dir, filename);
 
       this.saveVibe(result, savePath);

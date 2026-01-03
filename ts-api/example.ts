@@ -11,6 +11,7 @@ import dotenv from 'dotenv';
 import { NovelAIClient } from './src/client';
 import * as Schemas from './src/schemas';
 import * as Constants from './src/constants';
+import { ZodError } from 'zod';
 
 // Load environment variables
 dotenv.config();
@@ -35,7 +36,14 @@ async function exampleSimpleGenerate() {
     console.log(`✓ Generated: ${result.saved_path}`);
     console.log(`  Seed: ${result.seed}`);
   } catch (e) {
-    console.error("Error:", e);
+    if (e instanceof ZodError) {
+      console.error("❌ バリデーションエラー:");
+      e.issues.forEach(issue => {
+        console.error(`   - ${issue.path.join('.')}: ${issue.message}`);
+      });
+    } else {
+      console.error("Error:", e);
+    }
   }
 }
 
@@ -46,31 +54,53 @@ async function exampleWithVibes() {
     const client = new NovelAIClient();
 
     const vibeFiles = [
-      "えのきっぷ1.naiv4vibe",
-      "20251215_231647.naiv4vibe",
-      "漆黒の性王.naiv4vibe",
+      "vibes/input1.naiv4vibe",
     ];
 
     // Filter existing
-    const existingVibes = vibeFiles.filter(f => fs.existsSync(f));
+    const validVibes = vibeFiles.filter(f => fs.existsSync(f));
 
-    if (existingVibes.length === 0) {
+    if (validVibes.length === 0) {
       console.log("Vibeファイルが見つかりません");
       return;
     }
+    const characters: Schemas.CharacterConfig[] = [
+      {
+        prompt: "3::cynthia (pokemon) school uniform::,  3::saliva drip::, 2::embarrassed::, large areolae, cleavage, inverted nipples, 3::nude::, -2::loli::,2::deep kiss::, 3::saliva on breasts and areolae::",
+        center_x: 0.2,
+        center_y: 0.5,
+        negative_prompt: ""
+      },
+      {
+        prompt: "2::fat man::, 2::ugly::, 3::deep kiss, 3::saliva drip::,  ",
+        center_x: 0.8,
+        center_y: 0.5,
+        negative_prompt: ""
+      },
+    ];
 
     const result = await client.generate({
-      prompt: "1girl, beautiful anime girl, detailed eyes",
-      vibes: existingVibes,
-      vibe_strengths: new Array(existingVibes.length).fill(0.5),
-      save_dir: "output/"
+      prompt: "school classroom, sunny day, wide shot, detailed background, 2::face focus::, -3::multiple views::",
+      characters: characters,
+      vibes: validVibes.length > 0 ? validVibes : undefined,
+      vibe_strengths: validVibes.length > 0 ? [0.4, 0.3, 0.5, 0.2].slice(0, validVibes.length) : undefined,
+      width: 1024,
+      height: 1024,
+      save_dir: "output/multi_character/"
     });
 
     console.log(`✓ Generated: ${result.saved_path}`);
     console.log(`残りアンラス: ${result.anlas_remaining}`);
     console.log(`今回消費: ${result.anlas_consumed}`);
   } catch (e) {
-    console.error("Error:", e);
+    if (e instanceof ZodError) {
+      console.error("❌ バリデーションエラー:");
+      e.issues.forEach(issue => {
+        console.error(`   - ${issue.path.join('.')}: ${issue.message}`);
+      });
+    } else {
+      console.error("Error:", e);
+    }
   }
 }
 
@@ -85,12 +115,26 @@ async function exampleImg2img() {
       console.log(`入力画像が見つかりません: ${inputImage}`);
       return;
     }
+    const characters: Schemas.CharacterConfig[] = [
+      {
+        prompt: "3::cynthia (pokemon) school uniform::,  3::saliva drip::, 2::embarrassed::, large areolae, cleavage, inverted nipples, 3::nude::, -2::loli::,2::deep kiss::, 3::saliva on breasts and areolae::",
+        center_x: 0.2,
+        center_y: 0.5,
+        negative_prompt: ""
+      },
+      {
+        prompt: "2::fat man::, 2::ugly::, 3::deep kiss, 3::saliva drip::,  ",
+        center_x: 0.8,
+        center_y: 0.5,
+        negative_prompt: ""
+      },
+    ];
 
     const result = await client.generate({
       prompt: "1girl, beautiful anime girl, detailed eyes, masterpiece",
       action: "img2img",
       source_image: inputImage,
-      img2img_strength: 0.6,
+      img2img_strength: 0.8,
       save_dir: "output/"
     });
 
@@ -98,7 +142,14 @@ async function exampleImg2img() {
     console.log(`残りアンラス: ${result.anlas_remaining}`);
     console.log(`今回消費: ${result.anlas_consumed}`);
   } catch (e) {
-    console.error("Error:", e);
+    if (e instanceof ZodError) {
+      console.error("❌ バリデーションエラー:");
+      e.issues.forEach(issue => {
+        console.error(`   - ${issue.path.join('.')}: ${issue.message}`);
+      });
+    } else {
+      console.error("Error:", e);
+    }
   }
 }
 
@@ -109,7 +160,7 @@ async function exampleImg2imgWithVibes() {
     const client = new NovelAIClient();
 
     const inputImage = "reference/input.png";
-    const vibeFile = "えのきっぷ1.naiv4vibe";
+    const vibeFile = "vibes/えのきっぷ1.naiv4vibe";
 
     if (!fs.existsSync(inputImage)) {
       console.log(`入力画像が見つかりません: ${inputImage}`);
@@ -122,10 +173,12 @@ async function exampleImg2imgWithVibes() {
       prompt: "",
       action: "img2img",
       source_image: inputImage,
-      img2img_strength: 0.7,
+      img2img_strength: 0.5,
       img2img_noise: 0,
       vibes: vibes,
       vibe_strengths: vibes ? [0.7] : undefined,
+      width: 1024,
+      height: 1024,
       save_dir: "output/"
     });
 
@@ -133,7 +186,14 @@ async function exampleImg2imgWithVibes() {
     console.log(`残りアンラス: ${result.anlas_remaining}`);
     console.log(`今回消費: ${result.anlas_consumed}`);
   } catch (e) {
-    console.error("Error:", e);
+    if (e instanceof ZodError) {
+      console.error("❌ バリデーションエラー:");
+      e.issues.forEach(issue => {
+        console.error(`   - ${issue.path.join('.')}: ${issue.message}`);
+      });
+    } else {
+      console.error("Error:", e);
+    }
   }
 }
 
@@ -145,7 +205,7 @@ async function exampleMultiCharacter() {
 
     const characters: Schemas.CharacterConfig[] = [
       {
-        prompt: "3::cynthia (pokemon) school uniform::,  3::saliva drip::, 2::embarrassed::, large areolae, 3::nude::, -2::loli::,2::deep kiss::, 3::saliva on breasts and areolae::",
+        prompt: "3::liko (pokemon) school uniform::,  3::saliva drip::, 2::embarrassed::, large areolae, cleavage, inverted nipples, 3::nude::, -2::loli::,2::deep kiss::, 3::saliva on breasts and areolae::",
         center_x: 0.2,
         center_y: 0.5,
         negative_prompt: ""
@@ -173,8 +233,8 @@ async function exampleMultiCharacter() {
       characters: characters,
       vibes: validVibes.length > 0 ? validVibes : undefined,
       vibe_strengths: validVibes.length > 0 ? [0.4, 0.3, 0.5, 0.2].slice(0, validVibes.length) : undefined,
-      width: 1024,
-      height: 1024,
+      width: 1280,
+      height: 1280,
       save_dir: "output/multi_character/"
     });
 
@@ -182,7 +242,14 @@ async function exampleMultiCharacter() {
     console.log(`残りアンラス: ${result.anlas_remaining}`);
     console.log(`今回消費: ${result.anlas_consumed}`);
   } catch (e) {
-    console.error("Error:", e);
+    if (e instanceof ZodError) {
+      console.error("❌ バリデーションエラー:");
+      e.issues.forEach(issue => {
+        console.error(`   - ${issue.path.join('.')}: ${issue.message}`);
+      });
+    } else {
+      console.error("Error:", e);
+    }
   }
 }
 
@@ -199,24 +266,32 @@ async function exampleEncodeVibe() {
     }
 
     // エンコードのみ（保存なし）
-    const result = await client.encodeVibe({
-      image: imagePath,
-      information_extracted: 0.5,
-      strength: 0.7,
-    });
-    console.log(`✓ Encoded (hash: ${result.source_image_hash.slice(0, 12)}...)`);
+    // const result = await client.encodeVibe({
+    //   image: imagePath,
+    //   information_extracted: 0.5,
+    //   strength: 0.7,
+    // });
+    // console.log(`✓ Encoded (hash: ${result.source_image_hash.slice(0, 12)}...)`);
 
     // エンコード + 自動保存
     const resultSaved = await client.encodeVibe({
       image: imagePath,
-      save_dir: "vibes/"
+      save_filename: "input1", 
+      save_dir: "./vibes"
     });
     console.log(`✓ Saved: ${resultSaved.saved_path}`);
 
-    console.log(`残りアンラス: ${result.anlas_remaining}`);
-    console.log(`今回消費: ${result.anlas_consumed}`);
+    console.log(`残りアンラス: ${resultSaved.anlas_remaining}`);
+    console.log(`今回消費: ${resultSaved.anlas_consumed}`);
   } catch (e) {
-    console.error("Error:", e);
+    if (e instanceof ZodError) {
+      console.error("❌ バリデーションエラー:");
+      e.issues.forEach(issue => {
+        console.error(`   - ${issue.path.join('.')}: ${issue.message}`);
+      });
+    } else {
+      console.error("Error:", e);
+    }
   }
 }
 
@@ -254,7 +329,14 @@ async function exampleCharacterReference() {
     console.log(`  Seed: ${result.seed}`);
     console.log(`  残りアンラス: ${result.anlas_remaining}`);
   } catch (e) {
-    console.error("Error:", e);
+    if (e instanceof ZodError) {
+      console.error("❌ バリデーションエラー:");
+      e.issues.forEach(issue => {
+        console.error(`   - ${issue.path.join('.')}: ${issue.message}`);
+      });
+    } else {
+      console.error("Error:", e);
+    }
   }
 }
 
@@ -265,7 +347,7 @@ async function main() {
 
   // 実行したい例のコメントを外してください
 
-  await exampleSimpleGenerate();
+  // exampleSimpleGenerate();
 
   // await exampleWithVibes();
 
@@ -273,7 +355,7 @@ async function main() {
 
   // await exampleImg2imgWithVibes();
 
-  // await exampleMultiCharacter();
+  await exampleMultiCharacter();
 
   // await exampleEncodeVibe();
 
