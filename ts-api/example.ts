@@ -11,6 +11,7 @@ import dotenv from 'dotenv';
 import { NovelAIClient } from './src/client';
 import * as Schemas from './src/schemas';
 import * as Constants from './src/constants';
+import { ZodError } from 'zod';
 
 // Load environment variables
 dotenv.config();
@@ -35,7 +36,14 @@ async function exampleSimpleGenerate() {
     console.log(`✓ Generated: ${result.saved_path}`);
     console.log(`  Seed: ${result.seed}`);
   } catch (e) {
-    console.error("Error:", e);
+    if (e instanceof ZodError) {
+      console.error("❌ バリデーションエラー:");
+      e.issues.forEach(issue => {
+        console.error(`   - ${issue.path.join('.')}: ${issue.message}`);
+      });
+    } else {
+      console.error("Error:", e);
+    }
   }
 }
 
@@ -85,7 +93,14 @@ async function exampleWithVibes() {
     console.log(`残りアンラス: ${result.anlas_remaining}`);
     console.log(`今回消費: ${result.anlas_consumed}`);
   } catch (e) {
-    console.error("Error:", e);
+    if (e instanceof ZodError) {
+      console.error("❌ バリデーションエラー:");
+      e.issues.forEach(issue => {
+        console.error(`   - ${issue.path.join('.')}: ${issue.message}`);
+      });
+    } else {
+      console.error("Error:", e);
+    }
   }
 }
 
@@ -127,7 +142,14 @@ async function exampleImg2img() {
     console.log(`残りアンラス: ${result.anlas_remaining}`);
     console.log(`今回消費: ${result.anlas_consumed}`);
   } catch (e) {
-    console.error("Error:", e);
+    if (e instanceof ZodError) {
+      console.error("❌ バリデーションエラー:");
+      e.issues.forEach(issue => {
+        console.error(`   - ${issue.path.join('.')}: ${issue.message}`);
+      });
+    } else {
+      console.error("Error:", e);
+    }
   }
 }
 
@@ -164,7 +186,14 @@ async function exampleImg2imgWithVibes() {
     console.log(`残りアンラス: ${result.anlas_remaining}`);
     console.log(`今回消費: ${result.anlas_consumed}`);
   } catch (e) {
-    console.error("Error:", e);
+    if (e instanceof ZodError) {
+      console.error("❌ バリデーションエラー:");
+      e.issues.forEach(issue => {
+        console.error(`   - ${issue.path.join('.')}: ${issue.message}`);
+      });
+    } else {
+      console.error("Error:", e);
+    }
   }
 }
 
@@ -204,8 +233,8 @@ async function exampleMultiCharacter() {
       characters: characters,
       vibes: validVibes.length > 0 ? validVibes : undefined,
       vibe_strengths: validVibes.length > 0 ? [0.4, 0.3, 0.5, 0.2].slice(0, validVibes.length) : undefined,
-      width: 1024,
-      height: 1024,
+      width: 1280,
+      height: 1280,
       save_dir: "output/multi_character/"
     });
 
@@ -213,7 +242,14 @@ async function exampleMultiCharacter() {
     console.log(`残りアンラス: ${result.anlas_remaining}`);
     console.log(`今回消費: ${result.anlas_consumed}`);
   } catch (e) {
-    console.error("Error:", e);
+    if (e instanceof ZodError) {
+      console.error("❌ バリデーションエラー:");
+      e.issues.forEach(issue => {
+        console.error(`   - ${issue.path.join('.')}: ${issue.message}`);
+      });
+    } else {
+      console.error("Error:", e);
+    }
   }
 }
 
@@ -248,7 +284,14 @@ async function exampleEncodeVibe() {
     console.log(`残りアンラス: ${resultSaved.anlas_remaining}`);
     console.log(`今回消費: ${resultSaved.anlas_consumed}`);
   } catch (e) {
-    console.error("Error:", e);
+    if (e instanceof ZodError) {
+      console.error("❌ バリデーションエラー:");
+      e.issues.forEach(issue => {
+        console.error(`   - ${issue.path.join('.')}: ${issue.message}`);
+      });
+    } else {
+      console.error("Error:", e);
+    }
   }
 }
 
@@ -286,7 +329,14 @@ async function exampleCharacterReference() {
     console.log(`  Seed: ${result.seed}`);
     console.log(`  残りアンラス: ${result.anlas_remaining}`);
   } catch (e) {
-    console.error("Error:", e);
+    if (e instanceof ZodError) {
+      console.error("❌ バリデーションエラー:");
+      e.issues.forEach(issue => {
+        console.error(`   - ${issue.path.join('.')}: ${issue.message}`);
+      });
+    } else {
+      console.error("Error:", e);
+    }
   }
 }
 
