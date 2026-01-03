@@ -28,10 +28,13 @@ async function main() {
   }
 
   // === テスト1: 既存画像を使用したInpaint ===
-  await testInpaintWithExistingImage(client, outputDir);
+  // await testInpaintWithExistingImage(client, outputDir);
 
   // === テスト2: まず画像を生成してからInpaint ===
   // await testGenerateThenInpaint(client, outputDir);
+
+  // === テスト3: Inpaint + Vibe Transfer + キャラクター設定 ===
+  await testInpaintWithComplexFeatures(client, outputDir);
 }
 
 /**
@@ -160,6 +163,76 @@ async function testGenerateThenInpaint(client: NovelAIClient, outputDir: string)
     console.log(`✓ Inpaint completed!`);
     console.log(`  Saved to: ${inpaintResult.saved_path}`);
     console.log(`  Anlas consumed: ${inpaintResult.anlas_consumed}`);
+  } catch (error: any) {
+    console.error(`✗ Error: ${error.message}`);
+  }
+}
+
+/**
+ * テスト3: Inpaint機能と他の機能（Vibe, Character）の同時利用テスト
+ */
+async function testInpaintWithComplexFeatures(client: NovelAIClient, outputDir: string) {
+  console.log("\n--- Test: Inpaint + Vibes + Characters ---");
+
+  // referenceフォルダ内の画像
+  const referenceDir = "./reference";
+  const files = fs.existsSync(referenceDir) 
+    ? fs.readdirSync(referenceDir).filter(f => /\.(png|jpg|jpeg|webp)$/i.test(f))
+    : [];
+
+  if (files.length === 0) {
+    console.log("⚠ No image files found in reference folder. Skipping.");
+    return;
+  }
+
+  const sourceImagePath = path.join(referenceDir, files[0]);
+  const sourceBuffer = fs.readFileSync(sourceImagePath);
+  const metadata = await sharp(sourceBuffer).metadata();
+  const width = metadata.width || 832;
+  const height = metadata.height || 1216;
+
+  // マスク作成 (中央部)
+  const mask = await Utils.createRectangularMask(width, height, {
+    x: 0.35, y: 0.35, w: 0.30, h: 0.30,
+  });
+
+  // Vibeファイルの探索
+  const vibeFiles = [
+    "vibes/えのきっぷ1.naiv4vibe",
+    "vibes/漆黒の性王.naiv4vibe",
+  ].filter(f => fs.existsSync(f));
+
+  // キャラクター設定
+  const characters = [
+    {
+      prompt: "1girl, solo, holding a umbrella, looking at viewer",
+      center_x: 0.5,
+      center_y: 0.5,
+    }
+  ];
+
+  console.log(`✓ Using source: ${sourceImagePath}`);
+  console.log(`✓ Vibes: ${vibeFiles.length > 0 ? vibeFiles.join(", ") : "None found"}`);
+  console.log(`✓ Characters: ${characters.length}`);
+
+  try {
+    const result = await client.generate({
+      prompt: "masterpiece, best quality, rainy street, neon lights",
+      action: "infill",
+      source_image: sourceBuffer,
+      mask: mask,
+      width: Math.floor(width / 64) * 64,
+      height: Math.floor(height / 64) * 64,
+      characters: characters,
+      vibes: vibeFiles.length > 0 ? vibeFiles : undefined,
+      vibe_strengths: vibeFiles.length > 0 ? new Array(vibeFiles.length).fill(0.6) : undefined,
+      inpaint_strength: 0.7,
+      save_dir: outputDir,
+    });
+
+    console.log(`✓ Complex Inpaint completed!`);
+    console.log(`  Saved to: ${result.saved_path}`);
+    console.log(`  Anlas consumed: ${result.anlas_consumed}`);
   } catch (error: any) {
     console.error(`✗ Error: ${error.message}`);
   }
