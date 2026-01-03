@@ -223,3 +223,131 @@ export async function processCharacterReferences(
     secondary_strength_values
   };
 }
+
+
+// =============================================================================
+// Mask/Inpaint Helpers
+// =============================================================================
+
+/**
+ * 画像データのSHA256ハッシュを計算（cache_secret_key用）
+ */
+export function calculateCacheSecretKey(imageData: Buffer): string {
+  return crypto.createHash('sha256').update(imageData).digest('hex');
+}
+
+/**
+ * マスク画像を1/8サイズにリサイズ（API仕様に合わせる）
+ */
+export async function resizeMaskImage(
+  mask: Buffer,
+  targetWidth: number,
+  targetHeight: number
+): Promise<Buffer> {
+  // マスクは元画像の1/8サイズにリサイズ
+  const maskWidth = Math.floor(targetWidth / 8);
+  const maskHeight = Math.floor(targetHeight / 8);
+
+  const resized = await sharp(mask)
+    .resize({
+      width: maskWidth,
+      height: maskHeight,
+      fit: 'fill', // Exact size
+    })
+    .grayscale() // Ensure grayscale
+    .png()
+    .toBuffer();
+
+  return resized;
+}
+
+/**
+ * 矩形領域のマスク画像をプログラマティックに生成
+ * @param width 元画像の幅
+ * @param height 元画像の高さ  
+ * @param region マスク領域（0.0-1.0の相対座標）
+ * @returns マスク画像のBuffer（白=変更領域、黒=保持領域）
+ */
+export async function createRectangularMask(
+  width: number,
+  height: number,
+  region: { x: number; y: number; w: number; h: number }
+): Promise<Buffer> {
+  // マスクサイズは元画像の1/8
+  const maskWidth = Math.floor(width / 8);
+  const maskHeight = Math.floor(height / 8);
+
+  // 領域を絶対座標に変換
+  const rectX = Math.floor(region.x * maskWidth);
+  const rectY = Math.floor(region.y * maskHeight);
+  const rectW = Math.floor(region.w * maskWidth);
+  const rectH = Math.floor(region.h * maskHeight);
+
+  // 黒背景のキャンバスを作成
+  const canvas = Buffer.alloc(maskWidth * maskHeight, 0); // All black (0)
+
+  // 指定領域を白（255）で塗りつぶし
+  for (let y = rectY; y < Math.min(rectY + rectH, maskHeight); y++) {
+    for (let x = rectX; x < Math.min(rectX + rectW, maskWidth); x++) {
+      canvas[y * maskWidth + x] = 255;
+    }
+  }
+
+  // sharpでPNGに変換
+  const mask = await sharp(canvas, {
+    raw: {
+      width: maskWidth,
+      height: maskHeight,
+      channels: 1
+    }
+  })
+    .png()
+    .toBuffer();
+
+  return mask;
+}
+
+/**
+ * 円形領域のマスク画像をプログラマティックに生成
+ * @param width 元画像の幅
+ * @param height 元画像の高さ
+ * @param center 中心座標（0.0-1.0の相対座標）
+ * @param radius 半径（0.0-1.0、幅に対する相対値）
+ * @returns マスク画像のBuffer
+ */
+export async function createCircularMask(
+  width: number,
+  height: number,
+  center: { x: number; y: number },
+  radius: number
+): Promise<Buffer> {
+  const maskWidth = Math.floor(width / 8);
+  const maskHeight = Math.floor(height / 8);
+
+  const centerX = center.x * maskWidth;
+  const centerY = center.y * maskHeight;
+  const radiusPx = radius * maskWidth;
+
+  const canvas = Buffer.alloc(maskWidth * maskHeight, 0);
+
+  for (let y = 0; y < maskHeight; y++) {
+    for (let x = 0; x < maskWidth; x++) {
+      const dist = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2));
+      if (dist <= radiusPx) {
+        canvas[y * maskWidth + x] = 255;
+      }
+    }
+  }
+
+  const mask = await sharp(canvas, {
+    raw: {
+      width: maskWidth,
+      height: maskHeight,
+      channels: 1
+    }
+  })
+    .png()
+    .toBuffer();
+
+  return mask;
+}

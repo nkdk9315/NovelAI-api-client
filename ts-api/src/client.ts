@@ -279,6 +279,45 @@ export class NovelAIClient {
       payload.parameters.extra_noise_seed = seed - 1;
     }
 
+    // Infill/Inpaint (Mask機能)
+    if (validatedParams.action === "infill" && validatedParams.source_image && validatedParams.mask) {
+      // モデル名に-inpaintingサフィックスを追加
+      payload.model = validatedParams.model + "-inpainting";
+      
+      // 元画像を取得
+      const sourceImageBuffer = Utils.getImageBuffer(validatedParams.source_image);
+      const sourceImageBase64 = sourceImageBuffer.toString('base64');
+      
+      // マスク画像を処理（1/8サイズにリサイズ）
+      const maskBuffer = Utils.getImageBuffer(validatedParams.mask);
+      const resizedMask = await Utils.resizeMaskImage(
+        maskBuffer,
+        validatedParams.width,
+        validatedParams.height
+      );
+      const maskBase64 = resizedMask.toString('base64');
+      
+      // cache_secret_keyを生成
+      const imageCacheSecretKey = Utils.calculateCacheSecretKey(sourceImageBuffer);
+      const maskCacheSecretKey = Utils.calculateCacheSecretKey(resizedMask);
+      
+      // Inpaint用パラメータを設定
+      payload.parameters.image = sourceImageBase64;
+      payload.parameters.mask = maskBase64;
+      payload.parameters.strength = validatedParams.inpaint_strength;
+      payload.parameters.noise = validatedParams.inpaint_noise;
+      payload.parameters.add_original_image = false;
+      payload.parameters.extra_noise_seed = seed - 1;
+      payload.parameters.img2img = {
+        strength: validatedParams.inpaint_strength,
+        color_correct: validatedParams.inpaint_color_correct,
+      };
+      payload.parameters.image_cache_secret_key = imageCacheSecretKey;
+      payload.parameters.mask_cache_secret_key = maskCacheSecretKey;
+      payload.parameters.image_format = "png";
+      payload.parameters.stream = "msgpack";
+    }
+
     // Vibe
     if (vibeEncodings.length > 0) {
       payload.parameters.reference_image_multiple = vibeEncodings;
@@ -346,7 +385,9 @@ export class NovelAIClient {
     }
 
     // Make Request
-    const useStream = validatedParams.character_reference !== undefined && validatedParams.character_reference !== null;
+    // Use stream endpoint for character reference OR infill action
+    const useStream = (validatedParams.character_reference !== undefined && validatedParams.character_reference !== null) 
+      || validatedParams.action === "infill";
     const apiUrl = useStream ? Constants.STREAM_URL : Constants.API_URL;
 
     const response = await fetch(apiUrl, {

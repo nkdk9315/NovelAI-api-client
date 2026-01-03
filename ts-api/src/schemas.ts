@@ -96,10 +96,16 @@ export const GenerateParamsSchema = z.object({
   prompt: z.string().min(0).max(Constants.MAX_PROMPT_CHARS),
 
   // === Action & Image2Image ===
-  action: z.enum(["generate", "img2img"]).default("generate"),
+  action: z.enum(["generate", "img2img", "infill"]).default("generate"),
   source_image: ImageInputSchema.optional().nullable(),
   img2img_strength: z.number().min(0.0).max(1.0).default(Constants.DEFAULT_IMG2IMG_STRENGTH),
   img2img_noise: z.number().min(0.0).max(1.0).default(0.0),
+
+  // === Inpaint/Mask ===
+  mask: ImageInputSchema.optional().nullable(),
+  inpaint_strength: z.number().min(0.0).max(1.0).default(Constants.DEFAULT_INPAINT_STRENGTH),
+  inpaint_noise: z.number().min(0.0).max(1.0).default(Constants.DEFAULT_INPAINT_NOISE),
+  inpaint_color_correct: z.boolean().default(Constants.DEFAULT_INPAINT_COLOR_CORRECT),
 
   // === キャラクター設定 ===
   characters: z.array(CharacterConfigSchema).max(Constants.MAX_CHARACTERS).optional().nullable(),
@@ -147,6 +153,33 @@ export const GenerateParamsSchema = z.object({
       code: z.ZodIssueCode.custom,
       message: "source_image is required for img2img action",
       path: ["source_image"],
+    });
+  }
+
+  // 2b. action="infill" の場合は source_image と mask が必須
+  if (data.action === "infill") {
+    if (!data.source_image) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "source_image is required for infill action",
+        path: ["source_image"],
+      });
+    }
+    if (!data.mask) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "mask is required for infill action",
+        path: ["mask"],
+      });
+    }
+  }
+
+  // 2c. mask が指定されている場合は action が infill でなければならない
+  if (data.mask && data.action !== "infill") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "mask can only be used with action='infill'",
+      path: ["mask"],
     });
   }
 
