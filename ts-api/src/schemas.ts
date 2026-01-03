@@ -121,13 +121,13 @@ export const GenerateParamsSchema = z.object({
 
   // === 生成パラメータ ===
   model: z.enum(Constants.VALID_MODELS).default(Constants.DEFAULT_MODEL),
-  width: z.number().min(64).default(Constants.DEFAULT_WIDTH)
+  width: z.number().int().min(Constants.MIN_DIMENSION).default(Constants.DEFAULT_WIDTH)
     .refine(val => val % 64 === 0, { message: "Width must be a multiple of 64" }),
-  height: z.number().min(64).default(Constants.DEFAULT_HEIGHT)
+  height: z.number().int().min(Constants.MIN_DIMENSION).default(Constants.DEFAULT_HEIGHT)
     .refine(val => val % 64 === 0, { message: "Height must be a multiple of 64" }),
-  steps: z.number().min(Constants.MIN_STEPS).max(Constants.MAX_STEPS).default(Constants.DEFAULT_STEPS),
+  steps: z.number().int().min(Constants.MIN_STEPS).max(Constants.MAX_STEPS).default(Constants.DEFAULT_STEPS),
   scale: z.number().min(Constants.MIN_SCALE).max(Constants.MAX_SCALE).default(Constants.DEFAULT_SCALE),
-  seed: z.number().min(0).max(Constants.MAX_SEED).optional().nullable(),
+  seed: z.number().int().min(0).max(Constants.MAX_SEED).optional().nullable(),
   sampler: z.enum(Constants.VALID_SAMPLERS).default(Constants.DEFAULT_SAMPLER),
   noise_schedule: z.enum(Constants.VALID_NOISE_SCHEDULES).default(Constants.DEFAULT_NOISE_SCHEDULE),
 })
@@ -199,9 +199,23 @@ export const GenerateParamsSchema = z.object({
       path: ["width"], // Attach to width
     });
   }
+
+  // 8. save_path と save_dir は同時指定不可
+  if (data.save_path && data.save_dir) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "save_path and save_dir cannot be specified together. Use one or the other.",
+      path: ["save_path"],
+    });
+  }
 });
 
-export type GenerateParams = z.infer<typeof GenerateParamsSchema>;
+// Helper type for validated params (all fields present after .parse())
+type GenerateParamsValidated = z.infer<typeof GenerateParamsSchema>;
+
+// Input type - fields with defaults are optional
+export type GenerateParams = Pick<GenerateParamsValidated, 'prompt'> & 
+  Partial<Omit<GenerateParamsValidated, 'prompt'>>;
 
 
 // =============================================================================
@@ -215,6 +229,33 @@ export const EncodeVibeParamsSchema = z.object({
   strength: z.number().min(0.0).max(1.0).default(0.7),
   save_path: z.string().optional().nullable(),
   save_dir: z.string().optional().nullable(),
+  /** Custom filename for the .naiv4vibe file (without extension). If not provided, auto-generated. */
+  save_filename: z.string().optional().nullable(),
+})
+.superRefine((data, ctx) => {
+  // save_path と save_dir は同時指定不可
+  if (data.save_path && data.save_dir) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "save_path and save_dir cannot be specified together. Use one or the other.",
+      path: ["save_path"],
+    });
+  }
+
+  // save_filename は save_dir と一緒に使う必要がある
+  if (data.save_filename && !data.save_dir) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "save_filename requires save_dir to be specified.",
+      path: ["save_filename"],
+    });
+  }
 });
 
-export type EncodeVibeParams = z.infer<typeof EncodeVibeParamsSchema>;
+// Helper type for validated params
+type EncodeVibeParamsValidated = z.infer<typeof EncodeVibeParamsSchema>;
+
+// Input type - fields with defaults are optional  
+export type EncodeVibeParams = Pick<EncodeVibeParamsValidated, 'image'> &
+  Partial<Omit<EncodeVibeParamsValidated, 'image'>>;
+
