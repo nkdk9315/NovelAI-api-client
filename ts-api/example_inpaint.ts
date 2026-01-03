@@ -208,6 +208,7 @@ async function testInpaintWithComplexFeatures(client: NovelAIClient, outputDir: 
       prompt: "1girl, solo, holding a umbrella, looking at viewer",
       center_x: 0.5,
       center_y: 0.5,
+      negative_prompt: "",
     }
   ];
 

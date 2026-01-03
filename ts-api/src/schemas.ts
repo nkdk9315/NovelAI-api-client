@@ -243,16 +243,12 @@ export const GenerateParamsSchema = z.object({
   }
 });
 
-<<<<<<< HEAD
-export type GenerateParams = z.input<typeof GenerateParamsSchema>;
-=======
 // Helper type for validated params (all fields present after .parse())
 type GenerateParamsValidated = z.infer<typeof GenerateParamsSchema>;
 
 // Input type - fields with defaults are optional
 export type GenerateParams = Pick<GenerateParamsValidated, 'prompt'> & 
   Partial<Omit<GenerateParamsValidated, 'prompt'>>;
->>>>>>> origin/main
 
 
 // =============================================================================
@@ -289,9 +285,6 @@ export const EncodeVibeParamsSchema = z.object({
   }
 });
 
-<<<<<<< HEAD
-export type EncodeVibeParams = z.input<typeof EncodeVibeParamsSchema>;
-=======
 // Helper type for validated params
 type EncodeVibeParamsValidated = z.infer<typeof EncodeVibeParamsSchema>;
 
@@ -299,4 +292,3 @@ type EncodeVibeParamsValidated = z.infer<typeof EncodeVibeParamsSchema>;
 export type EncodeVibeParams = Pick<EncodeVibeParamsValidated, 'image'> &
   Partial<Omit<EncodeVibeParamsValidated, 'image'>>;
 
->>>>>>> origin/main
