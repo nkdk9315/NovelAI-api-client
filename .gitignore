@@ -25,3 +25,7 @@ venv/
 
 # Vibe files (必要に応じて)
 *.naiv4vibe
+
+# Node modules
+node_modules/
+**/node_modules/
