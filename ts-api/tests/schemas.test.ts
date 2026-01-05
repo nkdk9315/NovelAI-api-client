@@ -90,15 +90,15 @@ describe('CharacterReferenceConfigSchema', () => {
 // =============================================================================
 describe('GenerateParamsSchema', () => {
   describe('基本バリデーション', () => {
-    it('should validate minimal params (prompt only)', () => {
+    it('should validate minimal params (prompt only)', async () => {
       const params = { prompt: '1girl' };
-      const result = Schemas.GenerateParamsSchema.safeParse(params);
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync(params);
       expect(result.success).toBe(true);
     });
 
-    it('should apply all defaults correctly', () => {
+    it('should apply all defaults correctly', async () => {
       const params = { prompt: '1girl' };
-      const result = Schemas.GenerateParamsSchema.parse(params);
+      const result = await Schemas.GenerateParamsSchema.parseAsync(params);
       expect(result.action).toBe('generate');
       expect(result.model).toBe(Constants.DEFAULT_MODEL);
       expect(result.width).toBe(Constants.DEFAULT_WIDTH);
@@ -109,47 +109,48 @@ describe('GenerateParamsSchema', () => {
       expect(result.noise_schedule).toBe(Constants.DEFAULT_NOISE_SCHEDULE);
     });
 
-    it('should reject prompt exceeding max chars', () => {
+    it('should reject prompt exceeding max chars', async () => {
       const params = { prompt: 'a'.repeat(Constants.MAX_PROMPT_CHARS + 1) };
-      const result = Schemas.GenerateParamsSchema.safeParse(params);
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync(params);
       expect(result.success).toBe(false);
     });
   });
 
   describe('width/height バリデーション', () => {
-    it('should accept width/height as multiples of 64', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', width: 512, height: 768 });
+    it('should accept width/height as multiples of 64', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', width: 512, height: 768 });
       expect(result.success).toBe(true);
     });
 
-    it('should reject width not a multiple of 64', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', width: 500 });
+    it('should reject width not a multiple of 64', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', width: 500 });
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error.issues.some(i => i.message.includes('multiple of 64'))).toBe(true);
       }
     });
 
-    it('should reject height not a multiple of 64', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', height: 700 });
+    it('should reject height not a multiple of 64', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', height: 700 });
       expect(result.success).toBe(false);
     });
 
-    it('should reject width below min dimension', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', width: 32 });
+    it('should reject width below min dimension', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', width: 32 });
       expect(result.success).toBe(false);
     });
 
-    it('should reject non-integer width', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', width: 512.5 });
+    it('should reject non-integer width', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', width: 512.5 });
       expect(result.success).toBe(false);
     });
 
-    it('should reject total pixels exceeding MAX_PIXELS', () => {
+    it('should reject total pixels exceeding MAX_PIXELS', async () => {
       // 1024 x 1024 = 1,048,576 which equals MAX_PIXELS, should pass
-      expect(Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', width: 1024, height: 1024 }).success).toBe(true);
+      const resultPass = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', width: 1024, height: 1024 });
+      expect(resultPass.success).toBe(true);
       // 1280 x 1024 = 1,310,720 which exceeds MAX_PIXELS, should fail
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', width: 1280, height: 1024 });
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', width: 1280, height: 1024 });
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error.issues.some(i => i.message.includes('exceeds limit'))).toBe(true);
@@ -158,108 +159,118 @@ describe('GenerateParamsSchema', () => {
   });
 
   describe('steps バリデーション', () => {
-    it('should accept valid steps', () => {
-      expect(Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', steps: 1 }).success).toBe(true);
-      expect(Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', steps: 50 }).success).toBe(true);
+    it('should accept valid steps', async () => {
+      const result1 = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', steps: 1 });
+      expect(result1.success).toBe(true);
+      const result2 = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', steps: 50 });
+      expect(result2.success).toBe(true);
     });
 
-    it('should reject steps below min', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', steps: 0 });
+    it('should reject steps below min', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', steps: 0 });
       expect(result.success).toBe(false);
     });
 
-    it('should reject steps above max', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', steps: 51 });
+    it('should reject steps above max', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', steps: 51 });
       expect(result.success).toBe(false);
     });
 
-    it('should reject non-integer steps', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', steps: 23.5 });
+    it('should reject non-integer steps', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', steps: 23.5 });
       expect(result.success).toBe(false);
     });
   });
 
   describe('scale バリデーション', () => {
-    it('should accept valid scale', () => {
-      expect(Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', scale: 0 }).success).toBe(true);
-      expect(Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', scale: 10 }).success).toBe(true);
-      expect(Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', scale: 5.5 }).success).toBe(true);
+    it('should accept valid scale', async () => {
+      const result1 = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', scale: 0 });
+      expect(result1.success).toBe(true);
+      const result2 = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', scale: 10 });
+      expect(result2.success).toBe(true);
+      const result3 = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', scale: 5.5 });
+      expect(result3.success).toBe(true);
     });
 
-    it('should reject scale above max', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', scale: 10.1 });
+    it('should reject scale above max', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', scale: 10.1 });
       expect(result.success).toBe(false);
     });
   });
 
   describe('seed バリデーション', () => {
-    it('should accept valid seed', () => {
-      expect(Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', seed: 0 }).success).toBe(true);
-      expect(Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', seed: Constants.MAX_SEED }).success).toBe(true);
+    it('should accept valid seed', async () => {
+      const result1 = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', seed: 0 });
+      expect(result1.success).toBe(true);
+      const result2 = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', seed: Constants.MAX_SEED });
+      expect(result2.success).toBe(true);
     });
 
-    it('should reject seed above max', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', seed: Constants.MAX_SEED + 1 });
+    it('should reject seed above max', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', seed: Constants.MAX_SEED + 1 });
       expect(result.success).toBe(false);
     });
 
-    it('should reject negative seed', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', seed: -1 });
+    it('should reject negative seed', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', seed: -1 });
       expect(result.success).toBe(false);
     });
 
-    it('should reject non-integer seed', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', seed: 123.4 });
+    it('should reject non-integer seed', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', seed: 123.4 });
       expect(result.success).toBe(false);
     });
   });
 
   describe('enum バリデーション', () => {
-    it('should accept valid model', () => {
-      Constants.VALID_MODELS.forEach(model => {
-        expect(Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', model }).success).toBe(true);
-      });
+    it('should accept valid model', async () => {
+      for (const model of Constants.VALID_MODELS) {
+        const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', model });
+        expect(result.success).toBe(true);
+      }
     });
 
-    it('should reject invalid model', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', model: 'invalid-model' });
+    it('should reject invalid model', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', model: 'invalid-model' });
       expect(result.success).toBe(false);
     });
 
-    it('should accept valid sampler', () => {
-      Constants.VALID_SAMPLERS.forEach(sampler => {
-        expect(Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', sampler }).success).toBe(true);
-      });
+    it('should accept valid sampler', async () => {
+      for (const sampler of Constants.VALID_SAMPLERS) {
+        const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', sampler });
+        expect(result.success).toBe(true);
+      }
     });
 
-    it('should reject invalid sampler', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', sampler: 'invalid-sampler' });
+    it('should reject invalid sampler', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', sampler: 'invalid-sampler' });
       expect(result.success).toBe(false);
     });
 
-    it('should accept valid noise_schedule', () => {
-      Constants.VALID_NOISE_SCHEDULES.forEach(schedule => {
-        expect(Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', noise_schedule: schedule }).success).toBe(true);
-      });
+    it('should accept valid noise_schedule', async () => {
+      for (const schedule of Constants.VALID_NOISE_SCHEDULES) {
+        const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', noise_schedule: schedule });
+        expect(result.success).toBe(true);
+      }
     });
 
-    it('should reject invalid action', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', action: 'invalid' });
+    it('should reject invalid action', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', action: 'invalid' });
       expect(result.success).toBe(false);
     });
   });
 
   describe('img2img バリデーション', () => {
-    it('should require source_image for img2img action', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', action: 'img2img' });
+    it('should require source_image for img2img action', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', action: 'img2img' });
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error.issues.some(i => i.message.includes('source_image is required'))).toBe(true);
       }
     });
 
-    it('should accept img2img with source_image', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({
+    it('should accept img2img with source_image', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: '1girl',
         action: 'img2img',
         source_image: 'path/to/image.png',
@@ -267,15 +278,17 @@ describe('GenerateParamsSchema', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should validate img2img_strength range', () => {
-      expect(Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', img2img_strength: -0.1 }).success).toBe(false);
-      expect(Schemas.GenerateParamsSchema.safeParse({ prompt: '1girl', img2img_strength: 1.1 }).success).toBe(false);
+    it('should validate img2img_strength range', async () => {
+      const result1 = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', img2img_strength: -0.1 });
+      expect(result1.success).toBe(false);
+      const result2 = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', img2img_strength: 1.1 });
+      expect(result2.success).toBe(false);
     });
   });
 
   describe('vibes と character_reference の相互排他', () => {
-    it('should reject vibes and character_reference used together', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({
+    it('should reject vibes and character_reference used together', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: '1girl',
         vibes: ['vibe1.naiv4vibe'],
         character_reference: { image: 'test.png' },
@@ -286,8 +299,8 @@ describe('GenerateParamsSchema', () => {
       }
     });
 
-    it('should accept vibes without character_reference', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({
+    it('should accept vibes without character_reference', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: '1girl',
         vibes: ['vibe1.naiv4vibe'],
       });
@@ -296,24 +309,24 @@ describe('GenerateParamsSchema', () => {
   });
 
   describe('vibe_strengths / vibe_info_extracted 依存関係', () => {
-    it('should reject vibe_strengths without vibes', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({
+    it('should reject vibe_strengths without vibes', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: '1girl',
         vibe_strengths: [0.5],
       });
       expect(result.success).toBe(false);
     });
 
-    it('should reject vibe_info_extracted without vibes', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({
+    it('should reject vibe_info_extracted without vibes', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: '1girl',
         vibe_info_extracted: [0.7],
       });
       expect(result.success).toBe(false);
     });
 
-    it('should reject mismatched vibes and vibe_strengths length', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({
+    it('should reject mismatched vibes and vibe_strengths length', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: '1girl',
         vibes: ['vibe1.naiv4vibe', 'vibe2.naiv4vibe'],
         vibe_strengths: [0.5],  // length mismatch
@@ -324,8 +337,8 @@ describe('GenerateParamsSchema', () => {
       }
     });
 
-    it('should reject mismatched vibes and vibe_info_extracted length', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({
+    it('should reject mismatched vibes and vibe_info_extracted length', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: '1girl',
         vibes: ['vibe1.naiv4vibe'],
         vibe_info_extracted: [0.5, 0.6],  // length mismatch
@@ -333,8 +346,8 @@ describe('GenerateParamsSchema', () => {
       expect(result.success).toBe(false);
     });
 
-    it('should accept matching vibes and vibe_strengths length', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({
+    it('should accept matching vibes and vibe_strengths length', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: '1girl',
         vibes: ['vibe1.naiv4vibe', 'vibe2.naiv4vibe'],
         vibe_strengths: [0.5, 0.6],
@@ -344,8 +357,8 @@ describe('GenerateParamsSchema', () => {
   });
 
   describe('save_path / save_dir 相互排他', () => {
-    it('should reject save_path and save_dir used together', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({
+    it('should reject save_path and save_dir used together', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: '1girl',
         save_path: '/path/to/file.png',
         save_dir: '/path/to/dir/',
@@ -356,16 +369,16 @@ describe('GenerateParamsSchema', () => {
       }
     });
 
-    it('should accept save_path alone', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({
+    it('should accept save_path alone', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: '1girl',
         save_path: '/path/to/file.png',
       });
       expect(result.success).toBe(true);
     });
 
-    it('should accept save_dir alone', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({
+    it('should accept save_dir alone', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: '1girl',
         save_dir: '/path/to/dir/',
       });
@@ -374,8 +387,8 @@ describe('GenerateParamsSchema', () => {
   });
 
   describe('characters バリデーション', () => {
-    it('should accept valid characters array', () => {
-      const result = Schemas.GenerateParamsSchema.safeParse({
+    it('should accept valid characters array', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: '2girls',
         characters: [
           { prompt: 'girl A', center_x: 0.3, center_y: 0.5 },
@@ -385,13 +398,71 @@ describe('GenerateParamsSchema', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should reject characters exceeding max count', () => {
+    it('should reject characters exceeding max count', async () => {
       const tooManyChars = Array(Constants.MAX_CHARACTERS + 1).fill({ prompt: 'test' });
-      const result = Schemas.GenerateParamsSchema.safeParse({
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: 'many girls',
         characters: tooManyChars,
       });
       expect(result.success).toBe(false);
+    });
+  });
+
+  describe('トークン数バリデーション (MAX_TOKENS = 512)', () => {
+    it('should accept short prompts under 512 tokens', async () => {
+      const shortPrompt = 'a beautiful landscape with mountains and rivers';
+      const result = await Schemas.GenerateParamsSchema.parseAsync({
+        prompt: shortPrompt,
+      });
+      expect(result).toBeDefined();
+      expect(result.prompt).toBe(shortPrompt);
+    });
+
+    it('should reject prompts exceeding 512 tokens', async () => {
+      // Create a prompt that definitely exceeds 512 tokens
+      const longPrompt = Array(600).fill('masterpiece beautiful detailed anime girl').join(', ');
+      
+      try {
+        await Schemas.GenerateParamsSchema.parseAsync({
+          prompt: longPrompt,
+        });
+        // If we get here, the test should fail
+        expect.fail('Expected validation to reject long prompt, but it passed');
+      } catch (error) {
+        expect(error).toBeInstanceOf(z.ZodError);
+        if (error instanceof z.ZodError) {
+          const tokenError = error.issues.find(i => i.message.includes('token count'));
+          expect(tokenError).toBeDefined();
+          expect(tokenError?.path).toEqual(['prompt']);
+        }
+      }
+    });
+
+    it('should handle empty prompts without token validation errors', async () => {
+      const result = await Schemas.GenerateParamsSchema.parseAsync({
+        prompt: '',
+      });
+      expect(result).toBeDefined();
+      expect(result.prompt).toBe('');
+    });
+
+    it('should work with parseAsync (async validation)', async () => {
+      // Verify that async validation is properly triggered
+      const validPrompt = 'test prompt for async validation';
+      const result = await Schemas.GenerateParamsSchema.parseAsync({
+        prompt: validPrompt,
+      });
+      expect(result.prompt).toBe(validPrompt);
+    });
+
+    it('should fail with synchronous parse when async refinement is used', () => {
+      // This test verifies that safeParse will fail since we have async validation
+      const params = { prompt: 'test' };
+      
+      // safeParse should detect async refinement and fail
+      expect(() => {
+        Schemas.GenerateParamsSchema.parse(params);
+      }).toThrow(/Async refinement/);
     });
   });
 });
