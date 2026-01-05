@@ -85,6 +85,8 @@ export const MODEL_KEY_MAP: Record<string, string> = {
 
 // プロンプト
 export const MAX_PROMPT_CHARS = 2000;  // 文字数制限（512トークン×4文字の目安）
+export const MAX_TOKENS = 512;  // トークン数制限（T5 Tokenizer）
+
 
 // ピクセル
 export const MAX_PIXELS = 1_048_576;  // 1024 * 1024 (Opusプラン無料枠)

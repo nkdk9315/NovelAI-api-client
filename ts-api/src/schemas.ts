@@ -137,7 +137,7 @@ export const GenerateParamsSchema = z.object({
   sampler: z.enum(Constants.VALID_SAMPLERS).default(Constants.DEFAULT_SAMPLER),
   noise_schedule: z.enum(Constants.VALID_NOISE_SCHEDULES).default(Constants.DEFAULT_NOISE_SCHEDULE),
 })
-.superRefine((data, ctx) => {
+.superRefine(async (data, ctx) => {
   // 1. vibes と character_reference は同時使用不可
   if (data.vibes && data.vibes.length > 0 && data.character_reference) {
     ctx.addIssue({
@@ -240,6 +240,23 @@ export const GenerateParamsSchema = z.object({
       message: "save_path and save_dir cannot be specified together. Use one or the other.",
       path: ["save_path"],
     });
+  }
+
+  // 9. プロンプトのトークン数が512を超える
+  if (data.prompt && data.prompt.length > 0) {
+    try {
+      const { validateTokenCount } = await import('./tokenizer');
+      await validateTokenCount(data.prompt);
+    } catch (error: any) {
+      if (error.name === 'TokenValidationError') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Prompt token count (${error.tokenCount}) exceeds maximum allowed (${error.maxTokens})`,
+          path: ["prompt"],
+        });
+      }
+      // Other errors (like network errors) are swallowed to avoid blocking validation
+    }
   }
 });
 

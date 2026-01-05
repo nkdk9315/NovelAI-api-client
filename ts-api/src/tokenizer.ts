@@ -3,11 +3,22 @@ import * as zlib from 'zlib';
 import he from 'he';
 import { Tokenizer } from 'tokenizers';
 
+// Maximum token limit for NovelAI generation
+export const MAX_TOKENS = 512;
+
 // Custom error class for tokenizer-related errors
 export class TokenizerError extends Error {
     constructor(message: string, public readonly cause?: unknown) {
         super(message);
         this.name = 'TokenizerError';
+    }
+}
+
+// Custom error class for token validation errors
+export class TokenValidationError extends Error {
+    constructor(message: string, public readonly tokenCount: number, public readonly maxTokens: number) {
+        super(message);
+        this.name = 'TokenValidationError';
     }
 }
 
@@ -402,6 +413,27 @@ export function preprocessT5(text: string): string {
 // Main logic for direct execution test?
 // The user asked to transplant, so exporting functions is good.
 // But we can add a main block if run directly.
+
+/**
+ * Validates that the token count for the given text does not exceed MAX_TOKENS (512).
+ * @param text - The text to validate
+ * @throws {TokenValidationError} If token count exceeds MAX_TOKENS
+ * @returns {Promise<number>} The token count if valid
+ */
+export async function validateTokenCount(text: string): Promise<number> {
+    const tokenizer = await getT5Tokenizer();
+    const tokenCount = await tokenizer.countTokens(text);
+    
+    if (tokenCount > MAX_TOKENS) {
+        throw new TokenValidationError(
+            `Token count (${tokenCount}) exceeds maximum allowed (${MAX_TOKENS})`,
+            tokenCount,
+            MAX_TOKENS
+        );
+    }
+    
+    return tokenCount;
+}
 
 // Helper function for clearing cached tokenizers (useful for testing)
 export function clearTokenizerCache(): void {
