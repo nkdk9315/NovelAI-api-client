@@ -11,6 +11,8 @@ export const API_URL = "https://image.novelai.net/ai/generate-image";
 export const STREAM_URL = "https://image.novelai.net/ai/generate-image-stream";
 export const ENCODE_URL = "https://image.novelai.net/ai/encode-vibe";
 export const SUBSCRIPTION_URL = "https://api.novelai.net/user/subscription";
+export const AUGMENT_URL = "https://image.novelai.net/ai/augment-image";
+export const UPSCALE_URL = "https://api.novelai.net/ai/upscale";
 
 
 // =============================================================================
@@ -114,3 +116,35 @@ export const MAX_REF_IMAGE_DIMENSION = 4096;
 export const CHARREF_PORTRAIT_SIZE = { width: 1024, height: 1536 };  // 縦長
 export const CHARREF_LANDSCAPE_SIZE = { width: 1536, height: 1024 };  // 横長
 export const CHARREF_SQUARE_SIZE = { width: 1472, height: 1472 };  // 正方形
+
+
+// =============================================================================
+// Augment ツール定数
+// =============================================================================
+
+// Augmentツールタイプ
+export const AUGMENT_REQ_TYPES = [
+  "colorize",
+  "declutter",
+  "emotion",
+  "sketch",
+  "lineart",
+  "bg-removal",
+] as const;
+
+// 表情キーワード (emotion用)
+export const EMOTION_KEYWORDS = [
+  "neutral", "happy", "sad", "angry", "scared", "surprised",
+  "tired", "excited", "nervous", "thinking", "confused", "shy",
+  "disgusted", "smug", "bored", "laughing", "irritated", "aroused",
+  "embarrassed", "love", "worried", "determined", "hurt", "playful",
+] as const;
+
+// Defry範囲 (0=最強変更, 5=最弱変更)
+export const MIN_DEFRY = 0;
+export const MAX_DEFRY = 5;
+export const DEFAULT_DEFRY = 3;
+
+// Upscaleスケール
+export const VALID_UPSCALE_SCALES = [2, 4] as const;
+export const DEFAULT_UPSCALE_SCALE = 4;

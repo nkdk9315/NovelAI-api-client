@@ -309,3 +309,170 @@ type EncodeVibeParamsValidated = z.infer<typeof EncodeVibeParamsSchema>;
 export type EncodeVibeParams = Pick<EncodeVibeParamsValidated, 'image'> &
   Partial<Omit<EncodeVibeParamsValidated, 'image'>>;
 
+
+// =============================================================================
+// AugmentParams (画像加工ツール)
+// =============================================================================
+
+// Image input helper (reuse existing)
+const AugmentImageInputSchema = z.union([z.string(), z.instanceof(Buffer)]);
+
+// req_type によって必要な引数が異なる：
+// - colorize: defry必須(0-5), promptオプション
+// - emotion: defry必須(0-5), prompt必須(指定キーワード)
+// - その他(declutter, sketch, lineart, bg-removal): prompt/defry使用不可
+
+export const AugmentParamsSchema = z.object({
+  req_type: z.enum(Constants.AUGMENT_REQ_TYPES),
+  image: AugmentImageInputSchema,
+  
+  // colorize, emotion用のみ
+  prompt: z.string().optional().nullable(),
+  defry: z.number().int().min(Constants.MIN_DEFRY).max(Constants.MAX_DEFRY).optional().nullable(),
+  
+  // 出力オプション
+  save_path: z.string().optional().nullable(),
+  save_dir: z.string().optional().nullable(),
+})
+.superRefine((data, ctx) => {
+  const reqTypesRequiringDefry = ["colorize", "emotion"] as const;
+  const reqTypesWithNoExtraParams = ["declutter", "sketch", "lineart", "bg-removal"] as const;
+  
+  // === colorize / emotion の場合 ===
+  if (reqTypesRequiringDefry.includes(data.req_type as any)) {
+    // defry は必須
+    if (data.defry === undefined || data.defry === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `defry (0-5) is required for ${data.req_type}`,
+        path: ["defry"],
+      });
+    }
+  }
+  
+  // === emotion の場合 ===
+  if (data.req_type === "emotion") {
+    // prompt は必須
+    if (!data.prompt) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "prompt is required for emotion (e.g., 'happy;;', 'sad;;')",
+        path: ["prompt"],
+      });
+    }
+    
+    // prompt は有効なキーワードである必要がある（キーワードのみ、;;は不要）
+    if (data.prompt) {
+      if (!Constants.EMOTION_KEYWORDS.includes(data.prompt as any)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Invalid emotion keyword '${data.prompt}'. Valid: ${Constants.EMOTION_KEYWORDS.join(", ")}`,
+          path: ["prompt"],
+        });
+      }
+    }
+  }
+  
+  // === declutter, sketch, lineart, bg-removal の場合 ===
+  if (reqTypesWithNoExtraParams.includes(data.req_type as any)) {
+    // prompt は使用不可
+    if (data.prompt !== undefined && data.prompt !== null && data.prompt !== "") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `prompt cannot be used with ${data.req_type}`,
+        path: ["prompt"],
+      });
+    }
+    
+    // defry は使用不可
+    if (data.defry !== undefined && data.defry !== null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `defry cannot be used with ${data.req_type}`,
+        path: ["defry"],
+      });
+    }
+  }
+  
+  // save_path と save_dir は同時指定不可
+  if (data.save_path && data.save_dir) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "save_path and save_dir cannot be specified together.",
+      path: ["save_path"],
+    });
+  }
+});
+
+// Helper type for validated params
+type AugmentParamsValidated = z.infer<typeof AugmentParamsSchema>;
+
+// Input type - req_type と image は必須、他はオプション
+// colorize/emotion の場合は defry が実質必須（superRefine でチェック）
+export type AugmentParams = Pick<AugmentParamsValidated, 'req_type' | 'image'> &
+  Partial<Omit<AugmentParamsValidated, 'req_type' | 'image'>>;
+
+
+// =============================================================================
+// AugmentResult
+// =============================================================================
+
+export const AugmentResultSchema = z.object({
+  image_data: z.instanceof(Buffer),
+  req_type: z.enum(Constants.AUGMENT_REQ_TYPES),
+  anlas_remaining: z.number().min(0).optional().nullable(),
+  anlas_consumed: z.number().min(0).optional().nullable(),
+  saved_path: z.string().optional().nullable(),
+});
+
+export type AugmentResult = z.infer<typeof AugmentResultSchema>;
+
+
+// =============================================================================
+// UpscaleParams (画像拡大)
+// =============================================================================
+
+export const UpscaleParamsSchema = z.object({
+  image: AugmentImageInputSchema,
+  scale: z.number().int().refine(
+    (val) => Constants.VALID_UPSCALE_SCALES.includes(val as any),
+    { message: `scale must be one of: ${Constants.VALID_UPSCALE_SCALES.join(", ")}` }
+  ).default(Constants.DEFAULT_UPSCALE_SCALE),
+  
+  // 出力オプション
+  save_path: z.string().optional().nullable(),
+  save_dir: z.string().optional().nullable(),
+})
+.superRefine((data, ctx) => {
+  if (data.save_path && data.save_dir) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "save_path and save_dir cannot be specified together.",
+      path: ["save_path"],
+    });
+  }
+});
+
+// Helper type for validated params
+type UpscaleParamsValidated = z.infer<typeof UpscaleParamsSchema>;
+
+// Input type - fields with defaults are optional
+export type UpscaleParams = Pick<UpscaleParamsValidated, 'image'> &
+  Partial<Omit<UpscaleParamsValidated, 'image'>>;
+
+
+// =============================================================================
+// UpscaleResult
+// =============================================================================
+
+export const UpscaleResultSchema = z.object({
+  image_data: z.instanceof(Buffer),
+  scale: z.number(),
+  output_width: z.number(),
+  output_height: z.number(),
+  anlas_remaining: z.number().min(0).optional().nullable(),
+  anlas_consumed: z.number().min(0).optional().nullable(),
+  saved_path: z.string().optional().nullable(),
+});
+
+export type UpscaleResult = z.infer<typeof UpscaleResultSchema>;

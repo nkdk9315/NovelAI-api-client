@@ -605,3 +605,404 @@ describe('Helper Functions', () => {
     });
   });
 });
+
+
+
+// =============================================================================
+// AugmentParamsSchema Tests
+// =============================================================================
+describe('AugmentParamsSchema', () => {
+  describe('基本バリデーション', () => {
+    it('should validate minimal params for declutter (no defry/prompt)', () => {
+      const params = {
+        req_type: 'declutter',
+        image: 'test.png',
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept Buffer as image', () => {
+      const params = {
+        req_type: 'sketch',
+        image: Buffer.from('test'),
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('req_type バリデーション', () => {
+    it('should accept all valid req_types with appropriate params', () => {
+      // declutter, sketch, lineart, bg-removal: no prompt/defry needed
+      const simpleTypes = ['declutter', 'sketch', 'lineart', 'bg-removal'];
+      simpleTypes.forEach(req_type => {
+        const params = {
+          req_type,
+          image: 'test.png',
+        };
+        const result = Schemas.AugmentParamsSchema.safeParse(params);
+        expect(result.success).toBe(true);
+      });
+      
+      // colorize: defry required
+      const colorizeResult = Schemas.AugmentParamsSchema.safeParse({
+        req_type: 'colorize',
+        image: 'test.png',
+        defry: 3,
+      });
+      expect(colorizeResult.success).toBe(true);
+      
+      // emotion: defry + prompt required
+      const emotionResult = Schemas.AugmentParamsSchema.safeParse({
+        req_type: 'emotion',
+        image: 'test.png',
+        defry: 2,
+        prompt: 'happy',
+      });
+      expect(emotionResult.success).toBe(true);
+    });
+
+    it('should reject invalid req_type', () => {
+      const params = {
+        req_type: 'invalid-type',
+        image: 'test.png',
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('colorize バリデーション', () => {
+    it('should require defry for colorize', () => {
+      const params = {
+        req_type: 'colorize',
+        image: 'test.png',
+        // no defry
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some(i => i.message.includes('defry (0-5) is required for colorize'))).toBe(true);
+      }
+    });
+
+    it('should accept colorize with defry and optional prompt', () => {
+      // with prompt
+      const result1 = Schemas.AugmentParamsSchema.safeParse({
+        req_type: 'colorize',
+        image: 'test.png',
+        defry: 3,
+        prompt: 'vibrant colors',
+      });
+      expect(result1.success).toBe(true);
+      
+      // without prompt
+      const result2 = Schemas.AugmentParamsSchema.safeParse({
+        req_type: 'colorize',
+        image: 'test.png',
+        defry: 0,
+      });
+      expect(result2.success).toBe(true);
+    });
+  });
+
+  describe('emotion バリデーション', () => {
+    it('should require defry for emotion', () => {
+      const params = {
+        req_type: 'emotion',
+        image: 'test.png',
+        prompt: 'happy',
+        // no defry
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some(i => i.message.includes('defry (0-5) is required for emotion'))).toBe(true);
+      }
+    });
+
+    it('should require prompt for emotion', () => {
+      const params = {
+        req_type: 'emotion',
+        image: 'test.png',
+        defry: 2,
+        // no prompt
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some(i => i.message.includes('prompt is required for emotion'))).toBe(true);
+      }
+    });
+
+    it('should accept all valid emotion keywords (without ;;)', () => {
+      const validKeywords = [
+        'neutral', 'happy', 'sad', 'angry', 'scared', 'surprised',
+        'tired', 'excited', 'nervous', 'thinking', 'confused', 'shy',
+        'disgusted', 'smug', 'bored', 'laughing', 'irritated', 'aroused',
+        'embarrassed', 'love', 'worried', 'determined', 'hurt', 'playful',
+      ];
+      
+      validKeywords.forEach(keyword => {
+        const params = {
+          req_type: 'emotion',
+          image: 'test.png',
+          defry: 2,
+          prompt: keyword,  // keyword only, no ;;
+        };
+        const result = Schemas.AugmentParamsSchema.safeParse(params);
+        expect(result.success).toBe(true);
+      });
+    });
+
+    it('should reject invalid emotion keyword', () => {
+      const params = {
+        req_type: 'emotion',
+        image: 'test.png',
+        defry: 2,
+        prompt: 'invalid_emotion',
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some(i => i.message.includes('Invalid emotion keyword'))).toBe(true);
+      }
+    });
+
+    it('should reject emotion keyword with trailing ;; (handled by client)', () => {
+      // User should pass keyword only; ;; is added by client
+      const params = {
+        req_type: 'emotion',
+        image: 'test.png',
+        defry: 2,
+        prompt: 'happy;;',  // should be just 'happy'
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some(i => i.message.includes('Invalid emotion keyword'))).toBe(true);
+      }
+    });
+  });
+
+  describe('declutter/sketch/lineart/bg-removal バリデーション', () => {
+    const simpleTypes = ['declutter', 'sketch', 'lineart', 'bg-removal'] as const;
+
+    it('should reject prompt for simple types', () => {
+      simpleTypes.forEach(req_type => {
+        const params = {
+          req_type,
+          image: 'test.png',
+          prompt: 'should not be here',
+        };
+        const result = Schemas.AugmentParamsSchema.safeParse(params);
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.issues.some(i => i.message.includes(`prompt cannot be used with ${req_type}`))).toBe(true);
+        }
+      });
+    });
+
+    it('should reject defry for simple types', () => {
+      simpleTypes.forEach(req_type => {
+        const params = {
+          req_type,
+          image: 'test.png',
+          defry: 3,
+        };
+        const result = Schemas.AugmentParamsSchema.safeParse(params);
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.issues.some(i => i.message.includes(`defry cannot be used with ${req_type}`))).toBe(true);
+        }
+      });
+    });
+  });
+
+  describe('defry バリデーション', () => {
+    it('should accept valid defry range (0-5) for colorize', () => {
+      for (let i = 0; i <= 5; i++) {
+        const params = {
+          req_type: 'colorize',
+          image: 'test.png',
+          defry: i,
+        };
+        const result = Schemas.AugmentParamsSchema.safeParse(params);
+        expect(result.success).toBe(true);
+      }
+    });
+
+    it('should reject defry below 0', () => {
+      const params = {
+        req_type: 'colorize',
+        image: 'test.png',
+        defry: -1,
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject defry above 5', () => {
+      const params = {
+        req_type: 'colorize',
+        image: 'test.png',
+        defry: 6,
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject non-integer defry', () => {
+      const params = {
+        req_type: 'colorize',
+        image: 'test.png',
+        defry: 2.5,
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('save_path / save_dir 相互排他', () => {
+    it('should reject save_path and save_dir used together', () => {
+      const params = {
+        req_type: 'sketch',
+        image: 'test.png',
+        save_path: '/path/to/file.png',
+        save_dir: '/path/to/dir/',
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some(i => i.message.includes('cannot be specified together'))).toBe(true);
+      }
+    });
+
+    it('should accept save_path alone', () => {
+      const params = {
+        req_type: 'sketch',
+        image: 'test.png',
+        save_path: '/path/to/file.png',
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept save_dir alone', () => {
+      const params = {
+        req_type: 'sketch',
+        image: 'test.png',
+        save_dir: '/path/to/dir/',
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(true);
+    });
+  });
+});
+
+
+// =============================================================================
+// UpscaleParamsSchema Tests
+// =============================================================================
+describe('UpscaleParamsSchema', () => {
+  describe('基本バリデーション', () => {
+    it('should validate minimal params', () => {
+      const params = {
+        image: 'test.png',
+      };
+      const result = Schemas.UpscaleParamsSchema.safeParse(params);
+      expect(result.success).toBe(true);
+    });
+
+    it('should apply default scale value (4)', () => {
+      const params = {
+        image: 'test.png',
+      };
+      const result = Schemas.UpscaleParamsSchema.parse(params);
+      expect(result.scale).toBe(Constants.DEFAULT_UPSCALE_SCALE);
+    });
+
+    it('should accept Buffer as image', () => {
+      const params = {
+        image: Buffer.from('test'),
+      };
+      const result = Schemas.UpscaleParamsSchema.safeParse(params);
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('scale バリデーション', () => {
+    it('should accept scale 2', () => {
+      const params = {
+        image: 'test.png',
+        scale: 2,
+      };
+      const result = Schemas.UpscaleParamsSchema.safeParse(params);
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept scale 4', () => {
+      const params = {
+        image: 'test.png',
+        scale: 4,
+      };
+      const result = Schemas.UpscaleParamsSchema.safeParse(params);
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject invalid scale values', () => {
+      const invalidScales = [1, 3, 5, 8, 0, -1];
+      invalidScales.forEach(scale => {
+        const params = {
+          image: 'test.png',
+          scale,
+        };
+        const result = Schemas.UpscaleParamsSchema.safeParse(params);
+        expect(result.success).toBe(false);
+      });
+    });
+
+    it('should reject non-integer scale', () => {
+      const params = {
+        image: 'test.png',
+        scale: 2.5,
+      };
+      const result = Schemas.UpscaleParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('save_path / save_dir 相互排他', () => {
+    it('should reject save_path and save_dir used together', () => {
+      const params = {
+        image: 'test.png',
+        save_path: '/path/to/file.png',
+        save_dir: '/path/to/dir/',
+      };
+      const result = Schemas.UpscaleParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some(i => i.message.includes('cannot be specified together'))).toBe(true);
+      }
+    });
+
+    it('should accept save_path alone', () => {
+      const params = {
+        image: 'test.png',
+        save_path: '/path/to/file.png',
+      };
+      const result = Schemas.UpscaleParamsSchema.safeParse(params);
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept save_dir alone', () => {
+      const params = {
+        image: 'test.png',
+        save_dir: '/path/to/dir/',
+      };
+      const result = Schemas.UpscaleParamsSchema.safeParse(params);
+      expect(result.success).toBe(true);
+    });
+  });
+});
