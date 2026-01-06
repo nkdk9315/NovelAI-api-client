@@ -38,6 +38,45 @@ export function getImageBuffer(image: string | Buffer): Buffer {
 }
 
 /**
+ * 画像の存在確認と寸法を取得
+ * @throws Error if image doesn't exist or cannot be read
+ */
+export async function getImageDimensions(image: string | Buffer): Promise<{ width: number; height: number; buffer: Buffer }> {
+  let buffer: Buffer;
+
+  if (Buffer.isBuffer(image)) {
+    buffer = image;
+  } else if (typeof image === 'string') {
+    // Check if it's a file path
+    if (fs.existsSync(image) && fs.lstatSync(image).isFile()) {
+      buffer = fs.readFileSync(image);
+    } else if (image.includes('/') || image.includes('\\')) {
+      // Looks like a file path but doesn't exist
+      throw new Error(`Image file not found: ${image}`);
+    } else {
+      // Treat as Base64 string
+      const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
+      buffer = Buffer.from(base64Data, 'base64');
+    }
+  } else {
+    throw new Error(`Invalid image type: ${typeof image}`);
+  }
+
+  // Get dimensions using sharp
+  const metadata = await sharp(buffer).metadata();
+  
+  if (!metadata.width || !metadata.height) {
+    throw new Error("Could not determine image dimensions. The file may be corrupted or not a valid image.");
+  }
+
+  return {
+    width: metadata.width,
+    height: metadata.height,
+    buffer,
+  };
+}
+
+/**
  * 画像をBase64文字列に変換
  */
 export function getImageBase64(image: string | Buffer): string {

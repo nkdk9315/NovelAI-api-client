@@ -457,7 +457,7 @@ export class NovelAIClient {
     return result;
   }
 
-  private saveImage(result: Schemas.GenerateResult, savePath: string) {
+  private saveImage(result: { image_data: Buffer }, savePath: string) {
       const dir = path.dirname(savePath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(savePath, result.image_data);
@@ -509,5 +509,209 @@ export class NovelAIClient {
     }
 
     throw new Error(`Cannot parse stream response (length: ${content.length})`);
+  }
+
+  /**
+   * 画像加工ツール（カラー化、表情変換、スケッチ化など）
+   * @param params Augment parameters
+   * @returns Augmented image result
+   */
+  async augmentImage(params: Schemas.AugmentParams): Promise<Schemas.AugmentResult> {
+    // Validate parameters
+    const validatedParams = Schemas.AugmentParamsSchema.parse(params);
+
+    // Get image data and auto-detect dimensions
+    const { width, height, buffer: imageBuffer } = await Utils.getImageDimensions(validatedParams.image);
+    const b64Image = imageBuffer.toString('base64');
+
+    // Get initial balance
+    let anlasBefore: number | null = null;
+    try {
+      const balance = await this.getAnlasBalance();
+      anlasBefore = balance.total;
+    } catch (e) {
+      // Ignore error
+    }
+
+    // Build payload with auto-detected dimensions
+    const payload: any = {
+      req_type: validatedParams.req_type,
+      use_new_shared_trial: true,
+      width: width,
+      height: height,
+      image: b64Image,
+    };
+
+    // Add prompt and defry only for colorize and emotion
+    if (validatedParams.req_type === 'colorize') {
+      // colorize: prompt はそのまま使用（オプション）
+      if (validatedParams.prompt) {
+        payload.prompt = validatedParams.prompt;
+      }
+      payload.defry = validatedParams.defry;
+    } else if (validatedParams.req_type === 'emotion') {
+      // emotion: prompt に ;; を自動付与
+      if (validatedParams.prompt) {
+        payload.prompt = `${validatedParams.prompt};;`;
+      }
+      payload.defry = validatedParams.defry;
+    }
+
+    const response = await fetch(Constants.AUGMENT_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error(`Augment error response: ${text}`);
+      throw new Error(`Augment failed: ${response.status} ${response.statusText}`);
+    }
+
+    const responseBuffer = Buffer.from(await response.arrayBuffer());
+    const imageData = this.parseZipResponse(responseBuffer);
+
+    // Get final balance
+    let anlasRemaining: number | null = null;
+    let anlasConsumed: number | null = null;
+    try {
+      const balance = await this.getAnlasBalance();
+      anlasRemaining = balance.total;
+      if (anlasBefore !== null) {
+        anlasConsumed = anlasBefore - anlasRemaining;
+      }
+    } catch (e) {
+      // Ignore
+    }
+
+    const result: Schemas.AugmentResult = {
+      image_data: imageData,
+      req_type: validatedParams.req_type,
+      anlas_remaining: anlasRemaining,
+      anlas_consumed: anlasConsumed,
+      saved_path: null,
+    };
+
+    // Save if requested
+    if (validatedParams.save_path) {
+      this.saveImage(result, validatedParams.save_path);
+      result.saved_path = validatedParams.save_path;
+    } else if (validatedParams.save_dir) {
+      const dir = validatedParams.save_dir;
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+      const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 15);
+      const filename = `${validatedParams.req_type}_${timestamp}.png`;
+      const savePath = path.join(dir, filename);
+
+      this.saveImage(result, savePath);
+      result.saved_path = savePath;
+    }
+
+    return result;
+  }
+
+  /**
+   * 画像アップスケール（拡大）
+   * @param params Upscale parameters
+   * @returns Upscaled image result
+   */
+  async upscaleImage(params: Schemas.UpscaleParams): Promise<Schemas.UpscaleResult> {
+    // Validate parameters
+    const validatedParams = Schemas.UpscaleParamsSchema.parse(params);
+
+    // Get image data and auto-detect dimensions
+    const { width, height, buffer: imageBuffer } = await Utils.getImageDimensions(validatedParams.image);
+    const b64Image = imageBuffer.toString('base64');
+
+    // Get initial balance
+    let anlasBefore: number | null = null;
+    try {
+      const balance = await this.getAnlasBalance();
+      anlasBefore = balance.total;
+    } catch (e) {
+      // Ignore error
+    }
+
+    const payload = {
+      image: b64Image,
+      width: width,
+      height: height,
+      scale: validatedParams.scale,
+    };
+
+    const response = await fetch(Constants.UPSCALE_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error(`Upscale error response: ${text}`);
+      throw new Error(`Upscale failed: ${response.status} ${response.statusText}`);
+    }
+
+    // Response can be ZIP or raw image
+    const responseBuffer = Buffer.from(await response.arrayBuffer());
+    let imageData: Buffer;
+
+    // Check for ZIP signature (PK)
+    if (responseBuffer.length > 1 && responseBuffer[0] === 0x50 && responseBuffer[1] === 0x4b) {
+      imageData = this.parseZipResponse(responseBuffer);
+    } else {
+      imageData = responseBuffer;
+    }
+
+    // Get final balance
+    let anlasRemaining: number | null = null;
+    let anlasConsumed: number | null = null;
+    try {
+      const balance = await this.getAnlasBalance();
+      anlasRemaining = balance.total;
+      if (anlasBefore !== null) {
+        anlasConsumed = anlasBefore - anlasRemaining;
+      }
+    } catch (e) {
+      // Ignore
+    }
+
+    const outputWidth = width * validatedParams.scale;
+    const outputHeight = height * validatedParams.scale;
+
+    const result: Schemas.UpscaleResult = {
+      image_data: imageData,
+      scale: validatedParams.scale,
+      output_width: outputWidth,
+      output_height: outputHeight,
+      anlas_remaining: anlasRemaining,
+      anlas_consumed: anlasConsumed,
+      saved_path: null,
+    };
+
+    // Save if requested
+    if (validatedParams.save_path) {
+      this.saveImage(result, validatedParams.save_path);
+      result.saved_path = validatedParams.save_path;
+    } else if (validatedParams.save_dir) {
+      const dir = validatedParams.save_dir;
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+      const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 15);
+      const filename = `upscale_${validatedParams.scale}x_${timestamp}.png`;
+      const savePath = path.join(dir, filename);
+
+      this.saveImage(result, savePath);
+      result.saved_path = savePath;
+    }
+
+    return result;
   }
 }
