@@ -148,3 +148,19 @@ export const DEFAULT_DEFRY = 3;
 // Upscaleスケール
 export const VALID_UPSCALE_SCALES = [2, 4] as const;
 export const DEFAULT_UPSCALE_SCALE = 4;
+
+
+// =============================================================================
+// Enhance (品質アップ) プリセット
+// =============================================================================
+
+// レベル別の strength/noise プリセット（UI上のレベル1～5に対応）
+export const ENHANCE_LEVEL_PRESETS = {
+  1: { strength: 0.2, noise: 0 },
+  2: { strength: 0.4, noise: 0 },
+  3: { strength: 0.5, noise: 0 },
+  4: { strength: 0.6, noise: 0 },
+  5: { strength: 0.7, noise: 0.1 },
+} as const;
+
+export type EnhanceLevel = keyof typeof ENHANCE_LEVEL_PRESETS;
