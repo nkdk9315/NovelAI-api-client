@@ -1,0 +1,123 @@
+Request URL
+https://image.novelai.net/ai/generate-image-stream
+Request Method
+POST
+Status Code
+200 OK
+Remote Address
+104.20.39.223:443
+Referrer Policy
+strict-origin-when-cross-origin
+access-control-allow-origin
+*
+cache-control
+no-cache
+cf-cache-status
+DYNAMIC
+cf-ray
+9b82ad9dd97e7961-NRT
+content-type
+application/msgpack
+date
+Sat, 03 Jan 2026 13:00:17 GMT
+server
+cloudflare
+vary
+Origin
+:authority
+image.novelai.net
+:method
+POST
+:path
+/ai/generate-image-stream
+:scheme
+https
+accept
+*/*
+accept-encoding
+gzip, deflate, br, zstd
+accept-language
+en-US,en;q=0.9,pt;q=0.8,ja;q=0.7
+authorization
+Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IlR6RGNCQ1BBanV1c3hWa0NfTWZPNyIsIm5jIjoiSUR0V01oMlRpWG9KSnRmSV8zR0g4IiwiaWF0IjoxNzY3NDM5OTI0LCJleHAiOjE3NzAwMzE5MjR9.1Gp_25dIxwHWWCqLecdLzlDM4Oeg6O7VvxEo-9i78xs
+content-length
+2207897
+content-type
+application/json
+origin
+https://novelai.net
+priority
+u=1, i
+referer
+https://novelai.net/
+sec-ch-ua
+"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"
+sec-ch-ua-mobile
+?0
+sec-ch-ua-platform
+"Windows"
+sec-fetch-dest
+empty
+sec-fetch-mode
+cors
+sec-fetch-site
+same-site
+user-agent
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36
+x-correlation-id
+Xm57zP
+x-initiated-at
+2026-01-03T13:00:17.115Z
+
+
+Request call stack
+n	@	_app-8a649f7b38ad6692.js:1
+makeRequestWithCacheRetry	@	_app-8a649f7b38ad6692.js:311
+(anonymous)	@	_app-8a649f7b38ad6692.js:311
+l.status	@	_app-8a649f7b38ad6692.js:328
+l	@	_app-8a649f7b38ad6692.js:327
+(anonymous)	@	_app-8a649f7b38ad6692.js:328
+(anonymous)	@	_app-8a649f7b38ad6692.js:328
+(anonymous)	@	_app-8a649f7b38ad6692.js:328
+withScope	@	_app-8a649f7b38ad6692.js:31
+d	@	_app-8a649f7b38ad6692.js:31
+d	@	_app-8a649f7b38ad6692.js:321
+U	@	_app-8a649f7b38ad6692.js:328
+requestStream	@	_app-8a649f7b38ad6692.js:311
+await in requestStream		
+(anonymous)	@	6087-d9c04569385ccd15.js:2
+await in (anonymous)		
+(anonymous)	@	_app-8a649f7b38ad6692.js:323
+(anonymous)	@	_app-8a649f7b38ad6692.js:320
+k	@	_app-8a649f7b38ad6692.js:320
+B	@	_app-8a649f7b38ad6692.js:320
+(anonymous)	@	_app-8a649f7b38ad6692.js:1
+generateInfill	@	6087-d9c04569385ccd15.js:2
+await in generateInfill		
+m.prompt	@	6043-315495d0bee35961.js:2
+(anonymous)	@	6043-315495d0bee35961.js:2
+await in (anonymous)		
+(anonymous)	@	_app-8a649f7b38ad6692.js:323
+(anonymous)	@	_app-8a649f7b38ad6692.js:320
+k	@	_app-8a649f7b38ad6692.js:320
+B	@	_app-8a649f7b38ad6692.js:320
+(anonymous)	@	_app-8a649f7b38ad6692.js:1
+(anonymous)	@	6043-315495d0bee35961.js:2
+(anonymous)	@	_app-8a649f7b38ad6692.js:323
+(anonymous)	@	_app-8a649f7b38ad6692.js:320
+k	@	_app-8a649f7b38ad6692.js:320
+B	@	_app-8a649f7b38ad6692.js:320
+(anonymous)	@	_app-8a649f7b38ad6692.js:1
+onClick	@	6043-315495d0bee35961.js:2
+eI	@	framework-8573d718271eb13d.js:1
+eB	@	framework-8573d718271eb13d.js:1
+(anonymous)	@	framework-8573d718271eb13d.js:1
+t7	@	framework-8573d718271eb13d.js:1
+re	@	framework-8573d718271eb13d.js:1
+(anonymous)	@	framework-8573d718271eb13d.js:1
+oP	@	framework-8573d718271eb13d.js:1
+eF	@	framework-8573d718271eb13d.js:1
+ru	@	framework-8573d718271eb13d.js:1
+nI	@	framework-8573d718271eb13d.js:1
+nO	@	framework-8573d718271eb13d.js:1
+c	@	rocket-loader.min.js:1
