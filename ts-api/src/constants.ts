@@ -91,7 +91,7 @@ export const MAX_TOKENS = 512;  // トークン数制限（T5 Tokenizer）
 
 
 // ピクセル
-export const MAX_PIXELS = 1_048_576;  // 1024 * 1024 (Opusプラン無料枠)
+export const MAX_PIXELS = 3_145_728;  // 2048 * 1536 (サーバー側生成制限)
 export const MIN_DIMENSION = 64;
 export const MAX_DIMENSION = 1024;
 
