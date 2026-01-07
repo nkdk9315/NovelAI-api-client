@@ -1,0 +1,279 @@
+# ts-api コードレビューレポート
+
+> 80年の経験を持つ熟練開発者の視点から、批判的にコードを評価しました。
+
+## 🔴 重大な問題 (Critical Issues)
+
+### 1. エラーハンドリングの握りつぶし
+
+[client.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#L78-L84):
+```typescript
+// Get initial balance
+let anlasBefore: number | null = null;
+try {
+  const balance = await this.getAnlasBalance();
+  anlasBefore = balance.total;
+} catch (e) {
+  // Ignore error  ← 問題あり！
+}
+```
+
+**問題点**: [encodeVibe](file://wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#63-162), [generate](file://wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#196-465), [augmentImage](file://wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#520-623), [upscaleImage](file://wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#624-723) の全ての関数で、Anlas残高取得時のエラーを完全に握りつぶしている。認証エラーやネットワーク障害など、重要なエラーも無視される。
+
+**推奨**: 最低限ログ出力を追加するか、エラーを伝播するオプションを用意すべき。
+
+---
+
+### 2. 同期バリデーション vs 非同期バリデーション の不整合
+
+[client.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#L66-L68):
+```typescript
+// encodeVibe では同期的な parse() を使用
+const validatedParams = Schemas.EncodeVibeParamsSchema.parse(params);
+```
+
+[client.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#L201):
+```typescript
+// generate では非同期の parseAsync() を使用
+const validatedParams = await Schemas.GenerateParamsSchema.parseAsync(params);
+```
+
+[client.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#L527):
+```typescript
+// augmentImage では同期的な parse() を使用
+const validatedParams = Schemas.AugmentParamsSchema.parse(params);
+```
+
+**問題点**: スキーマに `async superRefine` がある場合、[parse()](file://wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#472-483) ではなく `parseAsync()` を使わないとエラーになる可能性がある。現状 `GenerateParamsSchema` にのみ async があるが、将来的にスキーマが変更されたときにバグを生む。
+
+---
+
+### 3. 機密情報のログ出力
+
+[client.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#L409-L411):
+```typescript
+if (!response.ok) {
+    const text = await response.text();
+    console.error(`Error response: ${text}`);  // ← API レスポンスをそのまま出力
+    throw new Error(`Generation failed: ${response.status} ${response.statusText}`);
+}
+```
+
+**問題点**: APIのエラーレスポンスに機密情報（トークン、内部エラー詳細）が含まれる可能性があり、それをそのまま出力している。
+
+---
+
+### 4. レースコンディション（Tokenizer EOS ID）
+
+[tokenizer.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/tokenizer.ts#L319-L322):
+```typescript
+constructor(private tokenizer: Tokenizer) {
+    // Verify and update EOS token ID if different (async, but defaults to 1)
+    ensureEosTokenId(tokenizer).then(id => this.eosTokenId = id);
+}
+```
+
+**問題点**: コンストラクタ内で非同期処理を開始しているが、完了を待っていない。[encode()](file://wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/tokenizer.ts#206-246) が呼ばれた時点で `eosTokenId` がまだ更新されていない可能性がある。
+
+---
+
+## 🟠 中程度の問題 (Medium Issues)
+
+### 5. 型安全性の欠如
+
+[client.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#L124):
+```typescript
+model: validatedParams.model as any,  // ← "as any" で型チェックを無効化
+```
+
+[client.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#L208):
+```typescript
+let charRefData: any = null;  // ← any型
+```
+
+[client.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#L239):
+```typescript
+const payload: any = {  // ← ペイロード全体がany型
+```
+
+**問題点**: `any` 型の多用により、型システムの恩恵を受けられない。ペイロードの型が変わってもコンパイルエラーにならない。
+
+---
+
+### 6. ファイルパス判定の脆弱性
+
+[utils.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/utils.ts#L51-L60):
+```typescript
+// Check if it's a file path
+if (fs.existsSync(image) && fs.lstatSync(image).isFile()) {
+  buffer = fs.readFileSync(image);
+} else if (image.includes('/') || image.includes('\\\\')) {
+  // Looks like a file path but doesn't exist
+  throw new Error(`Image file not found: ${image}`);
+} else {
+  // Treat as Base64 string
+  const base64Data = image.replace(/^data:image\\/\\w+;base64,/, "");
+  buffer = Buffer.from(base64Data, 'base64');
+}
+```
+
+**問題点**:
+1. Base64文字列に `/` が含まれる（Base64アルファベットに含まれる）ため、誤判定する可能性がある
+2. `fs.existsSync` と `fs.lstatSync` の2回のファイルシステムアクセスはTOCTOU (Time-of-check to time-of-use) 脆弱性
+
+---
+
+### 7. マスクリサイズの端数処理
+
+[utils.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/utils.ts#L287-L288):
+```typescript
+const maskWidth = Math.floor(targetWidth / 8);
+const maskHeight = Math.floor(targetHeight / 8);
+```
+
+**問題点**: `Math.floor` で切り捨てているが、これがAPI仕様と一致しているかの確認が必要。たとえば 840 / 8 = 105 で、元画像との比率が完全に1/8にならない。
+
+---
+
+### 8. 空配列チェックの不備
+
+[client.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#L229):
+```typescript
+let charConfigs = validatedParams.characters || [];
+```
+
+**問題点**: `null` と `undefined` のみガードしているが、空配列 `[]` の場合は後続処理で問題ないか確認が必要。
+
+---
+
+### 9. 定数の重複定義
+
+[constants.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/constants.ts#L90):
+```typescript
+export const MAX_TOKENS = 512;
+```
+
+[tokenizer.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/tokenizer.ts#L7):
+```typescript
+export const MAX_TOKENS = 512;
+```
+
+**問題点**: 同じ定数が2箇所で定義されている。変更時に同期が取れない可能性。
+
+---
+
+## 🟡 軽微な問題 (Minor Issues)
+
+### 10. マジックナンバー
+
+[client.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#L205):
+```typescript
+const seed = validatedParams.seed ?? Math.floor(Math.random() * 4294967295);
+```
+
+**推奨**: `Constants.MAX_SEED` を使用すべき。
+
+---
+
+### 11. Date フォーマットの一貫性
+
+[client.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#L151):
+```typescript
+const timestamp = new Date().toISOString().replace(/[-:T.]/g, '_').slice(0, 15);
+```
+
+[client.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#L455):
+```typescript
+const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 15);
+```
+
+**問題点**: 同じ目的のコードだが、置換パターンが異なる（`'_'` vs `''`）。
+
+---
+
+### 12. 冗長なコード
+
+[schemas.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/schemas.ts#L60-L62):
+```typescript
+model: z.enum(Constants.VALID_MODELS).refine((val) => Constants.VALID_MODELS.includes(val as any), {
+    message: `Invalid model. Valid models are: ${Constants.VALID_MODELS.join(", ")}`,
+}),
+```
+
+**問題点**: `z.enum()` 自体が有効な値のみを受け付けるため、追加の `.refine()` は不要。
+
+---
+
+### 13. 未使用のインポート/変数
+
+[schemas.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/schemas.ts#L331):
+```typescript
+const AugmentImageInputSchema = z.union([z.string(), z.instanceof(Buffer)]);
+```
+
+**問題点**: 既に `ImageInputSchema` (L43) で同じスキーマが定義されているので、再利用すべき。
+
+---
+
+### 14. コメントと挙動の不一致
+
+[utils.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/utils.ts#L308):
+```typescript
+/**
+ * マスク領域（0.0-1.0の相対座標）
+ * @returns マスク画像のBuffer（白=変更領域、黒=保持領域）
+ */
+```
+
+**確認**: 実際のAPI仕様が「白=変更領域」であることを確認する必要あり。逆の可能性もある。
+
+---
+
+## 🔵 エッジケース対応の懸念
+
+### E1. 空のプロンプト
+
+[schemas.ts](file:///wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/schemas.ts#L96):
+```typescript
+prompt: z.string().min(0).max(Constants.MAX_PROMPT_CHARS),
+```
+
+`min(0)` により空文字列を許可しているが、APIが空プロンプトをどう扱うか確認が必要。
+
+### E2. 極端な seed 値
+
+シード値 `0` や `MAX_SEED` (4294967295) での動作確認が必要。
+
+### E3. 境界値のピクセル数
+
+例: 1024×1024 = 1,048,576 (MAX_PIXELS ちょうど) での動作確認。
+
+### E4. Unicode/特殊文字を含むプロンプト
+
+絵文字や特殊Unicode文字のトークン化で問題が起きないか。
+
+### E5. 巨大な画像ファイル
+
+`MAX_REF_IMAGE_SIZE_MB = 10` が定義されているが、バリデーションで使用されていない。
+
+### E6. 同時実行
+
+複数の [generate()](file://wsl.localhost/Ubuntu/home/mur/workspace/novelAi/ts-api/src/client.ts#196-465) 呼び出しが並行して走った場合の挙動（特にAnlas残高計算）。
+
+---
+
+## 📋 改善推奨事項サマリー
+
+| 優先度 | 項目 | 対応 |
+|--------|------|------|
+| 🔴 High | エラー握りつぶし | ログ追加 or オプション化 |
+| 🔴 High | parseAsync 統一 | 全メソッドで parseAsync 使用 |
+| 🔴 High | Tokenizer レースコンディション | 初期化パターンの見直し |
+| 🟠 Med | any型の削除 | 適切な型定義の追加 |
+| 🟠 Med | ファイルパス判定 | ヒューリスティック改善 |
+| 🟡 Low | 定数重複 | constants.ts に統一 |
+| 🟡 Low | マジックナンバー | 定数参照に置換 |
+
+---
+
+*レビュー完了: 2026-01-07*

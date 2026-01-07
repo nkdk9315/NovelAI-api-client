@@ -21,6 +21,10 @@ export interface AnlasBalance {
 
 export class NovelAIClient {
   private apiKey: string;
+  
+  // Retry configuration for rate limiting
+  private readonly maxRetries = 3;
+  private readonly baseRetryDelayMs = 1000;
 
   constructor(apiKey?: string) {
     this.apiKey = apiKey || process.env.NOVELAI_API_KEY || "";
@@ -29,6 +33,59 @@ export class NovelAIClient {
         "API key is required. Set NOVELAI_API_KEY environment variable or pass apiKey parameter."
       );
     }
+  }
+
+  /**
+   * ユーティリティ: 指定時間待機
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * ユーティリティ: リトライ付きでリクエストを実行
+   * 429エラー (Too Many Requests / Concurrent generation locked) に対応
+   */
+  private async fetchWithRetry(
+    url: string,
+    options: RequestInit,
+    operationName: string = 'Request'
+  ): Promise<Response> {
+    let lastError: Error | null = null;
+    
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      const response = await fetch(url, options);
+      
+      if (response.ok) {
+        return response;
+      }
+      
+      // Handle 429 (rate limit / concurrent lock)
+      if (response.status === 429) {
+        if (attempt < this.maxRetries) {
+          const retryDelay = this.baseRetryDelayMs * Math.pow(2, attempt);
+          console.warn(
+            `[NovelAI] ${operationName}: Rate limited (429). Retrying in ${retryDelay}ms... (attempt ${attempt + 1}/${this.maxRetries})`
+          );
+          await this.sleep(retryDelay);
+          continue;
+        }
+        // Max retries reached
+        const text = await response.text();
+        const sanitizedText = text.length > 200 ? text.slice(0, 200) + '...[truncated]' : text;
+        console.error(`[NovelAI] ${operationName} error after ${this.maxRetries} retries (${response.status}): ${sanitizedText}`);
+        throw new Error(`${operationName} failed after ${this.maxRetries} retries: ${response.status} ${response.statusText}`);
+      }
+      
+      // Other errors - don't retry
+      const text = await response.text();
+      const sanitizedText = text.length > 200 ? text.slice(0, 200) + '...[truncated]' : text;
+      console.error(`[NovelAI] ${operationName} error (${response.status}): ${sanitizedText}`);
+      throw new Error(`${operationName} failed: ${response.status} ${response.statusText}`);
+    }
+    
+    // Should not reach here, but just in case
+    throw lastError || new Error(`${operationName} failed: Unknown error`);
   }
 
   /**
@@ -64,8 +121,8 @@ export class NovelAIClient {
    * 画像をVibe Transfer用にエンコード（2 Anlas消費）
    */
   async encodeVibe(params: Schemas.EncodeVibeParams): Promise<Schemas.VibeEncodeResult> {
-    // Validate parameters
-    const validatedParams = Schemas.EncodeVibeParamsSchema.parse(params);
+    // Validate parameters (use parseAsync for consistency with other methods)
+    const validatedParams = await Schemas.EncodeVibeParamsSchema.parseAsync(params);
 
     // Get image data
     const imageBuffer = Utils.getImageBuffer(validatedParams.image);
@@ -80,7 +137,8 @@ export class NovelAIClient {
       const balance = await this.getAnlasBalance();
       anlasBefore = balance.total;
     } catch (e) {
-      // Ignore error
+      // Log but continue - Anlas tracking is optional
+      console.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     const payload = {
@@ -116,12 +174,13 @@ export class NovelAIClient {
         anlasConsumed = anlasBefore - anlasRemaining;
       }
     } catch (e) {
-      // Ignore
+      // Log but continue - Anlas tracking is optional
+      console.warn('[NovelAI] Failed to get final Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     const result: Schemas.VibeEncodeResult = {
       encoding,
-      model: validatedParams.model as any,
+      model: validatedParams.model,
       information_extracted: validatedParams.information_extracted,
       strength: validatedParams.strength,
       source_image_hash: sourceHash,
@@ -148,7 +207,7 @@ export class NovelAIClient {
         filename = `${baseName}.naiv4vibe`;
       } else {
         // Auto-generate filename
-        const timestamp = new Date().toISOString().replace(/[-:T.]/g, '_').slice(0, 15);
+        const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 15);
         filename = `${sourceHash.slice(0, 12)}_${timestamp}.naiv4vibe`;
       }
       const savePath = path.join(dir, filename);
@@ -202,10 +261,13 @@ export class NovelAIClient {
 
     // Defaults
     const negativePrompt = validatedParams.negative_prompt ?? Constants.DEFAULT_NEGATIVE;
-    const seed = validatedParams.seed ?? Math.floor(Math.random() * 4294967295);
+    const seed = validatedParams.seed ?? Math.floor(Math.random() * Constants.MAX_SEED);
 
+    // Type for character reference processing result
+    type CharRefProcessResult = Awaited<ReturnType<typeof Utils.processCharacterReferences>>;
+    
     // Process Character Reference
-    let charRefData: any = null;
+    let charRefData: CharRefProcessResult | null = null;
     if (validatedParams.character_reference) {
       charRefData = await Utils.processCharacterReferences([validatedParams.character_reference]);
     }
@@ -225,10 +287,14 @@ export class NovelAIClient {
       }
     }
 
+    // Type for character caption dictionaries
+    type CharCaptionDict = ReturnType<typeof Schemas.characterToCaptionDict>;
+    type CharNegativeCaptionDict = ReturnType<typeof Schemas.characterToNegativeCaptionDict>;
+
     // Character Configs
     let charConfigs = validatedParams.characters || [];
-    let charCaptions: any[] = [];
-    let charNegativeCaptions: any[] = [];
+    let charCaptions: CharCaptionDict[] = [];
+    let charNegativeCaptions: CharNegativeCaptionDict[] = [];
 
     if (charConfigs.length > 0) {
       charCaptions = charConfigs.map(Schemas.characterToCaptionDict);
@@ -236,6 +302,10 @@ export class NovelAIClient {
     }
 
     // Build Payload
+    // Note: Using 'any' here as the NovelAI API payload has many dynamic properties
+    // that are conditionally added based on the action type. A full interface would
+    // require significant maintenance overhead. Type safety is maintained through
+    // validated input params.
     const payload: any = {
       input: validatedParams.prompt,
       model: validatedParams.model,
@@ -387,7 +457,8 @@ export class NovelAIClient {
       const balance = await this.getAnlasBalance();
       anlasBefore = balance.total;
     } catch (e) {
-      // Ignore
+      // Log but continue - Anlas tracking is optional
+      console.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     // Make Request
@@ -396,20 +467,18 @@ export class NovelAIClient {
       || validatedParams.action === "infill";
     const apiUrl = useStream ? Constants.STREAM_URL : Constants.API_URL;
 
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
+    const response = await this.fetchWithRetry(
+      apiUrl,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-        const text = await response.text();
-        console.error(`Error response: ${text}`);
-        throw new Error(`Generation failed: ${response.status} ${response.statusText}`);
-    }
+      'Generation'
+    );
 
     const responseBuffer = Buffer.from(await response.arrayBuffer());
     let imageData: Buffer;
@@ -430,7 +499,8 @@ export class NovelAIClient {
         anlasConsumed = anlasBefore - anlasRemaining;
       }
     } catch (e) {
-      // Ignore
+      // Log but continue - Anlas tracking is optional
+      console.warn('[NovelAI] Failed to get final Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     const result: Schemas.GenerateResult = {
@@ -523,8 +593,8 @@ export class NovelAIClient {
    * @returns Augmented image result
    */
   async augmentImage(params: Schemas.AugmentParams): Promise<Schemas.AugmentResult> {
-    // Validate parameters
-    const validatedParams = Schemas.AugmentParamsSchema.parse(params);
+    // Validate parameters (use parseAsync for consistency)
+    const validatedParams = await Schemas.AugmentParamsSchema.parseAsync(params);
 
     // Get image data and auto-detect dimensions
     const { width, height, buffer: imageBuffer } = await Utils.getImageDimensions(validatedParams.image);
@@ -536,7 +606,8 @@ export class NovelAIClient {
       const balance = await this.getAnlasBalance();
       anlasBefore = balance.total;
     } catch (e) {
-      // Ignore error
+      // Log but continue - Anlas tracking is optional
+      console.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     // Build payload with auto-detected dimensions
@@ -563,20 +634,18 @@ export class NovelAIClient {
       payload.defry = validatedParams.defry;
     }
 
-    const response = await fetch(Constants.AUGMENT_URL, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
+    const response = await this.fetchWithRetry(
+      Constants.AUGMENT_URL,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      console.error(`Augment error response: ${text}`);
-      throw new Error(`Augment failed: ${response.status} ${response.statusText}`);
-    }
+      'Augment'
+    );
 
     const responseBuffer = Buffer.from(await response.arrayBuffer());
     const imageData = this.parseZipResponse(responseBuffer);
@@ -591,7 +660,8 @@ export class NovelAIClient {
         anlasConsumed = anlasBefore - anlasRemaining;
       }
     } catch (e) {
-      // Ignore
+      // Log but continue - Anlas tracking is optional
+      console.warn('[NovelAI] Failed to get final Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     const result: Schemas.AugmentResult = {
@@ -627,8 +697,8 @@ export class NovelAIClient {
    * @returns Upscaled image result
    */
   async upscaleImage(params: Schemas.UpscaleParams): Promise<Schemas.UpscaleResult> {
-    // Validate parameters
-    const validatedParams = Schemas.UpscaleParamsSchema.parse(params);
+    // Validate parameters (use parseAsync for consistency)
+    const validatedParams = await Schemas.UpscaleParamsSchema.parseAsync(params);
 
     // Get image data and auto-detect dimensions
     const { width, height, buffer: imageBuffer } = await Utils.getImageDimensions(validatedParams.image);
@@ -640,7 +710,8 @@ export class NovelAIClient {
       const balance = await this.getAnlasBalance();
       anlasBefore = balance.total;
     } catch (e) {
-      // Ignore error
+      // Log but continue - Anlas tracking is optional
+      console.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     const payload = {
@@ -650,20 +721,18 @@ export class NovelAIClient {
       scale: validatedParams.scale,
     };
 
-    const response = await fetch(Constants.UPSCALE_URL, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
+    const response = await this.fetchWithRetry(
+      Constants.UPSCALE_URL,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      console.error(`Upscale error response: ${text}`);
-      throw new Error(`Upscale failed: ${response.status} ${response.statusText}`);
-    }
+      'Upscale'
+    );
 
     // Response can be ZIP or raw image
     const responseBuffer = Buffer.from(await response.arrayBuffer());
@@ -686,7 +755,8 @@ export class NovelAIClient {
         anlasConsumed = anlasBefore - anlasRemaining;
       }
     } catch (e) {
-      // Ignore
+      // Log but continue - Anlas tracking is optional
+      console.warn('[NovelAI] Failed to get final Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     const outputWidth = width * validatedParams.scale;

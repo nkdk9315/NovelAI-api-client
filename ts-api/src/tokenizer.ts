@@ -1,10 +1,16 @@
 import axios from 'axios';
 import * as zlib from 'zlib';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import he from 'he';
 import { Tokenizer } from 'tokenizers';
+import { MAX_TOKENS } from './constants';
 
-// Maximum token limit for NovelAI generation
-export const MAX_TOKENS = 512;
+// Cache directory for tokenizer data (relative to project root)
+const CACHE_DIR = path.join(__dirname, '..', '.cache', 'tokenizers');
+
+// Re-export MAX_TOKENS from constants for backward compatibility
+export { MAX_TOKENS };
 
 // Custom error class for tokenizer-related errors
 export class TokenizerError extends Error {
@@ -245,7 +251,65 @@ export class NovelAIClipTokenizer {
     }
 }
 
-async function fetchData(targetUrl: string): Promise<string> {
+/**
+ * Generate a cache filename from a URL.
+ * Extracts the tokenizer name and version from the URL.
+ */
+function getCacheFilename(url: string): string {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname; // e.g., /tokenizer/compressed/t5_tokenizer.def
+    const basename = path.basename(pathname, '.def'); // e.g., t5_tokenizer
+    const version = urlObj.searchParams.get('v') || 'unknown';
+    return `${basename}_v${version}.json`;
+}
+
+/**
+ * Check if a cached file exists and read it.
+ * Returns null if cache doesn't exist.
+ */
+async function readFromCache(cacheFile: string): Promise<string | null> {
+    const cachePath = path.join(CACHE_DIR, cacheFile);
+    try {
+        const data = await fs.readFile(cachePath, 'utf-8');
+        console.log(`Loading tokenizer from cache: ${cachePath}`);
+        return data;
+    } catch {
+        // Cache file doesn't exist or can't be read
+        return null;
+    }
+}
+
+/**
+ * Write data to cache file.
+ */
+async function writeToCache(cacheFile: string, data: string): Promise<void> {
+    const cachePath = path.join(CACHE_DIR, cacheFile);
+    try {
+        // Ensure cache directory exists
+        await fs.mkdir(CACHE_DIR, { recursive: true });
+        await fs.writeFile(cachePath, data, 'utf-8');
+        console.log(`Tokenizer data cached to: ${cachePath}`);
+    } catch (error) {
+        // Cache write failure is not fatal, just log and continue
+        console.warn(`Failed to write tokenizer cache: ${error}`);
+    }
+}
+
+/**
+ * Fetch and decompress tokenizer data from a URL.
+ * Uses disk cache to avoid repeated network requests.
+ */
+async function fetchData(targetUrl: string, forceRefresh = false): Promise<string> {
+    const cacheFile = getCacheFilename(targetUrl);
+    
+    // Try to load from cache first (unless forceRefresh is true)
+    if (!forceRefresh) {
+        const cachedData = await readFromCache(cacheFile);
+        if (cachedData) {
+            return cachedData;
+        }
+    }
+    
     console.log(`Fetching ${targetUrl}...`);
     
     let response;
@@ -287,7 +351,12 @@ async function fetchData(targetUrl: string): Promise<string> {
         }
     }
 
-    return data.toString("utf-8");
+    const dataStr = data.toString("utf-8");
+    
+    // Save to cache for future use
+    await writeToCache(cacheFile, dataStr);
+    
+    return dataStr;
 }
 
 export async function getClipTokenizer(forceRefresh = false): Promise<NovelAIClipTokenizer> {
@@ -296,7 +365,7 @@ export async function getClipTokenizer(forceRefresh = false): Promise<NovelAICli
     }
     
     const tokenUrl = "https://novelai.net/tokenizer/compressed/clip_tokenizer.def?v=2&static=true";
-    const dataStr = await fetchData(tokenUrl);
+    const dataStr = await fetchData(tokenUrl, forceRefresh);
     
     let jsonData;
     try {
@@ -314,11 +383,20 @@ export async function getClipTokenizer(forceRefresh = false): Promise<NovelAICli
 }
 
 export class NovelAIT5Tokenizer {
-    private eosTokenId: number = 1; // Default to 1 (standard T5 EOS token ID)
+    private eosTokenId: number;
 
-    constructor(private tokenizer: Tokenizer) {
-        // Verify and update EOS token ID if different (async, but defaults to 1)
-        ensureEosTokenId(tokenizer).then(id => this.eosTokenId = id);
+    // Private constructor - use static create() method instead
+    private constructor(private tokenizer: Tokenizer, eosTokenId: number) {
+        this.eosTokenId = eosTokenId;
+    }
+
+    /**
+     * Create a new NovelAIT5Tokenizer instance.
+     * Use this instead of constructor to ensure proper async initialization.
+     */
+    static async create(tokenizer: Tokenizer): Promise<NovelAIT5Tokenizer> {
+        const eosTokenId = await ensureEosTokenId(tokenizer);
+        return new NovelAIT5Tokenizer(tokenizer, eosTokenId);
     }
 
     /**
@@ -328,11 +406,6 @@ export class NovelAIT5Tokenizer {
      * For display purposes (matching official site), use countTokens() instead.
      */
     public async encode(text: string): Promise<number[]> {
-        // Ensure EOS ID is loaded
-        if (this.eosTokenId === undefined) {
-             this.eosTokenId = await ensureEosTokenId(this.tokenizer);
-        }
-
         // 1. Empty check
         if (!text || text.length === 0) {
             return [this.eosTokenId];
@@ -375,11 +448,11 @@ async function ensureEosTokenId(tokenizer: Tokenizer): Promise<number> {
 
 export async function getT5Tokenizer(forceRefresh = false): Promise<NovelAIT5Tokenizer> {
     if (cachedT5Tokenizer && !forceRefresh) {
-        return new NovelAIT5Tokenizer(cachedT5Tokenizer);
+        return NovelAIT5Tokenizer.create(cachedT5Tokenizer);
     }
     
     const tokenUrl = "https://novelai.net/tokenizer/compressed/t5_tokenizer.def?v=2&static=true";
-    const dataStr = await fetchData(tokenUrl);
+    const dataStr = await fetchData(tokenUrl, forceRefresh);
     
     try {
         cachedT5Tokenizer = await Tokenizer.fromString(dataStr);
@@ -387,7 +460,7 @@ export async function getT5Tokenizer(forceRefresh = false): Promise<NovelAIT5Tok
         throw new TokenizerError('Failed to initialize T5 tokenizer from data', error);
     }
     
-    return new NovelAIT5Tokenizer(cachedT5Tokenizer);
+    return NovelAIT5Tokenizer.create(cachedT5Tokenizer);
 }
 
 /**

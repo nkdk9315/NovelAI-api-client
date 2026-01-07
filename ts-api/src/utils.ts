@@ -38,25 +38,69 @@ export function getImageBuffer(image: string | Buffer): Buffer {
 }
 
 /**
+ * 画像ファイルのサイズをチェック
+ * @throws Error if file size exceeds MAX_REF_IMAGE_SIZE_MB
+ */
+export function validateImageFileSize(filePath: string): void {
+  try {
+    const stats = fs.statSync(filePath);
+    const sizeMB = stats.size / (1024 * 1024);
+    
+    if (sizeMB > Constants.MAX_REF_IMAGE_SIZE_MB) {
+      throw new Error(
+        `Image file size (${sizeMB.toFixed(2)} MB) exceeds maximum allowed size (${Constants.MAX_REF_IMAGE_SIZE_MB} MB): ${filePath}`
+      );
+    }
+  } catch (err: any) {
+    if (err.message.includes('exceeds maximum allowed size')) {
+      throw err; // Re-throw our validation error
+    }
+    // File doesn't exist or can't be read - will be handled by readFileSync later
+  }
+}
+
+/**
  * 画像の存在確認と寸法を取得
- * @throws Error if image doesn't exist or cannot be read
+ * @throws Error if image doesn't exist, cannot be read, or exceeds size limit
  */
 export async function getImageDimensions(image: string | Buffer): Promise<{ width: number; height: number; buffer: Buffer }> {
   let buffer: Buffer;
 
   if (Buffer.isBuffer(image)) {
+    // Check buffer size for in-memory images
+    const sizeMB = image.length / (1024 * 1024);
+    if (sizeMB > Constants.MAX_REF_IMAGE_SIZE_MB) {
+      throw new Error(
+        `Image buffer size (${sizeMB.toFixed(2)} MB) exceeds maximum allowed size (${Constants.MAX_REF_IMAGE_SIZE_MB} MB)`
+      );
+    }
     buffer = image;
   } else if (typeof image === 'string') {
-    // Check if it's a file path
-    if (fs.existsSync(image) && fs.lstatSync(image).isFile()) {
-      buffer = fs.readFileSync(image);
-    } else if (image.includes('/') || image.includes('\\')) {
-      // Looks like a file path but doesn't exist
-      throw new Error(`Image file not found: ${image}`);
+    // Use helper to determine if this looks like a file path
+    const isLikelyFilePath = looksLikeFilePath(image);
+    
+    if (isLikelyFilePath) {
+      // Validate file size before reading
+      validateImageFileSize(image);
+      
+      try {
+        // Single atomic file read operation (avoids TOCTOU)
+        buffer = fs.readFileSync(image);
+      } catch (err) {
+        throw new Error(`Image file not found or not readable: ${image}`);
+      }
     } else {
       // Treat as Base64 string
       const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
       buffer = Buffer.from(base64Data, 'base64');
+      
+      // Check decoded size
+      const sizeMB = buffer.length / (1024 * 1024);
+      if (sizeMB > Constants.MAX_REF_IMAGE_SIZE_MB) {
+        throw new Error(
+          `Decoded image size (${sizeMB.toFixed(2)} MB) exceeds maximum allowed size (${Constants.MAX_REF_IMAGE_SIZE_MB} MB)`
+        );
+      }
     }
   } else {
     throw new Error(`Invalid image type: ${typeof image}`);
@@ -74,6 +118,45 @@ export async function getImageDimensions(image: string | Buffer): Promise<{ widt
     height: metadata.height,
     buffer,
   };
+}
+
+/**
+ * Heuristically determine if a string looks like a file path.
+ * Base64 strings can contain '/' but typically don't look like paths.
+ */
+function looksLikeFilePath(str: string): boolean {
+  // If it starts with data URL prefix, it's definitely not a path
+  if (str.startsWith('data:')) {
+    return false;
+  }
+  
+  // Absolute paths (Unix or Windows)
+  if (str.startsWith('/') || /^[A-Za-z]:[\\/]/.test(str)) {
+    return true;
+  }
+  
+  // Relative paths with directory separators and file extension
+  // Check for common image extensions to reduce false positives
+  if ((str.includes('/') || str.includes('\\')) && 
+      /\.(png|jpg|jpeg|webp|gif|bmp|naiv4vibe)$/i.test(str)) {
+    return true;
+  }
+  
+  // Check if valid Base64: only contains Base64 chars and optional padding
+  // A pure Base64 string without path-like characteristics
+  const base64Regex = /^[A-Za-z0-9+/]+=*$/;
+  if (base64Regex.test(str) && str.length > 100) {
+    // Long string with only Base64 chars is likely Base64, not a path
+    return false;
+  }
+  
+  // If it has a file extension and no Base64-invalid chars for paths, assume path
+  if (/\.(png|jpg|jpeg|webp|gif|bmp|naiv4vibe)$/i.test(str)) {
+    return true;
+  }
+  
+  // Default: if it contains directory separator, try as path
+  return str.includes('/') || str.includes('\\');
 }
 
 /**

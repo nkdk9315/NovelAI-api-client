@@ -1,0 +1,396 @@
+{
+  "timestamp": "2026-01-07T05:31:57.421Z",
+  "summary": {
+    "total": 40,
+    "passed": 38,
+    "failed": 1,
+    "errors": 0,
+    "skipped": 1
+  },
+  "results": [
+    {
+      "id": "E1-1",
+      "name": "空文字列のスキーマバリデーション",
+      "category": "E1: 空のプロンプト",
+      "status": "PASS",
+      "description": "空文字列 \"\" がスキーマで許可されるか",
+      "expected": "許可される (min(0) のため)",
+      "actual": "許可された"
+    },
+    {
+      "id": "E1-2",
+      "name": "空プロンプトでのAPI呼び出し",
+      "category": "E1: 空のプロンプト",
+      "status": "PASS",
+      "description": "NovelAI APIが空プロンプトを受け入れるか",
+      "expected": "成功 or 明確なエラー",
+      "actual": "成功 - 画像生成完了 (output/edge_case_tests/gen_202601070531460_1964717725.png)",
+      "details": "Anlas消費: 0"
+    },
+    {
+      "id": "E1-3",
+      "name": "スペースのみのプロンプト (スキーマ)",
+      "category": "E1: 空のプロンプト",
+      "status": "PASS",
+      "description": "スペースのみ \"   \" がスキーマで許可されるか",
+      "expected": "許可される (現状トリムなし)",
+      "actual": "許可された"
+    },
+    {
+      "id": "E2-1",
+      "name": "シード値: 最小値 (0)",
+      "category": "E2: 極端な seed 値",
+      "status": "PASS",
+      "description": "seed = 0 がスキーマで正しく処理されるか",
+      "expected": "許可される",
+      "actual": "許可された"
+    },
+    {
+      "id": "E2-2",
+      "name": "シード値: 1",
+      "category": "E2: 極端な seed 値",
+      "status": "PASS",
+      "description": "seed = 1 がスキーマで正しく処理されるか",
+      "expected": "許可される",
+      "actual": "許可された"
+    },
+    {
+      "id": "E2-3",
+      "name": "シード値: MAX_SEED - 1",
+      "category": "E2: 極端な seed 値",
+      "status": "PASS",
+      "description": "seed = 4294967294 がスキーマで正しく処理されるか",
+      "expected": "許可される",
+      "actual": "許可された"
+    },
+    {
+      "id": "E2-4",
+      "name": "シード値: MAX_SEED (4294967295)",
+      "category": "E2: 極端な seed 値",
+      "status": "PASS",
+      "description": "seed = 4294967295 がスキーマで正しく処理されるか",
+      "expected": "許可される",
+      "actual": "許可された"
+    },
+    {
+      "id": "E2-5",
+      "name": "シード値: MAX_SEED + 1 (範囲外)",
+      "category": "E2: 極端な seed 値",
+      "status": "PASS",
+      "description": "seed = 4294967296 がスキーマで正しく処理されるか",
+      "expected": "拒否される",
+      "actual": "拒否された",
+      "details": "Number must be less than or equal to 4294967295"
+    },
+    {
+      "id": "E2-6",
+      "name": "シード値: -1 (負の値)",
+      "category": "E2: 極端な seed 値",
+      "status": "PASS",
+      "description": "seed = -1 がスキーマで正しく処理されるか",
+      "expected": "拒否される",
+      "actual": "拒否された",
+      "details": "Number must be greater than or equal to 0"
+    },
+    {
+      "id": "E2-7",
+      "name": "シード値: Int32 最大値 (2^31-1)",
+      "category": "E2: 極端な seed 値",
+      "status": "PASS",
+      "description": "seed = 2147483647 がスキーマで正しく処理されるか",
+      "expected": "許可される",
+      "actual": "許可された"
+    },
+    {
+      "id": "E2-API",
+      "name": "seed=0 でのAPI呼び出し",
+      "category": "E2: 極端な seed 値",
+      "status": "PASS",
+      "description": "seed=0 でAPIが正常動作するか",
+      "expected": "成功",
+      "actual": "成功 - seed: 0",
+      "details": "保存先: output/edge_case_tests/gen_202601070531479_0.png"
+    },
+    {
+      "id": "E3-1",
+      "name": "MAX_PIXELS ちょうど (1024x1024 = 1,048,576)",
+      "category": "E3: 境界値のピクセル数",
+      "status": "PASS",
+      "description": "1024x1024 = 1,048,576 pixels",
+      "expected": "許可される",
+      "actual": "許可された"
+    },
+    {
+      "id": "E3-2",
+      "name": "MAX_PIXELS 超過 (1024x1088 = 1,114,112)",
+      "category": "E3: 境界値のピクセル数",
+      "status": "PASS",
+      "description": "1024x1088 = 1,114,112 pixels",
+      "expected": "拒否される",
+      "actual": "拒否された",
+      "details": "Total pixels (1114112) exceeds limit (1048576). Current: 1024x1088"
+    },
+    {
+      "id": "E3-3",
+      "name": "デフォルト値 (832x1216 = 1,011,712)",
+      "category": "E3: 境界値のピクセル数",
+      "status": "PASS",
+      "description": "832x1216 = 1,011,712 pixels",
+      "expected": "許可される",
+      "actual": "許可された"
+    },
+    {
+      "id": "E3-4",
+      "name": "最小サイズ (64x64 = 4,096)",
+      "category": "E3: 境界値のピクセル数",
+      "status": "PASS",
+      "description": "64x64 = 4,096 pixels",
+      "expected": "許可される",
+      "actual": "許可された"
+    },
+    {
+      "id": "E3-5",
+      "name": "別の超過パターン (1088x960 = 1,044,480)",
+      "category": "E3: 境界値のピクセル数",
+      "status": "PASS",
+      "description": "1088x960 = 1,044,480 pixels",
+      "expected": "許可される",
+      "actual": "許可された"
+    },
+    {
+      "id": "E3-6",
+      "name": "超過パターン2 (1152x896 = 1,032,192)",
+      "category": "E3: 境界値のピクセル数",
+      "status": "PASS",
+      "description": "1152x896 = 1,032,192 pixels",
+      "expected": "許可される",
+      "actual": "許可された"
+    },
+    {
+      "id": "E3-7",
+      "name": "超過パターン3 (1280x832 = 1,064,960)",
+      "category": "E3: 境界値のピクセル数",
+      "status": "PASS",
+      "description": "1280x832 = 1,064,960 pixels",
+      "expected": "拒否される",
+      "actual": "拒否された",
+      "details": "Total pixels (1064960) exceeds limit (1048576). Current: 1280x832"
+    },
+    {
+      "id": "E3-API",
+      "name": "MAX_PIXELS ちょうど (1024x1024) でのAPI呼び出し",
+      "category": "E3: 境界値のピクセル数",
+      "status": "PASS",
+      "description": "境界値でAPIが正常動作するか",
+      "expected": "成功",
+      "actual": "成功",
+      "details": "保存先: output/edge_case_tests/gen_202601070531501_1814011436.png / Anlas消費: 0"
+    },
+    {
+      "id": "E4-1",
+      "name": "日本語",
+      "category": "E4: Unicode/特殊文字",
+      "status": "PASS",
+      "description": "特殊文字を含むプロンプトの処理",
+      "expected": "スキーマ通過",
+      "actual": "スキーマ通過",
+      "details": "文字数: 10"
+    },
+    {
+      "id": "E4-2",
+      "name": "絵文字",
+      "category": "E4: Unicode/特殊文字",
+      "status": "PASS",
+      "description": "特殊文字を含むプロンプトの処理",
+      "expected": "スキーマ通過",
+      "actual": "スキーマ通過",
+      "details": "文字数: 11"
+    },
+    {
+      "id": "E4-3",
+      "name": "アクセント記号",
+      "category": "E4: Unicode/特殊文字",
+      "status": "PASS",
+      "description": "特殊文字を含むプロンプトの処理",
+      "expected": "スキーマ通過",
+      "actual": "スキーマ通過",
+      "details": "文字数: 17"
+    },
+    {
+      "id": "E4-4",
+      "name": "ZWJ文字 (家族絵文字)",
+      "category": "E4: Unicode/特殊文字",
+      "status": "PASS",
+      "description": "特殊文字を含むプロンプトの処理",
+      "expected": "スキーマ通過",
+      "actual": "スキーマ通過",
+      "details": "文字数: 18"
+    },
+    {
+      "id": "E4-5",
+      "name": "ゼロ幅スペース",
+      "category": "E4: Unicode/特殊文字",
+      "status": "PASS",
+      "description": "特殊文字を含むプロンプトの処理",
+      "expected": "スキーマ通過",
+      "actual": "スキーマ通過",
+      "details": "文字数: 9"
+    },
+    {
+      "id": "E4-6",
+      "name": "HTMLタグ",
+      "category": "E4: Unicode/特殊文字",
+      "status": "PASS",
+      "description": "特殊文字を含むプロンプトの処理",
+      "expected": "スキーマ通過",
+      "actual": "スキーマ通過",
+      "details": "文字数: 36"
+    },
+    {
+      "id": "E4-7",
+      "name": "エスケープ文字 (リテラル)",
+      "category": "E4: Unicode/特殊文字",
+      "status": "PASS",
+      "description": "特殊文字を含むプロンプトの処理",
+      "expected": "スキーマ通過",
+      "actual": "スキーマ通過",
+      "details": "文字数: 13"
+    },
+    {
+      "id": "E4-8",
+      "name": "改行・タブ (実際)",
+      "category": "E4: Unicode/特殊文字",
+      "status": "PASS",
+      "description": "特殊文字を含むプロンプトの処理",
+      "expected": "スキーマ通過",
+      "actual": "スキーマ通過",
+      "details": "文字数: 9"
+    },
+    {
+      "id": "E4-9",
+      "name": "引用符",
+      "category": "E4: Unicode/特殊文字",
+      "status": "PASS",
+      "description": "特殊文字を含むプロンプトの処理",
+      "expected": "スキーマ通過",
+      "actual": "スキーマ通過",
+      "details": "文字数: 24"
+    },
+    {
+      "id": "E4-10",
+      "name": "MAX_PROMPT_CHARS超過 (2001文字)",
+      "category": "E4: Unicode/特殊文字",
+      "status": "PASS",
+      "description": "特殊文字を含むプロンプトの処理",
+      "expected": "拒否",
+      "actual": "拒否: String must contain at most 2000 character(s)",
+      "details": "文字数: 2001"
+    },
+    {
+      "id": "E4-11",
+      "name": "MAX_PROMPT_CHARSちょうど (2000文字)",
+      "category": "E4: Unicode/特殊文字",
+      "status": "FAIL",
+      "description": "特殊文字を含むプロンプトの処理",
+      "expected": "スキーマ通過",
+      "actual": "拒否: Prompt token count (2002) exceeds maximum allowed (512)",
+      "details": "文字数: 2000"
+    },
+    {
+      "id": "E4-API",
+      "name": "絵文字を含むプロンプトでのAPI呼び出し",
+      "category": "E4: Unicode/特殊文字",
+      "status": "PASS",
+      "description": "絵文字がAPIで正常処理されるか",
+      "expected": "成功",
+      "actual": "成功",
+      "details": "保存先: output/edge_case_tests/gen_202601070531514_2547453725.png"
+    },
+    {
+      "id": "E5-1",
+      "name": "MAX_REF_IMAGE_SIZE_MB 定数確認",
+      "category": "E5: 巨大な画像ファイル",
+      "status": "PASS",
+      "description": "MAX_REF_IMAGE_SIZE_MB が定義されているか",
+      "expected": "10 (MB)",
+      "actual": "10 (MB)",
+      "details": "⚠️ この定数は現在バリデーションで使用されていない"
+    },
+    {
+      "id": "E5-2",
+      "name": "参照画像のサイズ確認",
+      "category": "E5: 巨大な画像ファイル",
+      "status": "PASS",
+      "description": "参照画像がサイズ制限内か",
+      "expected": "<= 10 MB",
+      "actual": "1.55 MB",
+      "details": "./reference/input.png"
+    },
+    {
+      "id": "E5-3",
+      "name": "10MB超過画像のバリデーション (未実装)",
+      "category": "E5: 巨大な画像ファイル",
+      "status": "SKIP",
+      "description": "10MB超過画像が適切にエラーになるか",
+      "expected": "エラー",
+      "actual": "⚠️ バリデーション未実装 - 画像サイズチェックがスキーマにありません",
+      "details": "utils.ts で fs.readFileSync 前にサイズチェックを追加推奨"
+    },
+    {
+      "id": "E6-1",
+      "name": "3つの同時generate実行",
+      "category": "E6: 同時実行",
+      "status": "PASS",
+      "description": "3つのgenerateを同時実行した場合の挙動",
+      "expected": "全て成功 or 一部失敗 (レート制限)",
+      "actual": "成功: 3, 失敗: 0",
+      "details": "所要時間: 5533ms / Anlas消費: 0"
+    },
+    {
+      "id": "E6-2",
+      "name": "Anlas残高の整合性",
+      "category": "E6: 同時実行",
+      "status": "PASS",
+      "description": "同時実行時のAnlas残高表示の信頼性",
+      "expected": "各リクエストのanlas_consumedは独立計算",
+      "actual": "⚠️ 同時実行時、anlas_before と anlas_after の差分が不正確になる可能性あり",
+      "details": "generate() は各リクエスト前後でgetAnlasBalance()を呼ぶため、同時実行時は順序が保証されない"
+    },
+    {
+      "id": "EX-1",
+      "name": "512x512 (64の倍数)",
+      "category": "Extra: 64の倍数チェック",
+      "status": "PASS",
+      "description": "512x512 のバリデーション",
+      "expected": "許可される",
+      "actual": "許可された"
+    },
+    {
+      "id": "EX-2",
+      "name": "513x512 (非倍数)",
+      "category": "Extra: 64の倍数チェック",
+      "status": "PASS",
+      "description": "513x512 のバリデーション",
+      "expected": "拒否される",
+      "actual": "拒否された: Width must be a multiple of 64"
+    },
+    {
+      "id": "EX-3",
+      "name": "128x192 (64の倍数)",
+      "category": "Extra: 64の倍数チェック",
+      "status": "PASS",
+      "description": "128x192 のバリデーション",
+      "expected": "許可される",
+      "actual": "許可された"
+    },
+    {
+      "id": "EX-4",
+      "name": "100x100 (非倍数)",
+      "category": "Extra: 64の倍数チェック",
+      "status": "PASS",
+      "description": "100x100 のバリデーション",
+      "expected": "拒否される",
+      "actual": "拒否された: Width must be a multiple of 64"
+    }
+  ]
+}
