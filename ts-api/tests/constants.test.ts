@@ -82,11 +82,10 @@ describe('Validation Constants', () => {
   });
 
   it('should have valid noise schedules array', () => {
-    expect(Constants.VALID_NOISE_SCHEDULES).toContain('native');
     expect(Constants.VALID_NOISE_SCHEDULES).toContain('karras');
     expect(Constants.VALID_NOISE_SCHEDULES).toContain('exponential');
     expect(Constants.VALID_NOISE_SCHEDULES).toContain('polyexponential');
-    expect(Constants.VALID_NOISE_SCHEDULES.length).toBe(4);
+    expect(Constants.VALID_NOISE_SCHEDULES.length).toBe(3);
   });
 });
 

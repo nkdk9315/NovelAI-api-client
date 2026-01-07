@@ -177,6 +177,7 @@ generate(params: GenerateParams): Promise<GenerateResult>
 | `height` | `number` | `1216` | 高さ（64の倍数） |
 | `steps` | `number` | `23` | ステップ数（1-50） |
 | `scale` | `number` | `5.0` | CFG Scale（0.0-10.0） |
+| `cfg_rescale` | `number` | `0` | プロンプトガイダンスの再調整（0.0-1.0） |
 | `seed` | `number` | `undefined` | シード値（undefinedでランダム） |
 | `sampler` | `string` | `"k_euler_ancestral"` | サンプラー |
 | `noise_schedule` | `string` | `"karras"` | ノイズスケジュール |
@@ -335,7 +336,7 @@ export const VALID_SAMPLERS = [
 ] as const;
 
 export const VALID_NOISE_SCHEDULES = [
-  "native", "karras", "exponential", "polyexponential"
+  "karras", "exponential", "polyexponential"
 ] as const;
 
 export const MODEL_KEY_MAP: Record<string, string> = {

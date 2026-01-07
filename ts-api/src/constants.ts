@@ -35,6 +35,7 @@ export const DEFAULT_NOISE_SCHEDULE = "karras";
 export const DEFAULT_VIBE_STRENGTH = 0.7;
 export const DEFAULT_VIBE_INFO_EXTRACTED = 0.7;
 export const DEFAULT_IMG2IMG_STRENGTH = 0.62;
+export const DEFAULT_CFG_RESCALE = 0;
 
 // Inpaint defaults
 export const DEFAULT_INPAINT_STRENGTH = 0.7;
@@ -66,7 +67,6 @@ export const VALID_MODELS = [
 
 // ノイズスケジュール
 export const VALID_NOISE_SCHEDULES = [
-    "native",
     "karras",
     "exponential",
     "polyexponential",
