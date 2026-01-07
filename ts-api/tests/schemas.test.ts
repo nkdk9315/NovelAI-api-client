@@ -254,9 +254,33 @@ describe('GenerateParamsSchema', () => {
       }
     });
 
+    it('should reject invalid noise_schedule', async () => {
+      // "native" is no longer valid
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', noise_schedule: 'native' });
+      expect(result.success).toBe(false);
+    });
+
     it('should reject invalid action', async () => {
       const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', action: 'invalid' });
       expect(result.success).toBe(false);
+    });
+  });
+
+  describe('cfg_rescale バリデーション', () => {
+    it('should accept valid cfg_rescale', async () => {
+      const result1 = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', cfg_rescale: 0 });
+      expect(result1.success).toBe(true);
+      const result2 = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', cfg_rescale: 1 });
+      expect(result2.success).toBe(true);
+      const result3 = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', cfg_rescale: 0.5 });
+      expect(result3.success).toBe(true);
+    });
+
+    it('should reject cfg_rescale out of range', async () => {
+      const result1 = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', cfg_rescale: -0.1 });
+      expect(result1.success).toBe(false);
+      const result2 = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', cfg_rescale: 1.1 });
+      expect(result2.success).toBe(false);
     });
   });
 

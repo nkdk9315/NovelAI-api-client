@@ -137,6 +137,7 @@ export const GenerateParamsSchema = z.object({
     .refine(val => val % 64 === 0, { message: "Height must be a multiple of 64" }),
   steps: z.number().int().min(Constants.MIN_STEPS).max(Constants.MAX_STEPS).default(Constants.DEFAULT_STEPS),
   scale: z.number().min(Constants.MIN_SCALE).max(Constants.MAX_SCALE).default(Constants.DEFAULT_SCALE),
+  cfg_rescale: z.number().min(0).max(1).default(Constants.DEFAULT_CFG_RESCALE),
   seed: z.number().int().min(0).max(Constants.MAX_SEED).optional().nullable(),
   sampler: z.enum(Constants.VALID_SAMPLERS).default(Constants.DEFAULT_SAMPLER),
   noise_schedule: z.enum(Constants.VALID_NOISE_SCHEDULES).default(Constants.DEFAULT_NOISE_SCHEDULE),

@@ -325,7 +325,7 @@ export class NovelAIClient {
         controlnet_strength: 1,
         legacy: false,
         add_original_image: true,
-        cfg_rescale: 0,
+        cfg_rescale: validatedParams.cfg_rescale,
         noise_schedule: validatedParams.noise_schedule,
         legacy_v3_extend: false,
         skip_cfg_above_sigma: null,
