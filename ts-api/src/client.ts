@@ -252,61 +252,19 @@ export class NovelAIClient {
     fs.writeFileSync(savePath, JSON.stringify(vibeData, null, 2), 'utf-8');
   }
 
+  // ===========================================================================
+  // Generate Method - Private Helpers
+  // ===========================================================================
+
   /**
-   * 統合画像生成メソッド
+   * Build the base payload structure for image generation
    */
-  async generate(params: Schemas.GenerateParams): Promise<Schemas.GenerateResult> {
-    // Validate parameters
-    const validatedParams = await Schemas.GenerateParamsSchema.parseAsync(params);
-
-    // Defaults
-    const negativePrompt = validatedParams.negative_prompt ?? Constants.DEFAULT_NEGATIVE;
-    const seed = validatedParams.seed ?? Math.floor(Math.random() * Constants.MAX_SEED);
-
-    // Type for character reference processing result
-    type CharRefProcessResult = Awaited<ReturnType<typeof Utils.processCharacterReferences>>;
-    
-    // Process Character Reference
-    let charRefData: CharRefProcessResult | null = null;
-    if (validatedParams.character_reference) {
-      charRefData = await Utils.processCharacterReferences([validatedParams.character_reference]);
-    }
-
-    // Process Vibes
-    let vibeEncodings: string[] = [];
-    let vibeInfoList: number[] = [];
-    let vibeStrengths = validatedParams.vibe_strengths;
-
-    if (validatedParams.vibes && validatedParams.vibes.length > 0) {
-      const processed = await Utils.processVibes(validatedParams.vibes, validatedParams.model);
-      vibeEncodings = processed.encodings;
-      vibeInfoList = validatedParams.vibe_info_extracted || processed.info_extracted_list;
-
-      if (!vibeStrengths) {
-        vibeStrengths = new Array(vibeEncodings.length).fill(Constants.DEFAULT_VIBE_STRENGTH);
-      }
-    }
-
-    // Type for character caption dictionaries
-    type CharCaptionDict = ReturnType<typeof Schemas.characterToCaptionDict>;
-    type CharNegativeCaptionDict = ReturnType<typeof Schemas.characterToNegativeCaptionDict>;
-
-    // Character Configs
-    let charConfigs = validatedParams.characters || [];
-    let charCaptions: CharCaptionDict[] = [];
-    let charNegativeCaptions: CharNegativeCaptionDict[] = [];
-
-    if (charConfigs.length > 0) {
-      charCaptions = charConfigs.map(Schemas.characterToCaptionDict);
-      charNegativeCaptions = charConfigs.map(Schemas.characterToNegativeCaptionDict);
-    }
-
-    // Build Payload
-    // Note: Using 'any' here as the NovelAI API payload has many dynamic properties
-    // that are conditionally added based on the action type. A full interface would
-    // require significant maintenance overhead. Type safety is maintained through
-    // validated input params.
-    const payload: any = {
+  private buildBasePayload(
+    validatedParams: Schemas.GenerateParams & { width: number; height: number; model: string },
+    seed: number,
+    negativePrompt: string
+  ): any {
+    return {
       input: validatedParams.prompt,
       model: validatedParams.model,
       action: validatedParams.action,
@@ -340,93 +298,127 @@ export class NovelAIClient {
       },
       use_new_shared_trial: true,
     };
+  }
 
-    // Img2Img
+  /**
+   * Apply Img2Img parameters to the payload
+   */
+  private applyImg2ImgParams(
+    payload: any,
+    validatedParams: Schemas.GenerateParams,
+    seed: number
+  ): void {
     if (validatedParams.action === "img2img" && validatedParams.source_image) {
       payload.parameters.image = Utils.getImageBase64(validatedParams.source_image);
       payload.parameters.strength = validatedParams.img2img_strength;
       payload.parameters.noise = validatedParams.img2img_noise;
       payload.parameters.extra_noise_seed = seed - 1;
     }
+  }
 
-    // Infill/Inpaint (Mask機能)
-    if (validatedParams.action === "infill" && validatedParams.source_image && validatedParams.mask) {
-      // モデル名に-inpaintingサフィックスを追加
-      payload.model = validatedParams.model + "-inpainting";
-      
-      // 元画像を取得
-      const sourceImageBuffer = Utils.getImageBuffer(validatedParams.source_image);
-      const sourceImageBase64 = sourceImageBuffer.toString('base64');
-      
-      // マスク画像を処理（1/8サイズにリサイズ）
-      const maskBuffer = Utils.getImageBuffer(validatedParams.mask);
-      const resizedMask = await Utils.resizeMaskImage(
-        maskBuffer,
-        validatedParams.width,
-        validatedParams.height
-      );
-      const maskBase64 = resizedMask.toString('base64');
-      
-      // cache_secret_keyを生成
-      const imageCacheSecretKey = Utils.calculateCacheSecretKey(sourceImageBuffer);
-      const maskCacheSecretKey = Utils.calculateCacheSecretKey(resizedMask);
-      
-      // パラメータ設定
-      const maskStrength = validatedParams.mask_strength!;
-      const hybridStrength = validatedParams.hybrid_img2img_strength ?? maskStrength;
-      const hybridNoise = validatedParams.hybrid_img2img_noise ?? 0;
-      
-      // Inpaint用パラメータを設定
-      payload.parameters.image = sourceImageBase64;
-      payload.parameters.mask = maskBase64;
-      payload.parameters.strength = hybridStrength;  // Img2Img元画像の強度
-      payload.parameters.noise = hybridNoise;        // Img2Img元画像のノイズ
-      payload.parameters.add_original_image = false;
-      payload.parameters.extra_noise_seed = seed - 1;
-      payload.parameters.inpaintImg2ImgStrength = maskStrength;  // マスク反映度
-      payload.parameters.img2img = {
-        strength: maskStrength,  // マスク反映度（連動）
-        color_correct: validatedParams.inpaint_color_correct,
-      };
-      payload.parameters.image_cache_secret_key = imageCacheSecretKey;
-      payload.parameters.mask_cache_secret_key = maskCacheSecretKey;
-      payload.parameters.image_format = "png";
-      payload.parameters.stream = "msgpack";
+  /**
+   * Apply Infill/Inpaint parameters to the payload
+   */
+  private async applyInfillParams(
+    payload: any,
+    validatedParams: Schemas.GenerateParams & { width: number; height: number; model: string },
+    seed: number
+  ): Promise<void> {
+    if (validatedParams.action !== "infill" || !validatedParams.source_image || !validatedParams.mask) {
+      return;
     }
 
-    // Vibe
+    // モデル名に-inpaintingサフィックスを追加
+    payload.model = validatedParams.model + "-inpainting";
+    
+    // 元画像を取得
+    const sourceImageBuffer = Utils.getImageBuffer(validatedParams.source_image);
+    const sourceImageBase64 = sourceImageBuffer.toString('base64');
+    
+    // マスク画像を処理（1/8サイズにリサイズ）
+    const maskBuffer = Utils.getImageBuffer(validatedParams.mask);
+    const resizedMask = await Utils.resizeMaskImage(
+      maskBuffer,
+      validatedParams.width,
+      validatedParams.height
+    );
+    const maskBase64 = resizedMask.toString('base64');
+    
+    // cache_secret_keyを生成
+    const imageCacheSecretKey = Utils.calculateCacheSecretKey(sourceImageBuffer);
+    const maskCacheSecretKey = Utils.calculateCacheSecretKey(resizedMask);
+    
+    // パラメータ設定
+    const maskStrength = validatedParams.mask_strength!;
+    const hybridStrength = validatedParams.hybrid_img2img_strength ?? maskStrength;
+    const hybridNoise = validatedParams.hybrid_img2img_noise ?? 0;
+    
+    // Inpaint用パラメータを設定
+    payload.parameters.image = sourceImageBase64;
+    payload.parameters.mask = maskBase64;
+    payload.parameters.strength = hybridStrength;
+    payload.parameters.noise = hybridNoise;
+    payload.parameters.add_original_image = false;
+    payload.parameters.extra_noise_seed = seed - 1;
+    payload.parameters.inpaintImg2ImgStrength = maskStrength;
+    payload.parameters.img2img = {
+      strength: maskStrength,
+      color_correct: validatedParams.inpaint_color_correct,
+    };
+    payload.parameters.image_cache_secret_key = imageCacheSecretKey;
+    payload.parameters.mask_cache_secret_key = maskCacheSecretKey;
+    payload.parameters.image_format = "png";
+    payload.parameters.stream = "msgpack";
+  }
+
+  /**
+   * Apply Vibe Transfer parameters to the payload
+   */
+  private applyVibeParams(
+    payload: any,
+    vibeEncodings: string[],
+    vibeStrengths: number[] | null | undefined,
+    vibeInfoList: number[]
+  ): void {
     if (vibeEncodings.length > 0) {
       payload.parameters.reference_image_multiple = vibeEncodings;
       payload.parameters.reference_strength_multiple = vibeStrengths;
       payload.parameters.reference_information_extracted_multiple = vibeInfoList;
       payload.parameters.normalize_reference_strength_multiple = true;
     }
+  }
 
-    // Character Reference
-    if (charRefData) {
-      const { images, descriptions, info_extracted, strength_values, secondary_strength_values } = charRefData;
-      payload.parameters.director_reference_images = images;
-      payload.parameters.director_reference_descriptions = descriptions;
-      payload.parameters.director_reference_information_extracted = info_extracted;
-      payload.parameters.director_reference_strength_values = strength_values;
-      payload.parameters.director_reference_secondary_strength_values = secondary_strength_values;
-      payload.parameters.use_coords = true;
-      payload.parameters.stream = "msgpack";
-      payload.parameters.image_format = "png";
+  /**
+   * Apply Character Reference parameters to the payload
+   */
+  private applyCharRefParams(
+    payload: any,
+    charRefData: Awaited<ReturnType<typeof Utils.processCharacterReferences>>
+  ): void {
+    const { images, descriptions, info_extracted, strength_values, secondary_strength_values } = charRefData;
+    payload.parameters.director_reference_images = images;
+    payload.parameters.director_reference_descriptions = descriptions;
+    payload.parameters.director_reference_information_extracted = info_extracted;
+    payload.parameters.director_reference_strength_values = strength_values;
+    payload.parameters.director_reference_secondary_strength_values = secondary_strength_values;
+    payload.parameters.use_coords = true;
+    payload.parameters.stream = "msgpack";
+    payload.parameters.image_format = "png";
+  }
 
-      // Ensure character prompts exist if using reference
-      if (charConfigs.length === 0) {
-        const dummyChar: Schemas.CharacterConfig = { prompt: validatedParams.prompt, center_x: 0.5, center_y: 0.5, negative_prompt: "" };
-        charConfigs = [dummyChar];
-        charCaptions = [Schemas.characterToCaptionDict(dummyChar)];
-        charNegativeCaptions = [Schemas.characterToNegativeCaptionDict(dummyChar)];
-      }
-    }
-
-    // V4 Prompt Structure
+  /**
+   * Build V4 prompt structure for the payload
+   */
+  private buildV4PromptStructure(
+    payload: any,
+    prompt: string,
+    negativePrompt: string,
+    charCaptions: ReturnType<typeof Schemas.characterToCaptionDict>[],
+    charNegativeCaptions: ReturnType<typeof Schemas.characterToNegativeCaptionDict>[]
+  ): void {
     payload.parameters.v4_prompt = {
       caption: {
-        base_caption: validatedParams.prompt,
+        base_caption: prompt,
         char_captions: charCaptions,
       },
       use_coords: true,
@@ -439,8 +431,15 @@ export class NovelAIClient {
       },
       legacy_uc: false,
     };
+  }
 
-    // Character Prompts (use_coords)
+  /**
+   * Apply character prompts (use_coords) to the payload
+   */
+  private applyCharacterPrompts(
+    payload: any,
+    charConfigs: Schemas.CharacterConfig[]
+  ): void {
     if (charConfigs.length > 0) {
       payload.parameters.use_coords = true;
       payload.parameters.characterPrompts = charConfigs.map(char => ({
@@ -450,6 +449,86 @@ export class NovelAIClient {
         enabled: true,
       }));
     }
+  }
+
+  // ===========================================================================
+  // Generate Method - Main Implementation
+  // ===========================================================================
+
+  /**
+   * 統合画像生成メソッド
+   */
+  async generate(params: Schemas.GenerateParams): Promise<Schemas.GenerateResult> {
+    // Validate parameters
+    const validatedParams = await Schemas.GenerateParamsSchema.parseAsync(params);
+
+    // Defaults
+    const negativePrompt = validatedParams.negative_prompt ?? Constants.DEFAULT_NEGATIVE;
+    const seed = validatedParams.seed ?? Math.floor(Math.random() * Constants.MAX_SEED);
+
+    // Process Character Reference
+    type CharRefProcessResult = Awaited<ReturnType<typeof Utils.processCharacterReferences>>;
+    let charRefData: CharRefProcessResult | null = null;
+    if (validatedParams.character_reference) {
+      charRefData = await Utils.processCharacterReferences([validatedParams.character_reference]);
+    }
+
+    // Process Vibes
+    let vibeEncodings: string[] = [];
+    let vibeInfoList: number[] = [];
+    let vibeStrengths = validatedParams.vibe_strengths;
+
+    if (validatedParams.vibes && validatedParams.vibes.length > 0) {
+      const processed = await Utils.processVibes(validatedParams.vibes, validatedParams.model);
+      vibeEncodings = processed.encodings;
+      vibeInfoList = validatedParams.vibe_info_extracted || processed.info_extracted_list;
+
+      if (!vibeStrengths) {
+        vibeStrengths = new Array(vibeEncodings.length).fill(Constants.DEFAULT_VIBE_STRENGTH);
+      }
+    }
+
+    // Character Configs
+    type CharCaptionDict = ReturnType<typeof Schemas.characterToCaptionDict>;
+    type CharNegativeCaptionDict = ReturnType<typeof Schemas.characterToNegativeCaptionDict>;
+    let charConfigs = validatedParams.characters || [];
+    let charCaptions: CharCaptionDict[] = [];
+    let charNegativeCaptions: CharNegativeCaptionDict[] = [];
+
+    if (charConfigs.length > 0) {
+      charCaptions = charConfigs.map(Schemas.characterToCaptionDict);
+      charNegativeCaptions = charConfigs.map(Schemas.characterToNegativeCaptionDict);
+    }
+
+    // Build payload using helper methods
+    const payload = this.buildBasePayload(validatedParams, seed, negativePrompt);
+    
+    // Apply action-specific parameters
+    this.applyImg2ImgParams(payload, validatedParams, seed);
+    await this.applyInfillParams(payload, validatedParams, seed);
+    
+    // Apply additional features
+    this.applyVibeParams(payload, vibeEncodings, vibeStrengths, vibeInfoList);
+    
+    if (charRefData) {
+      this.applyCharRefParams(payload, charRefData);
+      // Ensure character prompts exist if using reference
+      if (charConfigs.length === 0) {
+        const dummyChar: Schemas.CharacterConfig = { 
+          prompt: validatedParams.prompt, 
+          center_x: 0.5, 
+          center_y: 0.5, 
+          negative_prompt: "" 
+        };
+        charConfigs = [dummyChar];
+        charCaptions = [Schemas.characterToCaptionDict(dummyChar)];
+        charNegativeCaptions = [Schemas.characterToNegativeCaptionDict(dummyChar)];
+      }
+    }
+
+    // Build prompt structures
+    this.buildV4PromptStructure(payload, validatedParams.prompt, negativePrompt, charCaptions, charNegativeCaptions);
+    this.applyCharacterPrompts(payload, charConfigs);
 
     // Get initial balance
     let anlasBefore: number | null = null;
@@ -457,12 +536,10 @@ export class NovelAIClient {
       const balance = await this.getAnlasBalance();
       anlasBefore = balance.total;
     } catch (e) {
-      // Log but continue - Anlas tracking is optional
       console.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     // Make Request
-    // Use stream endpoint for character reference OR infill action
     const useStream = (validatedParams.character_reference !== undefined && validatedParams.character_reference !== null) 
       || validatedParams.action === "infill";
     const apiUrl = useStream ? Constants.STREAM_URL : Constants.API_URL;
@@ -481,13 +558,7 @@ export class NovelAIClient {
     );
 
     const responseBuffer = Buffer.from(await response.arrayBuffer());
-    let imageData: Buffer;
-
-    if (useStream) {
-        imageData = this.parseStreamResponse(responseBuffer);
-    } else {
-        imageData = this.parseZipResponse(responseBuffer);
-    }
+    const imageData = useStream ? this.parseStreamResponse(responseBuffer) : this.parseZipResponse(responseBuffer);
 
     // Get final balance
     let anlasRemaining: number | null = null;
@@ -499,7 +570,6 @@ export class NovelAIClient {
         anlasConsumed = anlasBefore - anlasRemaining;
       }
     } catch (e) {
-      // Log but continue - Anlas tracking is optional
       console.warn('[NovelAI] Failed to get final Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 

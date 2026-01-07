@@ -86,64 +86,36 @@ export type GenerateResult = z.infer<typeof GenerateResultSchema>;
 
 
 // =============================================================================
-// GenerateParams
+// GenerateParams - Validation Helper Functions
 // =============================================================================
 
-export const GenerateParamsSchema = z.object({
-  // === 基本プロンプト ===
-  prompt: z.string().min(0).max(Constants.MAX_PROMPT_CHARS),
+// Type alias for refinement context
+type RefinementCtx = z.RefinementCtx;
 
-  // === Action & Image2Image ===
-  action: z.enum(["generate", "img2img", "infill"]).default("generate"),
-  source_image: ImageInputSchema.optional().nullable(),
-  img2img_strength: z.number().min(0.0).max(1.0).default(Constants.DEFAULT_IMG2IMG_STRENGTH),
-  img2img_noise: z.number().min(0.0).max(1.0).default(0.0),
+// Raw input type before validation (used by validation helpers)
+type GenerateParamsRaw = {
+  prompt: string;
+  action: "generate" | "img2img" | "infill";
+  source_image?: string | Buffer | null;
+  mask?: string | Buffer | null;
+  mask_strength?: number | null;
+  vibes?: any[] | null;
+  vibe_strengths?: number[] | null;
+  vibe_info_extracted?: number[] | null;
+  character_reference?: z.infer<typeof CharacterReferenceConfigSchema> | null;
+  characters?: z.infer<typeof CharacterConfigSchema>[] | null;
+  negative_prompt?: string | null;
+  save_path?: string | null;
+  save_dir?: string | null;
+  width: number;
+  height: number;
+};
 
-  // === Inpaint/Mask ===
-  mask: ImageInputSchema.optional().nullable(),
-  /** Mask application strength (0.01-1). Required for infill action. */
-  mask_strength: z.number().min(0.01).max(1.0).optional().nullable(),
-  inpaint_color_correct: z.boolean().default(Constants.DEFAULT_INPAINT_COLOR_CORRECT),
-
-  // === Hybrid Mode (Mask + Img2Img) ===
-  /** Img2Img strength when used with mask. Controls how much original image influences (0.01-0.99). */
-  hybrid_img2img_strength: z.number().min(0.01).max(0.99).optional().nullable(),
-  /** Img2Img noise when used with mask (0-0.99). */
-  hybrid_img2img_noise: z.number().min(0.0).max(0.99).optional().nullable(),
-
-  // === キャラクター設定 ===
-  characters: z.array(CharacterConfigSchema).max(Constants.MAX_CHARACTERS).optional().nullable(),
-
-  // === Vibe Transfer ===
-  vibes: z.array(z.any()).max(Constants.MAX_VIBES).optional().nullable(), // Vibes can be complex types, validation handled in client
-  vibe_strengths: z.array(z.number().min(0.0).max(1.0)).optional().nullable(),
-  vibe_info_extracted: z.array(z.number().min(0.0).max(1.0)).optional().nullable(),
-
-  // === Character Reference ===
-  character_reference: CharacterReferenceConfigSchema.optional().nullable(),
-
-  // === プロンプト ===
-  negative_prompt: z.string().max(Constants.MAX_PROMPT_CHARS).optional().nullable(),
-
-  // === 出力オプション ===
-  save_path: z.string().optional().nullable(),
-  save_dir: z.string().optional().nullable(),
-
-  // === 生成パラメータ ===
-  model: z.enum(Constants.VALID_MODELS).default(Constants.DEFAULT_MODEL),
-  width: z.number().int().min(Constants.MIN_DIMENSION).default(Constants.DEFAULT_WIDTH)
-    .refine(val => val % 64 === 0, { message: "Width must be a multiple of 64" }),
-  height: z.number().int().min(Constants.MIN_DIMENSION).default(Constants.DEFAULT_HEIGHT)
-    .refine(val => val % 64 === 0, { message: "Height must be a multiple of 64" }),
-  steps: z.number().int().min(Constants.MIN_STEPS).max(Constants.MAX_STEPS).default(Constants.DEFAULT_STEPS),
-  scale: z.number().min(Constants.MIN_SCALE).max(Constants.MAX_SCALE).default(Constants.DEFAULT_SCALE),
-  cfg_rescale: z.number().min(0).max(1).default(Constants.DEFAULT_CFG_RESCALE),
-  seed: z.number().int().min(0).max(Constants.MAX_SEED).optional().nullable(),
-  sampler: z.enum(Constants.VALID_SAMPLERS).default(Constants.DEFAULT_SAMPLER),
-  noise_schedule: z.enum(Constants.VALID_NOISE_SCHEDULES).default(Constants.DEFAULT_NOISE_SCHEDULE),
-})
-.superRefine(async (data, ctx) => {
-  // 1. vibes と character_reference は同時使用不可
+/**
+ * Validate action-dependent requirements (img2img, infill)
+ */
+function validateActionDependencies(data: GenerateParamsRaw, ctx: RefinementCtx): void {
+  // vibes と character_reference は同時使用不可
   if (data.vibes && data.vibes.length > 0 && data.character_reference) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -152,7 +124,7 @@ export const GenerateParamsSchema = z.object({
     });
   }
 
-  // 2. action="img2img" の場合は source_image が必須
+  // action="img2img" の場合は source_image が必須
   if (data.action === "img2img" && !data.source_image) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -161,7 +133,7 @@ export const GenerateParamsSchema = z.object({
     });
   }
 
-  // 2b. action="infill" の場合は source_image, mask, mask_strength が必須
+  // action="infill" の場合は source_image, mask, mask_strength が必須
   if (data.action === "infill") {
     if (!data.source_image) {
       ctx.addIssue({
@@ -186,7 +158,7 @@ export const GenerateParamsSchema = z.object({
     }
   }
 
-  // 2c. mask が指定されている場合は action が infill でなければならない
+  // mask が指定されている場合は action が infill でなければならない
   if (data.mask && data.action !== "infill") {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -194,9 +166,16 @@ export const GenerateParamsSchema = z.object({
       path: ["mask"],
     });
   }
+}
 
-  // 3. vibes なしで vibe_strengths が指定されている
-  if (data.vibe_strengths && (!data.vibes || data.vibes.length === 0)) {
+/**
+ * Validate vibe-related parameters and array length consistency
+ */
+function validateVibeParams(data: GenerateParamsRaw, ctx: RefinementCtx): void {
+  const hasVibes = data.vibes && data.vibes.length > 0;
+
+  // vibes なしで vibe_strengths が指定されている
+  if (data.vibe_strengths && !hasVibes) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: "vibe_strengths cannot be specified without vibes",
@@ -204,8 +183,8 @@ export const GenerateParamsSchema = z.object({
     });
   }
 
-  // 4. vibes なしで vibe_info_extracted が指定されている
-  if (data.vibe_info_extracted && (!data.vibes || data.vibes.length === 0)) {
+  // vibes なしで vibe_info_extracted が指定されている
+  if (data.vibe_info_extracted && !hasVibes) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: "vibe_info_extracted cannot be specified without vibes",
@@ -213,7 +192,7 @@ export const GenerateParamsSchema = z.object({
     });
   }
 
-  // 5. vibes と vibe_strengths の長さが一致しない
+  // vibes と vibe_strengths の長さが一致しない
   if (data.vibes && data.vibe_strengths) {
     if (data.vibes.length !== data.vibe_strengths.length) {
       ctx.addIssue({
@@ -224,7 +203,7 @@ export const GenerateParamsSchema = z.object({
     }
   }
 
-  // 6. vibes と vibe_info_extracted の長さが一致しない
+  // vibes と vibe_info_extracted の長さが一致しない
   if (data.vibes && data.vibe_info_extracted) {
     if (data.vibes.length !== data.vibe_info_extracted.length) {
       ctx.addIssue({
@@ -234,18 +213,26 @@ export const GenerateParamsSchema = z.object({
       });
     }
   }
+}
 
-  // 7. width * height が MAX_PIXELS を超える
+/**
+ * Validate pixel constraints (total pixels <= MAX_PIXELS)
+ */
+function validatePixelConstraints(data: GenerateParamsRaw, ctx: RefinementCtx): void {
   const totalPixels = data.width * data.height;
   if (totalPixels > Constants.MAX_PIXELS) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: `Total pixels (${totalPixels}) exceeds limit (${Constants.MAX_PIXELS}). Current: ${data.width}x${data.height}`,
-      path: ["width"], // Attach to width
+      path: ["width"],
     });
   }
+}
 
-  // 8. save_path と save_dir は同時指定不可
+/**
+ * Validate save options (save_path and save_dir are mutually exclusive)
+ */
+function validateSaveOptions(data: GenerateParamsRaw, ctx: RefinementCtx): void {
   if (data.save_path && data.save_dir) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -253,9 +240,12 @@ export const GenerateParamsSchema = z.object({
       path: ["save_path"],
     });
   }
+}
 
-  // 9. プロンプトのトークン数が512を超える（ポジティブ・ネガティブ別々にカウント）
-  // ベースプロンプト + キャラクター別プロンプトの合計が512トークン以下である必要がある
+/**
+ * Validate token counts for positive and negative prompts (async)
+ */
+async function validateTokenCounts(data: GenerateParamsRaw, ctx: RefinementCtx): Promise<void> {
   try {
     const { getT5Tokenizer, MAX_TOKENS } = await import('./tokenizer');
     const tokenizer = await getT5Tokenizer();
@@ -319,6 +309,72 @@ export const GenerateParamsSchema = z.object({
       console.warn('[NovelAI] Token validation skipped due to error:', error.message);
     }
   }
+}
+
+// =============================================================================
+// GenerateParams Schema Definition
+// =============================================================================
+
+export const GenerateParamsSchema = z.object({
+  // === 基本プロンプト ===
+  prompt: z.string().min(0).max(Constants.MAX_PROMPT_CHARS),
+
+  // === Action & Image2Image ===
+  action: z.enum(["generate", "img2img", "infill"]).default("generate"),
+  source_image: ImageInputSchema.optional().nullable(),
+  img2img_strength: z.number().min(0.0).max(1.0).default(Constants.DEFAULT_IMG2IMG_STRENGTH),
+  img2img_noise: z.number().min(0.0).max(1.0).default(0.0),
+
+  // === Inpaint/Mask ===
+  mask: ImageInputSchema.optional().nullable(),
+  /** Mask application strength (0.01-1). Required for infill action. */
+  mask_strength: z.number().min(0.01).max(1.0).optional().nullable(),
+  inpaint_color_correct: z.boolean().default(Constants.DEFAULT_INPAINT_COLOR_CORRECT),
+
+  // === Hybrid Mode (Mask + Img2Img) ===
+  /** Img2Img strength when used with mask. Controls how much original image influences (0.01-0.99). */
+  hybrid_img2img_strength: z.number().min(0.01).max(0.99).optional().nullable(),
+  /** Img2Img noise when used with mask (0-0.99). */
+  hybrid_img2img_noise: z.number().min(0.0).max(0.99).optional().nullable(),
+
+  // === キャラクター設定 ===
+  characters: z.array(CharacterConfigSchema).max(Constants.MAX_CHARACTERS).optional().nullable(),
+
+  // === Vibe Transfer ===
+  vibes: z.array(z.any()).max(Constants.MAX_VIBES).optional().nullable(),
+  vibe_strengths: z.array(z.number().min(0.0).max(1.0)).optional().nullable(),
+  vibe_info_extracted: z.array(z.number().min(0.0).max(1.0)).optional().nullable(),
+
+  // === Character Reference ===
+  character_reference: CharacterReferenceConfigSchema.optional().nullable(),
+
+  // === プロンプト ===
+  negative_prompt: z.string().max(Constants.MAX_PROMPT_CHARS).optional().nullable(),
+
+  // === 出力オプション ===
+  save_path: z.string().optional().nullable(),
+  save_dir: z.string().optional().nullable(),
+
+  // === 生成パラメータ ===
+  model: z.enum(Constants.VALID_MODELS).default(Constants.DEFAULT_MODEL),
+  width: z.number().int().min(Constants.MIN_DIMENSION).default(Constants.DEFAULT_WIDTH)
+    .refine(val => val % 64 === 0, { message: "Width must be a multiple of 64" }),
+  height: z.number().int().min(Constants.MIN_DIMENSION).default(Constants.DEFAULT_HEIGHT)
+    .refine(val => val % 64 === 0, { message: "Height must be a multiple of 64" }),
+  steps: z.number().int().min(Constants.MIN_STEPS).max(Constants.MAX_STEPS).default(Constants.DEFAULT_STEPS),
+  scale: z.number().min(Constants.MIN_SCALE).max(Constants.MAX_SCALE).default(Constants.DEFAULT_SCALE),
+  cfg_rescale: z.number().min(0).max(1).default(Constants.DEFAULT_CFG_RESCALE),
+  seed: z.number().int().min(0).max(Constants.MAX_SEED).optional().nullable(),
+  sampler: z.enum(Constants.VALID_SAMPLERS).default(Constants.DEFAULT_SAMPLER),
+  noise_schedule: z.enum(Constants.VALID_NOISE_SCHEDULES).default(Constants.DEFAULT_NOISE_SCHEDULE),
+})
+.superRefine(async (data, ctx) => {
+  // Delegate to focused validation functions
+  validateActionDependencies(data as GenerateParamsRaw, ctx);
+  validateVibeParams(data as GenerateParamsRaw, ctx);
+  validatePixelConstraints(data as GenerateParamsRaw, ctx);
+  validateSaveOptions(data as GenerateParamsRaw, ctx);
+  await validateTokenCounts(data as GenerateParamsRaw, ctx);
 });
 
 // Helper type for validated params (all fields present after .parse())
