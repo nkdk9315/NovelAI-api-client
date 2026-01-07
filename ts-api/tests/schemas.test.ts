@@ -146,11 +146,11 @@ describe('GenerateParamsSchema', () => {
     });
 
     it('should reject total pixels exceeding MAX_PIXELS', async () => {
-      // 1024 x 1024 = 1,048,576 which equals MAX_PIXELS, should pass
-      const resultPass = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', width: 1024, height: 1024 });
+      // 2048 x 1536 = 3,145,728 which equals MAX_PIXELS, should pass
+      const resultPass = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', width: 2048, height: 1536 });
       expect(resultPass.success).toBe(true);
-      // 1280 x 1024 = 1,310,720 which exceeds MAX_PIXELS, should fail
-      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', width: 1280, height: 1024 });
+      // 2112 x 1536 = 3,244,032 which exceeds MAX_PIXELS, should fail
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', width: 2112, height: 1536 });
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error.issues.some(i => i.message.includes('exceeds limit'))).toBe(true);

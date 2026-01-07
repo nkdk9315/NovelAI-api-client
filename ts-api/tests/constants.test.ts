@@ -135,7 +135,7 @@ describe('Augment Tool Constants', () => {
 // =============================================================================
 describe('Limit Constants', () => {
   it('should have valid pixel limits', () => {
-    expect(Constants.MAX_PIXELS).toBe(1_048_576);  // 1024 * 1024
+    expect(Constants.MAX_PIXELS).toBe(3_145_728);  // 2048 * 1536 (サーバー側制限)
     expect(Constants.MIN_DIMENSION).toBe(64);
     expect(Constants.MAX_DIMENSION).toBe(1024);
   });
