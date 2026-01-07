@@ -198,7 +198,7 @@ export class NovelAIClient {
    */
   async generate(params: Schemas.GenerateParams): Promise<Schemas.GenerateResult> {
     // Validate parameters
-    const validatedParams = Schemas.GenerateParamsSchema.parse(params);
+    const validatedParams = await Schemas.GenerateParamsSchema.parseAsync(params);
 
     // Defaults
     const negativePrompt = validatedParams.negative_prompt ?? Constants.DEFAULT_NEGATIVE;
@@ -301,15 +301,21 @@ export class NovelAIClient {
       const imageCacheSecretKey = Utils.calculateCacheSecretKey(sourceImageBuffer);
       const maskCacheSecretKey = Utils.calculateCacheSecretKey(resizedMask);
       
+      // パラメータ設定
+      const maskStrength = validatedParams.mask_strength!;
+      const hybridStrength = validatedParams.hybrid_img2img_strength ?? maskStrength;
+      const hybridNoise = validatedParams.hybrid_img2img_noise ?? 0;
+      
       // Inpaint用パラメータを設定
       payload.parameters.image = sourceImageBase64;
       payload.parameters.mask = maskBase64;
-      payload.parameters.strength = validatedParams.inpaint_strength;
-      payload.parameters.noise = validatedParams.inpaint_noise;
+      payload.parameters.strength = hybridStrength;  // Img2Img元画像の強度
+      payload.parameters.noise = hybridNoise;        // Img2Img元画像のノイズ
       payload.parameters.add_original_image = false;
       payload.parameters.extra_noise_seed = seed - 1;
+      payload.parameters.inpaintImg2ImgStrength = maskStrength;  // マスク反映度
       payload.parameters.img2img = {
-        strength: validatedParams.inpaint_strength,
+        strength: maskStrength,  // マスク反映度（連動）
         color_correct: validatedParams.inpaint_color_correct,
       };
       payload.parameters.image_cache_secret_key = imageCacheSecretKey;
