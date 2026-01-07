@@ -464,6 +464,126 @@ describe('GenerateParamsSchema', () => {
         Schemas.GenerateParamsSchema.parse(params);
       }).toThrow(/Async refinement/);
     });
+
+    // === Combined Token Count Tests (Base + Character Prompts) ===
+    
+    it('should accept combined positive prompts under 512 tokens', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: 'masterpiece, best quality, 1girl',
+        characters: [
+          { prompt: 'red hair, blue eyes' },
+          { prompt: 'white dress' },
+        ],
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject combined positive prompts exceeding 512 tokens', async () => {
+      // Create prompts that together exceed 512 tokens
+      const basePrompt = Array(250).fill('masterpiece beautiful').join(', ');
+      const charPrompt1 = Array(200).fill('detailed anime girl').join(', ');
+      const charPrompt2 = Array(200).fill('stunning artwork').join(', ');
+      
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: basePrompt,
+        characters: [
+          { prompt: charPrompt1 },
+          { prompt: charPrompt2 },
+        ],
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const tokenError = result.error.issues.find(i => 
+          i.message.includes('Total positive prompt token count') && 
+          i.message.includes('exceeds maximum allowed')
+        );
+        expect(tokenError).toBeDefined();
+        expect(tokenError?.path).toEqual(['prompt']);
+      }
+    });
+
+    it('should accept combined negative prompts under 512 tokens', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: '1girl',
+        negative_prompt: 'lowres, bad anatomy',
+        characters: [
+          { prompt: 'girl A', negative_prompt: 'extra limbs' },
+          { prompt: 'girl B', negative_prompt: 'bad hands' },
+        ],
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject combined negative prompts exceeding 512 tokens', async () => {
+      // Create negative prompts that together exceed 512 tokens
+      const baseNegative = Array(250).fill('lowres bad anatomy').join(', ');
+      const charNegative1 = Array(200).fill('extra limbs deformed').join(', ');
+      const charNegative2 = Array(200).fill('ugly blurry').join(', ');
+      
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: '1girl',
+        negative_prompt: baseNegative,
+        characters: [
+          { prompt: 'girl A', negative_prompt: charNegative1 },
+          { prompt: 'girl B', negative_prompt: charNegative2 },
+        ],
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const tokenError = result.error.issues.find(i => 
+          i.message.includes('Total negative prompt token count') && 
+          i.message.includes('exceeds maximum allowed')
+        );
+        expect(tokenError).toBeDefined();
+        expect(tokenError?.path).toEqual(['negative_prompt']);
+      }
+    });
+
+    it('should validate positive and negative prompts independently', async () => {
+      // Positive prompts exceed limit, negative prompts are fine
+      const longPositive = Array(600).fill('masterpiece beautiful').join(', ');
+      
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: longPositive,
+        negative_prompt: 'lowres',
+        characters: [
+          { prompt: 'short prompt', negative_prompt: 'bad' },
+        ],
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        // Should only have positive prompt error, not negative
+        const positiveError = result.error.issues.find(i => 
+          i.message.includes('Total positive prompt token count')
+        );
+        const negativeError = result.error.issues.find(i => 
+          i.message.includes('Total negative prompt token count')
+        );
+        expect(positiveError).toBeDefined();
+        expect(negativeError).toBeUndefined();
+      }
+    });
+
+    it('should count only character prompts when base prompt is empty', async () => {
+      // Empty base prompt, but character prompts exceed limit
+      const charPrompt1 = Array(300).fill('detailed anime girl').join(', ');
+      const charPrompt2 = Array(300).fill('stunning artwork').join(', ');
+      
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: '',  // empty base prompt
+        characters: [
+          { prompt: charPrompt1 },
+          { prompt: charPrompt2 },
+        ],
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const tokenError = result.error.issues.find(i => 
+          i.message.includes('Total positive prompt token count')
+        );
+        expect(tokenError).toBeDefined();
+      }
+    });
   });
 });
 

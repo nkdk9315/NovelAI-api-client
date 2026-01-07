@@ -57,9 +57,7 @@ export type CharacterReferenceConfig = z.infer<typeof CharacterReferenceConfigSc
 
 export const VibeEncodeResultSchema = z.object({
   encoding: z.string().min(1),
-  model: z.enum(Constants.VALID_MODELS).refine((val) => Constants.VALID_MODELS.includes(val as any), {
-    message: `Invalid model. Valid models are: ${Constants.VALID_MODELS.join(", ")}`,
-  }),
+  model: z.enum(Constants.VALID_MODELS),
   information_extracted: z.number().min(0.0).max(1.0),
   strength: z.number().min(0.0).max(1.0),
   source_image_hash: z.string().regex(/^[a-f0-9]{64}$/),
@@ -255,20 +253,69 @@ export const GenerateParamsSchema = z.object({
     });
   }
 
-  // 9. プロンプトのトークン数が512を超える
-  if (data.prompt && data.prompt.length > 0) {
-    try {
-      const { validateTokenCount } = await import('./tokenizer');
-      await validateTokenCount(data.prompt);
-    } catch (error: any) {
-      if (error.name === 'TokenValidationError') {
+  // 9. プロンプトのトークン数が512を超える（ポジティブ・ネガティブ別々にカウント）
+  // ベースプロンプト + キャラクター別プロンプトの合計が512トークン以下である必要がある
+  try {
+    const { getT5Tokenizer, MAX_TOKENS } = await import('./tokenizer');
+    const tokenizer = await getT5Tokenizer();
+
+    // === ポジティブプロンプトの合計トークン数 ===
+    const positivePrompts: string[] = [];
+    if (data.prompt && data.prompt.length > 0) {
+      positivePrompts.push(data.prompt);
+    }
+    if (data.characters && data.characters.length > 0) {
+      for (const char of data.characters) {
+        if (char.prompt && char.prompt.length > 0) {
+          positivePrompts.push(char.prompt);
+        }
+      }
+    }
+
+    if (positivePrompts.length > 0) {
+      let totalPositiveTokens = 0;
+      for (const prompt of positivePrompts) {
+        totalPositiveTokens += await tokenizer.countTokens(prompt);
+      }
+      if (totalPositiveTokens > MAX_TOKENS) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `Prompt token count (${error.tokenCount}) exceeds maximum allowed (${error.maxTokens})`,
+          message: `Total positive prompt token count (${totalPositiveTokens}) exceeds maximum allowed (${MAX_TOKENS}). Base prompt + all character prompts must be <= ${MAX_TOKENS} tokens.`,
           path: ["prompt"],
         });
       }
-      // Other errors (like network errors) are swallowed to avoid blocking validation
+    }
+
+    // === ネガティブプロンプトの合計トークン数 ===
+    const negativePrompts: string[] = [];
+    if (data.negative_prompt && data.negative_prompt.length > 0) {
+      negativePrompts.push(data.negative_prompt);
+    }
+    if (data.characters && data.characters.length > 0) {
+      for (const char of data.characters) {
+        if (char.negative_prompt && char.negative_prompt.length > 0) {
+          negativePrompts.push(char.negative_prompt);
+        }
+      }
+    }
+
+    if (negativePrompts.length > 0) {
+      let totalNegativeTokens = 0;
+      for (const prompt of negativePrompts) {
+        totalNegativeTokens += await tokenizer.countTokens(prompt);
+      }
+      if (totalNegativeTokens > MAX_TOKENS) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Total negative prompt token count (${totalNegativeTokens}) exceeds maximum allowed (${MAX_TOKENS}). Base negative prompt + all character negative prompts must be <= ${MAX_TOKENS} tokens.`,
+          path: ["negative_prompt"],
+        });
+      }
+    }
+  } catch (error: any) {
+    // Network errors or tokenizer errors are logged but don't block validation
+    if (error.name !== 'TokenValidationError' && error.name !== 'TokenizerError') {
+      console.warn('[NovelAI] Token validation skipped due to error:', error.message);
     }
   }
 });
@@ -327,9 +374,6 @@ export type EncodeVibeParams = Pick<EncodeVibeParamsValidated, 'image'> &
 // AugmentParams (画像加工ツール)
 // =============================================================================
 
-// Image input helper (reuse existing)
-const AugmentImageInputSchema = z.union([z.string(), z.instanceof(Buffer)]);
-
 // req_type によって必要な引数が異なる：
 // - colorize: defry必須(0-5), promptオプション
 // - emotion: defry必須(0-5), prompt必須(指定キーワード)
@@ -337,7 +381,7 @@ const AugmentImageInputSchema = z.union([z.string(), z.instanceof(Buffer)]);
 
 export const AugmentParamsSchema = z.object({
   req_type: z.enum(Constants.AUGMENT_REQ_TYPES),
-  image: AugmentImageInputSchema,
+  image: ImageInputSchema,
   
   // colorize, emotion用のみ
   prompt: z.string().optional().nullable(),
@@ -446,7 +490,7 @@ export type AugmentResult = z.infer<typeof AugmentResultSchema>;
 // =============================================================================
 
 export const UpscaleParamsSchema = z.object({
-  image: AugmentImageInputSchema,
+  image: ImageInputSchema,
   scale: z.number().int().refine(
     (val) => Constants.VALID_UPSCALE_SCALES.includes(val as any),
     { message: `scale must be one of: ${Constants.VALID_UPSCALE_SCALES.join(", ")}` }

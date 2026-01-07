@@ -229,12 +229,12 @@ async function exampleMultiCharacter() {
     const validVibes = vibeFiles.filter(f => fs.existsSync(f));
 
     const result = await client.generate({
-      prompt: "school classroom, sunny day, wide shot, detailed background, 2::face focus::, -3::multiple views::",
+      prompt: "",
       characters: characters,
       vibes: validVibes.length > 0 ? validVibes : undefined,
       vibe_strengths: validVibes.length > 0 ? [0.4, 0.3, 0.5, 0.2].slice(0, validVibes.length) : undefined,
-      width: 1280,
-      height: 1280,
+      width: 1024,
+      height: 1024,
       save_dir: "output/multi_character/"
     });
 
