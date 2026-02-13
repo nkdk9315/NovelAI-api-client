@@ -110,7 +110,7 @@ async function exampleImg2img() {
   try {
     const client = new NovelAIClient();
 
-    const inputImage = "reference/input.png";
+    const inputImage = "reference/input.jpeg";
     if (!fs.existsSync(inputImage)) {
       console.log(`入力画像が見つかりません: ${inputImage}`);
       return;
@@ -131,8 +131,9 @@ async function exampleImg2img() {
     ];
 
     const result = await client.generate({
-      prompt: "1girl, beautiful anime girl, detailed eyes, masterpiece",
+      prompt: "backstreet, night, neon lights, detailed background, 2::face focus::, -3::multiple views::",
       action: "img2img",
+      characters: characters,
       source_image: inputImage,
       img2img_strength: 0.8,
       save_dir: "output/"
@@ -159,8 +160,8 @@ async function exampleImg2imgWithVibes() {
   try {
     const client = new NovelAIClient();
 
-    const inputImage = "reference/input.png";
-    const vibeFile = "vibes/えのきっぷ1.naiv4vibe";
+    const inputImage = "reference/input.jpeg";
+    const vibeFile = "vibes/input1.naiv4vibe";
 
     if (!fs.existsSync(inputImage)) {
       console.log(`入力画像が見つかりません: ${inputImage}`);
@@ -205,7 +206,7 @@ async function exampleMultiCharacter() {
 
     const characters: Schemas.CharacterConfig[] = [
       {
-        prompt: "3::liko (pokemon) school uniform::,  3::saliva drip::, 2::embarrassed::, large areolae, cleavage, inverted nipples, 3::nude::, -2::loli::,2::deep kiss::, 3::saliva on breasts and areolae::",
+        prompt: "3::cynthia (pokemon) school uniform::,  3::saliva drip::, 2::embarrassed::, large areolae, cleavage, inverted nipples, 3::nude::, -2::loli::,2::deep kiss::, 3::saliva on breasts and areolae::",
         center_x: 0.2,
         center_y: 0.5,
         negative_prompt: ""
@@ -219,17 +220,15 @@ async function exampleMultiCharacter() {
     ];
 
     const vibeFiles = [
-      "vibes/えのきっぷ1.naiv4vibe",
-      "vibes/20251215_231647.naiv4vibe",
-      "vibes/漆黒の性王.naiv4vibe",
-      "vibes/890bc110faa4_20251231_134734.naiv4vibe",
+      "vibes/input1.naiv4vibe",
+      "vibes/input2.naiv4vibe",
     ];
 
     // Filter valid
     const validVibes = vibeFiles.filter(f => fs.existsSync(f));
 
     const result = await client.generate({
-      prompt: "",
+      prompt: "-3::multiple views::",
       characters: characters,
       vibes: validVibes.length > 0 ? validVibes : undefined,
       vibe_strengths: validVibes.length > 0 ? [0.4, 0.3, 0.5, 0.2].slice(0, validVibes.length) : undefined,
@@ -259,7 +258,7 @@ async function exampleEncodeVibe() {
   try {
     const client = new NovelAIClient();
 
-    const imagePath = "reference/input.png";
+    const imagePath = "reference/input.jpeg";
     if (!fs.existsSync(imagePath)) {
       console.log(`参照画像が見つかりません: ${imagePath}`);
       return;
@@ -276,7 +275,7 @@ async function exampleEncodeVibe() {
     // エンコード + 自動保存
     const resultSaved = await client.encodeVibe({
       image: imagePath,
-      save_filename: "input1", 
+      save_filename: "input1",
       save_dir: "./vibes"
     });
     console.log(`✓ Saved: ${resultSaved.saved_path}`);
@@ -301,7 +300,7 @@ async function exampleCharacterReference() {
   try {
     const client = new NovelAIClient();
 
-    const referenceImage = "reference/input.png";
+    const referenceImage = "reference/input.jpeg";
     if (!fs.existsSync(referenceImage)) {
       console.log(`参照画像が見つかりません: ${referenceImage}`);
       return;
@@ -319,8 +318,9 @@ async function exampleCharacterReference() {
       ],
       character_reference: {
         image: referenceImage,
-        fidelity: 0.8,
-        include_style: true
+        strength: 0.1,
+        fidelity: 0.1,
+        mode: "character&style"
       },
       save_dir: "output/charref/"
     });
@@ -340,6 +340,63 @@ async function exampleCharacterReference() {
   }
 }
 
+async function exampleCharacterReferenceStyles() {
+  console.log("\n=== キャラクター参照モード比較 ===");
+
+  const client = new NovelAIClient();
+
+  const referenceImage = "reference/input.jpeg";
+  if (!fs.existsSync(referenceImage)) {
+    console.log(`参照画像が見つかりません: ${referenceImage}`);
+    return;
+  }
+
+  const modes = ["character", "character&style", "style"] as const;
+
+  for (const mode of modes) {
+    console.log(`\n--- mode: "${mode}" ---`);
+    try {
+      // style モードではキャラクター指定なし（use_coords: false の動作確認）
+      const characters: Schemas.CharacterConfig[] | undefined =
+        mode === "style"
+          ? undefined
+          : [
+            {
+              prompt: "1girl, standing",
+              center_x: 0.5,
+              center_y: 0.5,
+              negative_prompt: "",
+            },
+          ];
+
+      const result = await client.generate({
+        prompt: "school classroom, sunny day, detailed background",
+        characters,
+        character_reference: {
+          image: referenceImage,
+          strength: 0.6,
+          fidelity: 0.8,
+          mode,
+        },
+        save_dir: "output/charref/",
+      });
+
+      console.log(`✓ Generated: ${result.saved_path}`);
+      console.log(`  Seed: ${result.seed}`);
+      console.log(`  残りアンラス: ${result.anlas_remaining}`);
+    } catch (e) {
+      if (e instanceof ZodError) {
+        console.error("❌ バリデーションエラー:");
+        e.issues.forEach((issue) => {
+          console.error(`   - ${issue.path.join(".")}: ${issue.message}`);
+        });
+      } else {
+        console.error("Error:", e);
+      }
+    }
+  }
+}
+
 async function main() {
   console.log("=".repeat(50));
   console.log("NovelAI Unified Client 使用例 (TypeScript)");
@@ -347,7 +404,7 @@ async function main() {
 
   // 実行したい例のコメントを外してください
 
-  // exampleSimpleGenerate();
+  // await exampleSimpleGenerate();
 
   // await exampleWithVibes();
 
@@ -355,11 +412,13 @@ async function main() {
 
   // await exampleImg2imgWithVibes();
 
-  await exampleMultiCharacter();
+  // await exampleMultiCharacter();
 
   // await exampleEncodeVibe();
 
   // await exampleCharacterReference();
+
+  // await exampleCharacterReferenceStyles();
 
   console.log("\n使用したい例のコード内のコメントを外して実行してください。");
 }

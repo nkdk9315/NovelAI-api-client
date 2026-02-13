@@ -287,7 +287,7 @@ export class NovelAIClient {
         noise_schedule: validatedParams.noise_schedule,
         legacy_v3_extend: false,
         skip_cfg_above_sigma: null,
-        use_coords: true,
+        use_coords: false,
         legacy_uc: false,
         normalize_reference_strength_multiple: true,
         inpaintImg2ImgStrength: 1,
@@ -401,7 +401,6 @@ export class NovelAIClient {
     payload.parameters.director_reference_information_extracted = info_extracted;
     payload.parameters.director_reference_strength_values = strength_values;
     payload.parameters.director_reference_secondary_strength_values = secondary_strength_values;
-    payload.parameters.use_coords = true;
     payload.parameters.stream = "msgpack";
     payload.parameters.image_format = "png";
   }
@@ -512,18 +511,6 @@ export class NovelAIClient {
     
     if (charRefData) {
       this.applyCharRefParams(payload, charRefData);
-      // Ensure character prompts exist if using reference
-      if (charConfigs.length === 0) {
-        const dummyChar: Schemas.CharacterConfig = { 
-          prompt: validatedParams.prompt, 
-          center_x: 0.5, 
-          center_y: 0.5, 
-          negative_prompt: "" 
-        };
-        charConfigs = [dummyChar];
-        charCaptions = [Schemas.characterToCaptionDict(dummyChar)];
-        charNegativeCaptions = [Schemas.characterToNegativeCaptionDict(dummyChar)];
-      }
     }
 
     // Build prompt structures

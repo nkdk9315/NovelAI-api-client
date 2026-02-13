@@ -2,8 +2,13 @@
   "compilerOptions": {
     "target": "ES2020",
     "module": "commonjs",
-    "lib": ["ES2020", "DOM"],
-    "types": ["node"],
+    "lib": [
+      "ES2020",
+      "DOM"
+    ],
+    "types": [
+      "node"
+    ],
     "moduleResolution": "node",
     "baseUrl": ".",
     "declaration": true,
@@ -13,6 +18,12 @@
     "forceConsistentCasingInFileNames": true,
     "outDir": "./dist"
   },
-  "include": ["src/**/*", "example.ts"],
-  "exclude": ["node_modules", "**/*.test.ts"]
+  "include": [
+    "src/**/*",
+    "example.ts",
+    "tests/**/*"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

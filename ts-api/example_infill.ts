@@ -13,7 +13,7 @@ import path from 'path';
 dotenv.config();
 
 const client = new NovelAIClient();
-const INPUT_IMAGE = './reference/input.png';
+const INPUT_IMAGE = './reference/input.jpeg';
 const OUTPUT_DIR = './output/test/';
 
 // 出力ディレクトリ作成
@@ -53,14 +53,14 @@ async function testImg2Img() {
  */
 async function testInfillOnly() {
   console.log('\n=== Test: Infill (Mask Only) ===');
-  
+
   // 簡易マスク画像を作成（中央部分を白にする）
   const maskPath = path.join(OUTPUT_DIR, 'temp_mask.png');
-  
+
   // sharpがなければスキップ
   try {
     const sharp = (await import('sharp')).default;
-    
+
     // 832x1216 の画像、中央600x800を白、それ以外を黒
     const mask = await sharp({
       create: {
@@ -70,21 +70,21 @@ async function testInfillOnly() {
         background: { r: 0, g: 0, b: 0, alpha: 255 }
       }
     })
-    .composite([{
-      input: Buffer.from(
-        `<svg width="832" height="1216">
+      .composite([{
+        input: Buffer.from(
+          `<svg width="832" height="1216">
           <rect x="116" y="208" width="600" height="800" fill="white"/>
         </svg>`
-      ),
-      top: 0,
-      left: 0
-    }])
-    .png()
-    .toBuffer();
-    
+        ),
+        top: 0,
+        left: 0
+      }])
+      .png()
+      .toBuffer();
+
     fs.writeFileSync(maskPath, mask);
     console.log(`   Created temp mask: ${maskPath}`);
-    
+
     const result = await client.generate({
       prompt: '1girl, smiling, happy',
       action: 'infill',
@@ -98,7 +98,7 @@ async function testInfillOnly() {
     console.log('✅ Infill (Mask Only) success!');
     console.log(`   Saved to: ${result.saved_path}`);
     console.log(`   Anlas consumed: ${result.anlas_consumed}`);
-    
+
     // 一時ファイル削除
     fs.unlinkSync(maskPath);
     return true;
@@ -113,12 +113,12 @@ async function testInfillOnly() {
  */
 async function testInfillWithImg2Img() {
   console.log('\n=== Test: Infill + Img2Img (Hybrid Mode) ===');
-  
+
   const maskPath = path.join(OUTPUT_DIR, 'temp_mask_hybrid.png');
-  
+
   try {
     const sharp = (await import('sharp')).default;
-    
+
     // マスク画像作成
     const mask = await sharp({
       create: {
@@ -128,21 +128,21 @@ async function testInfillWithImg2Img() {
         background: { r: 0, g: 0, b: 0, alpha: 255 }
       }
     })
-    .composite([{
-      input: Buffer.from(
-        `<svg width="832" height="1216">
+      .composite([{
+        input: Buffer.from(
+          `<svg width="832" height="1216">
           <rect x="116" y="208" width="600" height="800" fill="white"/>
         </svg>`
-      ),
-      top: 0,
-      left: 0
-    }])
-    .png()
-    .toBuffer();
-    
+        ),
+        top: 0,
+        left: 0
+      }])
+      .png()
+      .toBuffer();
+
     fs.writeFileSync(maskPath, mask);
     console.log(`   Created temp mask: ${maskPath}`);
-    
+
     const result = await client.generate({
       prompt: '1girl, beautiful dress, elegant',
       action: 'infill',
@@ -158,7 +158,7 @@ async function testInfillWithImg2Img() {
     console.log('✅ Infill + Img2Img (Hybrid) success!');
     console.log(`   Saved to: ${result.saved_path}`);
     console.log(`   Anlas consumed: ${result.anlas_consumed}`);
-    
+
     // 一時ファイル削除
     fs.unlinkSync(maskPath);
     return true;
@@ -175,24 +175,24 @@ async function main() {
   console.log(`Input Image: ${INPUT_IMAGE}`);
   console.log(`Output Dir: ${OUTPUT_DIR}`);
   console.log('========================================');
-  
+
   // 入力画像存在チェック
   if (!fs.existsSync(INPUT_IMAGE)) {
     console.error(`❌ Input image not found: ${INPUT_IMAGE}`);
     process.exit(1);
   }
-  
+
   const results: { name: string; success: boolean }[] = [];
-  
+
   // Test 1: Img2Img
   results.push({ name: 'Img2Img', success: await testImg2Img() });
-  
+
   // Test 2: Infill (Mask Only)
   results.push({ name: 'Infill (Mask Only)', success: await testInfillOnly() });
-  
+
   // Test 3: Infill + Img2Img (Hybrid)
   results.push({ name: 'Infill + Img2Img', success: await testInfillWithImg2Img() });
-  
+
   // 結果サマリー
   console.log('\n========================================');
   console.log('Test Results Summary');
@@ -200,7 +200,7 @@ async function main() {
   for (const r of results) {
     console.log(`${r.success ? '✅' : '❌'} ${r.name}`);
   }
-  
+
   const failed = results.filter(r => !r.success).length;
   if (failed > 0) {
     console.log(`\n${failed} test(s) failed.`);

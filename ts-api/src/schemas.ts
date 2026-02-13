@@ -42,10 +42,13 @@ export function characterToNegativeCaptionDict(config: CharacterConfig) {
 // Image input can be string (path or base64) or Buffer
 const ImageInputSchema = z.union([z.string(), z.instanceof(Buffer)]);
 
+export const CHARREF_MODES = ["character", "character&style", "style"] as const;
+
 export const CharacterReferenceConfigSchema = z.object({
   image: ImageInputSchema,
+  strength: z.number().min(0.0).max(1.0).default(0.6),
   fidelity: z.number().min(0.0).max(1.0).default(1.0),
-  include_style: z.boolean().default(true),
+  mode: z.enum(CHARREF_MODES).default("character&style"),
 });
 
 export type CharacterReferenceConfig = z.infer<typeof CharacterReferenceConfigSchema>;

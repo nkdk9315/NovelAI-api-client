@@ -326,14 +326,14 @@ export async function processCharacterReferences(
     images.push(b64Image);
 
     // Style settings
-    const refType = ref.include_style ? "character&style" : "character";
+    const refType = ref.mode;
     descriptions.push({
       caption: { base_caption: refType, char_captions: [] },
       legacy_uc: false
     });
 
     info_extracted.push(1.0);
-    strength_values.push(1.0);
+    strength_values.push(ref.strength);
     secondary_strength_values.push(1.0 - ref.fidelity);
   }
 

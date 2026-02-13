@@ -182,3 +182,54 @@ describe('Model Key Map', () => {
     expect(Constants.MODEL_KEY_MAP['nai-diffusion-4-5-full']).toBe('v4-5full');
   });
 });
+
+// =============================================================================
+// Anlas Cost Constants Tests
+// =============================================================================
+describe('Anlas Cost Constants', () => {
+  it('should have valid Opus free conditions', () => {
+    expect(Constants.OPUS_FREE_PIXELS).toBe(1_048_576);
+    expect(Constants.OPUS_FREE_MAX_STEPS).toBe(28);
+    expect(Constants.OPUS_MIN_TIER).toBe(3);
+  });
+
+  it('should have valid per-image cost limits', () => {
+    expect(Constants.MAX_COST_PER_IMAGE).toBe(140);
+    expect(Constants.MIN_COST_PER_IMAGE).toBe(2);
+    expect(Constants.MIN_COST_PER_IMAGE).toBeLessThan(Constants.MAX_COST_PER_IMAGE);
+  });
+
+  it('should have valid Vibe cost constants', () => {
+    expect(Constants.VIBE_BATCH_PRICE).toBe(2);
+    expect(Constants.VIBE_FREE_THRESHOLD).toBe(4);
+    expect(Constants.VIBE_ENCODE_PRICE).toBe(2);
+  });
+
+  it('should have valid character reference cost', () => {
+    expect(Constants.CHAR_REF_PRICE).toBe(5);
+  });
+
+  it('should have valid V4 cost coefficients', () => {
+    expect(Constants.V4_COST_COEFF_LINEAR).toBeCloseTo(2.951823174884865e-6, 15);
+    expect(Constants.V4_COST_COEFF_STEP).toBeCloseTo(5.753298233447344e-7, 15);
+  });
+
+  it('should have valid Augment constants', () => {
+    expect(Constants.AUGMENT_FIXED_STEPS).toBe(28);
+    expect(Constants.AUGMENT_MIN_PIXELS).toBe(1_048_576);
+    expect(Constants.BG_REMOVAL_MULTIPLIER).toBe(3);
+    expect(Constants.BG_REMOVAL_ADDEND).toBe(5);
+  });
+
+  it('should have valid upscale cost table', () => {
+    expect(Constants.UPSCALE_COST_TABLE).toHaveLength(5);
+    expect(Constants.UPSCALE_COST_TABLE[0]).toEqual([1_048_576, 7]);
+    expect(Constants.UPSCALE_COST_TABLE[4]).toEqual([262_144, 1]);
+    expect(Constants.UPSCALE_OPUS_FREE_PIXELS).toBe(409_600);
+  });
+
+  it('should have valid grid size and inpaint threshold', () => {
+    expect(Constants.GRID_SIZE).toBe(64);
+    expect(Constants.INPAINT_THRESHOLD_RATIO).toBe(0.8);
+  });
+});

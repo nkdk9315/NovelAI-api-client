@@ -1,0 +1,23 @@
+/**
+ * ブラウザ用エントリーポイント
+ * anlas.ts の全エクスポート + 表示用定数を再エクスポート
+ */
+export * from './anlas';
+export {
+  V4_COST_COEFF_LINEAR,
+  V4_COST_COEFF_STEP,
+  OPUS_FREE_PIXELS,
+  MAX_PIXELS,
+  AUGMENT_MIN_PIXELS,
+  AUGMENT_FIXED_STEPS,
+  BG_REMOVAL_MULTIPLIER,
+  BG_REMOVAL_ADDEND,
+  UPSCALE_OPUS_FREE_PIXELS,
+  VIBE_ENCODE_PRICE,
+  CHAR_REF_PRICE,
+  VIBE_FREE_THRESHOLD,
+  INPAINT_THRESHOLD_RATIO,
+  GRID_SIZE,
+  MAX_COST_PER_IMAGE,
+  MIN_COST_PER_IMAGE,
+} from './constants';
