@@ -3,7 +3,6 @@ import * as zlib from 'zlib';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import he from 'he';
-import { Tokenizer } from 'tokenizers';
 import { MAX_TOKENS } from './constants';
 
 // Cache directory for tokenizer data (relative to project root)
@@ -30,7 +29,24 @@ export class TokenValidationError extends Error {
 
 // Singleton cache for tokenizers
 let cachedClipTokenizer: NovelAIClipTokenizer | null = null;
-let cachedT5Tokenizer: Tokenizer | null = null;
+let cachedT5Tokenizer: NovelAIT5Tokenizer | null = null;
+
+// Dynamic import for native tokenizer (tokenizers package)
+let nativeTokenizerModule: any = null;
+let nativeTokenizerUnavailable = false;
+
+async function tryLoadNativeTokenizer(): Promise<any> {
+    if (nativeTokenizerUnavailable) return null;
+    if (nativeTokenizerModule) return nativeTokenizerModule;
+    try {
+        nativeTokenizerModule = await import('tokenizers');
+        return nativeTokenizerModule;
+    } catch {
+        nativeTokenizerUnavailable = true;
+        console.warn('[NovelAI] Native tokenizer unavailable, using pure JS fallback');
+        return null;
+    }
+}
 
 // The initial vocabulary list from 9423.2de67be589ffa59d.js
 const INITIAL_VOCAB: string[] = [
@@ -382,27 +398,165 @@ export async function getClipTokenizer(forceRefresh = false): Promise<NovelAICli
     return cachedClipTokenizer;
 }
 
+// Abstraction for tokenizer backends (native vs pure JS)
+interface TokenizerBackend {
+    encode(text: string): Promise<number[]> | number[];
+    tokenToId(token: string): number | null;
+}
+
+/**
+ * Pure JavaScript Unigram tokenizer implementation.
+ * Used as a fallback when the native `tokenizers` package is unavailable
+ * (e.g., macOS Apple Silicon where tokenizers-darwin-arm64 is not published).
+ *
+ * Implements:
+ * - NFKC normalization (approximation of Precompiled normalizer)
+ * - WhitespaceSplit + Metaspace pre-tokenization
+ * - Viterbi algorithm for optimal Unigram segmentation
+ */
+export class PureJSUnigram implements TokenizerBackend {
+    private vocab: Map<string, number>;      // piece → log score
+    private pieceToId: Map<string, number>;  // piece → token ID
+    private unkId: number;
+    private unkScore: number;
+    private maxPieceLength: number;
+
+    constructor(vocabEntries: [string, number][], unkId: number) {
+        this.unkId = unkId;
+        this.vocab = new Map();
+        this.pieceToId = new Map();
+        this.maxPieceLength = 0;
+
+        let minScore = 0;
+        for (let i = 0; i < vocabEntries.length; i++) {
+            const [piece, score] = vocabEntries[i];
+            this.vocab.set(piece, score);
+            this.pieceToId.set(piece, i);
+            if (piece.length > this.maxPieceLength) {
+                this.maxPieceLength = piece.length;
+            }
+            if (score !== 0 && score < minScore) {
+                minScore = score;
+            }
+        }
+
+        // SentencePiece uses min_score - kUnkPenalty (10.0) for unknown characters
+        this.unkScore = minScore - 10;
+    }
+
+    /**
+     * Encode text into token IDs using Unigram model with Viterbi algorithm.
+     * Pre-tokenization: NFKC normalize → WhitespaceSplit → Metaspace (▁ prefix)
+     */
+    encode(text: string): number[] {
+        // 1. NFKC normalization (approximation of Precompiled normalizer)
+        const normalized = text.normalize('NFKC');
+
+        // 2. WhitespaceSplit: split on whitespace
+        const pieces = normalized.split(/\s+/).filter(p => p.length > 0);
+        if (pieces.length === 0) return [];
+
+        // 3. Metaspace: prepend ▁ to each piece (add_prefix_space: true)
+        const metaspaced = pieces.map(p => '\u2581' + p);
+
+        // 4. Viterbi on each metaspaced piece
+        const ids: number[] = [];
+        for (const piece of metaspaced) {
+            const pieceIds = this.viterbi(piece);
+            ids.push(...pieceIds);
+        }
+
+        return ids;
+    }
+
+    /**
+     * Viterbi algorithm for optimal Unigram segmentation.
+     * Finds the highest-scoring segmentation of the input text into vocab pieces.
+     */
+    private viterbi(text: string): number[] {
+        const len = text.length;
+        if (len === 0) return [];
+
+        // best[i] = { score, prev } for position i (characters 0..i processed)
+        const best: Array<{ score: number; prev: number }> = new Array(len + 1);
+        best[0] = { score: 0, prev: -1 };
+
+        for (let i = 1; i <= len; i++) {
+            best[i] = { score: -Infinity, prev: 0 };
+
+            for (let l = 1; l <= Math.min(this.maxPieceLength, i); l++) {
+                const substr = text.substring(i - l, i);
+                const score = this.vocab.get(substr);
+
+                if (score !== undefined) {
+                    const candidate = best[i - l].score + score;
+                    if (candidate > best[i].score) {
+                        best[i] = { score: candidate, prev: i - l };
+                    }
+                }
+            }
+
+            // If no vocab match found, single char fallback to unk
+            if (best[i].score === -Infinity) {
+                best[i] = { score: best[i - 1].score + this.unkScore, prev: i - 1 };
+            }
+        }
+
+        // Backtrack to recover pieces
+        const pieces: string[] = [];
+        let pos = len;
+        while (pos > 0) {
+            const prev = best[pos].prev;
+            pieces.push(text.substring(prev, pos));
+            pos = prev;
+        }
+        pieces.reverse();
+
+        // Convert pieces to token IDs
+        return pieces.map(p => this.pieceToId.get(p) ?? this.unkId);
+    }
+
+    tokenToId(token: string): number | null {
+        return this.pieceToId.get(token) ?? null;
+    }
+}
+
 export class NovelAIT5Tokenizer {
     private eosTokenId: number;
+    private backend: TokenizerBackend;
 
-    // Private constructor - use static create() method instead
-    private constructor(private tokenizer: Tokenizer, eosTokenId: number) {
+    private constructor(backend: TokenizerBackend, eosTokenId: number) {
+        this.backend = backend;
         this.eosTokenId = eosTokenId;
     }
 
     /**
-     * Create a new NovelAIT5Tokenizer instance.
-     * Use this instead of constructor to ensure proper async initialization.
+     * Create from native `tokenizers` package.
      */
-    static async create(tokenizer: Tokenizer): Promise<NovelAIT5Tokenizer> {
-        const eosTokenId = await ensureEosTokenId(tokenizer);
-        return new NovelAIT5Tokenizer(tokenizer, eosTokenId);
+    static createFromNative(tokenizer: any): NovelAIT5Tokenizer {
+        const eosId = tokenizer.tokenToId("</s>") ?? 1;
+        const backend: TokenizerBackend = {
+            encode: async (text: string) => {
+                const encoding = await tokenizer.encode(text);
+                return Array.from(encoding.getIds());
+            },
+            tokenToId: (token: string) => tokenizer.tokenToId(token) ?? null,
+        };
+        return new NovelAIT5Tokenizer(backend, eosId);
+    }
+
+    /**
+     * Create from pure JS Unigram fallback.
+     */
+    static createFromPureJS(pureJS: PureJSUnigram): NovelAIT5Tokenizer {
+        const eosId = pureJS.tokenToId("</s>") ?? 1;
+        return new NovelAIT5Tokenizer(pureJS, eosId);
     }
 
     /**
      * Encode text using official NovelAI T5 logic.
      * Returns the full token array INCLUDING EOS (for model input).
-     * 
+     *
      * For display purposes (matching official site), use countTokens() instead.
      */
     public async encode(text: string): Promise<number[]> {
@@ -414,9 +568,8 @@ export class NovelAIT5Tokenizer {
         // 2. Preprocess
         const processed = preprocessT5(text);
 
-        // 3. Encode
-        const encoding = await this.tokenizer.encode(processed);
-        const ids = Array.from(encoding.getIds());
+        // 3. Encode via backend
+        const ids = Array.from(await this.backend.encode(processed));
 
         // 4. Append EOS
         ids.push(this.eosTokenId);
@@ -427,7 +580,7 @@ export class NovelAIT5Tokenizer {
     /**
      * Count tokens matching official NovelAI UI display.
      * Returns token count EXCLUDING EOS token.
-     * 
+     *
      * This is what the NovelAI website shows in the token counter.
      */
     public async countTokens(text: string): Promise<number> {
@@ -437,30 +590,39 @@ export class NovelAIT5Tokenizer {
     }
 }
 
-async function ensureEosTokenId(tokenizer: Tokenizer): Promise<number> {
-    // Try standard T5 EOS token
-    const id = tokenizer.tokenToId("</s>");
-    if (id !== null && id !== undefined) return id;
-    
-    // Fallback: T5 standard EOS token ID is 1
-    return 1;
-}
-
 export async function getT5Tokenizer(forceRefresh = false): Promise<NovelAIT5Tokenizer> {
     if (cachedT5Tokenizer && !forceRefresh) {
-        return NovelAIT5Tokenizer.create(cachedT5Tokenizer);
+        return cachedT5Tokenizer;
     }
-    
+
     const tokenUrl = "https://novelai.net/tokenizer/compressed/t5_tokenizer.def?v=2&static=true";
     const dataStr = await fetchData(tokenUrl, forceRefresh);
-    
-    try {
-        cachedT5Tokenizer = await Tokenizer.fromString(dataStr);
-    } catch (error) {
-        throw new TokenizerError('Failed to initialize T5 tokenizer from data', error);
+
+    // Try native tokenizer first
+    const nativeMod = await tryLoadNativeTokenizer();
+    if (nativeMod) {
+        try {
+            const tokenizer = await nativeMod.Tokenizer.fromString(dataStr);
+            cachedT5Tokenizer = NovelAIT5Tokenizer.createFromNative(tokenizer);
+            return cachedT5Tokenizer;
+        } catch (error) {
+            console.warn('[NovelAI] Native tokenizer fromString failed, falling back to pure JS:', error);
+        }
     }
-    
-    return NovelAIT5Tokenizer.create(cachedT5Tokenizer);
+
+    // Fallback: Pure JS Unigram
+    let json: any;
+    try {
+        json = JSON.parse(dataStr);
+    } catch (error) {
+        throw new TokenizerError('Failed to parse T5 tokenizer data as JSON', error);
+    }
+
+    const vocab: [string, number][] = json.model.vocab;
+    const unkId: number = json.model.unk_id;
+    const pureJS = new PureJSUnigram(vocab, unkId);
+    cachedT5Tokenizer = NovelAIT5Tokenizer.createFromPureJS(pureJS);
+    return cachedT5Tokenizer;
 }
 
 /**
@@ -512,6 +674,8 @@ export async function validateTokenCount(text: string): Promise<number> {
 export function clearTokenizerCache(): void {
     cachedClipTokenizer = null;
     cachedT5Tokenizer = null;
+    nativeTokenizerModule = null;
+    nativeTokenizerUnavailable = false;
 }
 
 // Main module check (CommonJS)

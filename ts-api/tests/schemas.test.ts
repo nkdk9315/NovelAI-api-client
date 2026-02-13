@@ -72,16 +72,34 @@ describe('CharacterReferenceConfigSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('should apply defaults for fidelity and include_style', () => {
+  it('should apply defaults for strength, fidelity and mode', () => {
     const config = { image: 'test.png' };
     const result = Schemas.CharacterReferenceConfigSchema.parse(config);
+    expect(result.strength).toBe(0.6);
     expect(result.fidelity).toBe(1.0);
-    expect(result.include_style).toBe(true);
+    expect(result.mode).toBe('character&style');
   });
 
   it('should reject fidelity outside 0-1 range', () => {
     expect(Schemas.CharacterReferenceConfigSchema.safeParse({ image: 'test.png', fidelity: -0.1 }).success).toBe(false);
     expect(Schemas.CharacterReferenceConfigSchema.safeParse({ image: 'test.png', fidelity: 1.1 }).success).toBe(false);
+  });
+
+  it('should reject strength outside 0-1 range', () => {
+    expect(Schemas.CharacterReferenceConfigSchema.safeParse({ image: 'test.png', strength: -0.1 }).success).toBe(false);
+    expect(Schemas.CharacterReferenceConfigSchema.safeParse({ image: 'test.png', strength: 1.1 }).success).toBe(false);
+  });
+
+  it('should accept all valid modes', () => {
+    for (const mode of Schemas.CHARREF_MODES) {
+      const result = Schemas.CharacterReferenceConfigSchema.safeParse({ image: 'test.png', mode });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it('should reject invalid mode', () => {
+    const result = Schemas.CharacterReferenceConfigSchema.safeParse({ image: 'test.png', mode: 'invalid' });
+    expect(result.success).toBe(false);
   });
 });
 

@@ -18,6 +18,7 @@ vi.mock('tokenizers', () => ({
 
 import {
     NovelAIClipTokenizer,
+    PureJSUnigram,
     preprocessT5,
     clearTokenizerCache,
     TokenizerError,
@@ -277,6 +278,184 @@ describe('clearTokenizerCache', () => {
         clearTokenizerCache();
         clearTokenizerCache();
         // Should not throw
+    });
+});
+
+// =============================================================================
+// PureJSUnigram Tests
+// =============================================================================
+describe('PureJSUnigram', () => {
+    // Minimal test vocab:
+    //  0: <pad>    (score 0, special)
+    //  1: </s>     (score 0, special / EOS)
+    //  2: <unk>    (score 0, special)
+    //  3: ▁        (score -2.0)
+    //  4: ▁hello   (score -5.0)
+    //  5: ▁world   (score -5.5)
+    //  6: ▁he      (score -6.0)
+    //  7: llo      (score -6.0)
+    //  8: wor      (score -7.0)
+    //  9: ld       (score -7.0)
+    // 10: h        (score -8.0)
+    // 11: e        (score -8.0)
+    // 12: l        (score -8.0)
+    // 13: o        (score -8.0)
+    // 14: w        (score -8.0)
+    // 15: r        (score -8.0)
+    // 16: d        (score -8.0)
+    // 17: ,        (score -4.0)
+    // 18: ▁,       (score -3.5)
+    const MINI_VOCAB: [string, number][] = [
+        ['<pad>', 0],
+        ['</s>', 0],
+        ['<unk>', 0],
+        ['\u2581', -2.0],
+        ['\u2581hello', -5.0],
+        ['\u2581world', -5.5],
+        ['\u2581he', -6.0],
+        ['llo', -6.0],
+        ['wor', -7.0],
+        ['ld', -7.0],
+        ['h', -8.0],
+        ['e', -8.0],
+        ['l', -8.0],
+        ['o', -8.0],
+        ['w', -8.0],
+        ['r', -8.0],
+        ['d', -8.0],
+        [',', -4.0],
+        ['\u2581,', -3.5],
+    ];
+    const UNK_ID = 2;
+
+    let tokenizer: PureJSUnigram;
+
+    beforeAll(() => {
+        tokenizer = new PureJSUnigram(MINI_VOCAB, UNK_ID);
+    });
+
+    describe('constructor', () => {
+        it('should create a PureJSUnigram instance', () => {
+            expect(tokenizer).toBeInstanceOf(PureJSUnigram);
+        });
+    });
+
+    describe('tokenToId()', () => {
+        it('should return correct ID for known tokens', () => {
+            expect(tokenizer.tokenToId('</s>')).toBe(1);
+            expect(tokenizer.tokenToId('<unk>')).toBe(2);
+            expect(tokenizer.tokenToId('\u2581hello')).toBe(4);
+        });
+
+        it('should return null for unknown tokens', () => {
+            expect(tokenizer.tokenToId('nonexistent')).toBeNull();
+        });
+    });
+
+    describe('encode()', () => {
+        it('should return an array of numbers', () => {
+            const result = tokenizer.encode('hello');
+            expect(Array.isArray(result)).toBe(true);
+            result.forEach(id => {
+                expect(typeof id).toBe('number');
+            });
+        });
+
+        it('should return empty array for empty string', () => {
+            expect(tokenizer.encode('')).toEqual([]);
+        });
+
+        it('should return empty array for whitespace only', () => {
+            expect(tokenizer.encode('   ')).toEqual([]);
+        });
+
+        it('should prefer longer matching pieces (Viterbi)', () => {
+            // "hello" → pre-tokenized as "▁hello"
+            // ▁hello (id=4, score=-5.0) is better than ▁he+llo (score=-12.0) or ▁+h+e+l+l+o
+            const result = tokenizer.encode('hello');
+            expect(result).toEqual([4]); // ▁hello
+        });
+
+        it('should handle multiple words', () => {
+            // "hello world" → WhitespaceSplit → ["hello", "world"]
+            // → Metaspace → ["▁hello", "▁world"]
+            // → Viterbi: ▁hello(4), ▁world(5)
+            const result = tokenizer.encode('hello world');
+            expect(result).toEqual([4, 5]);
+        });
+
+        it('should use unk for characters not in vocab', () => {
+            // "xyz" → "▁xyz"
+            // ▁ is in vocab, but x,y,z are not → unk for each unknown char
+            const result = tokenizer.encode('xyz');
+            // ▁ (id=3) then x→unk(2), y→unk(2), z→unk(2)
+            expect(result).toContain(UNK_ID);
+        });
+
+        it('should handle mixed spaces and text', () => {
+            // Multiple spaces are collapsed by WhitespaceSplit
+            const result1 = tokenizer.encode('hello   world');
+            const result2 = tokenizer.encode('hello world');
+            expect(result1).toEqual(result2);
+        });
+    });
+});
+
+// =============================================================================
+// PureJSUnigram with real T5 vocab (if cached file available)
+// =============================================================================
+describe('PureJSUnigram with real T5 vocab', () => {
+    let tokenizer: PureJSUnigram | null = null;
+
+    beforeAll(async () => {
+        const fs = await import('fs/promises');
+        const path = await import('path');
+        const cachePath = path.join(__dirname, '..', '.cache', 'tokenizers', 't5_tokenizer_v2.json');
+        try {
+            const data = await fs.readFile(cachePath, 'utf-8');
+            const json = JSON.parse(data);
+            tokenizer = new PureJSUnigram(json.model.vocab, json.model.unk_id);
+        } catch {
+            // Cache file not available, skip tests
+        }
+    });
+
+    it('should tokenize simple English text', () => {
+        if (!tokenizer) return;
+        const ids = tokenizer.encode('hello world');
+        expect(ids.length).toBeGreaterThan(0);
+        // All IDs should be non-negative integers
+        ids.forEach(id => {
+            expect(id).toBeGreaterThanOrEqual(0);
+            expect(Number.isInteger(id)).toBe(true);
+        });
+    });
+
+    it('should tokenize NovelAI-style prompts', () => {
+        if (!tokenizer) return;
+        const ids = tokenizer.encode('1girl, beautiful, masterpiece, best quality');
+        expect(ids.length).toBeGreaterThan(0);
+    });
+
+    it('should resolve </s> EOS token to ID 1', () => {
+        if (!tokenizer) return;
+        expect(tokenizer.tokenToId('</s>')).toBe(1);
+    });
+
+    it('should resolve <unk> token to ID 2', () => {
+        if (!tokenizer) return;
+        expect(tokenizer.tokenToId('<unk>')).toBe(2);
+    });
+
+    it('should handle empty string', () => {
+        if (!tokenizer) return;
+        expect(tokenizer.encode('')).toEqual([]);
+    });
+
+    it('should handle Japanese text (CJK characters)', () => {
+        if (!tokenizer) return;
+        const ids = tokenizer.encode('美しい少女');
+        expect(ids.length).toBeGreaterThan(0);
     });
 });
 

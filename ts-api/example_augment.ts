@@ -16,7 +16,7 @@ const OUTPUT_DIR = path.join(__dirname, 'output', 'augment');
 
 async function main() {
   const client = new NovelAIClient();
-  
+
   // アンラス残高を確認
   const balance = await client.getAnlasBalance();
   console.log(`\n📊 現在のアンラス残高: ${balance.total}`);
@@ -29,7 +29,7 @@ async function main() {
   try {
     const colorizeResult = await client.augmentImage({
       req_type: "colorize",
-      image: path.join(__dirname, 'reference', 'sample_mono.png'),  // モノクロ画像
+      image: path.join(__dirname, 'reference', 'input.jpeg'),  // モノクロ画像
       // width/height は自動検出
       prompt: "vibrant colors, detailed shading",  // カラー化のヒント
       defry: 3,  // 中程度の変更 (0=最強, 5=最弱)
@@ -45,19 +45,19 @@ async function main() {
   // 2. 表情変換 (emotion)
   // =====================================================
   console.log('\n😊 表情変換テスト...');
-  
+
   // 利用可能な表情キーワード:
   // neutral, happy, sad, angry, scared, surprised, tired, excited,
   // nervous, thinking, confused, shy, disgusted, smug, bored,
   // laughing, irritated, aroused, embarrassed, love, worried,
   // determined, hurt, playful
-  
+
   try {
     const emotionResult = await client.augmentImage({
       req_type: "emotion",
-      image: path.join(__dirname, 'reference', 'sample_face.png'),  // 顔画像
+      image: path.join(__dirname, 'reference', 'input.jpeg'),  // 顔画像
       // width/height は自動検出
-      prompt: "happy;;",  // 表情キーワード（末尾に;;が必要）
+      prompt: "happy",  // 表情キーワード
       defry: 0,  // 最強の変更
       save_dir: OUTPUT_DIR,
     });
@@ -74,7 +74,7 @@ async function main() {
   try {
     const sketchResult = await client.augmentImage({
       req_type: "sketch",
-      image: path.join(__dirname, 'reference', 'sample.png'),
+      image: path.join(__dirname, 'reference', 'input.jpeg'),
       // width/height は自動検出
       save_dir: OUTPUT_DIR,
     });
@@ -91,7 +91,7 @@ async function main() {
   try {
     const lineartResult = await client.augmentImage({
       req_type: "lineart",
-      image: path.join(__dirname, 'reference', 'sample.png'),
+      image: path.join(__dirname, 'reference', 'input.jpeg'),
       // width/height は自動検出
       save_dir: OUTPUT_DIR,
     });
@@ -108,7 +108,7 @@ async function main() {
   try {
     const declutterResult = await client.augmentImage({
       req_type: "declutter",
-      image: path.join(__dirname, 'reference', 'sample.png'),
+      image: path.join(__dirname, 'reference', 'input.jpeg'),
       // width/height は自動検出
       save_dir: OUTPUT_DIR,
     });
@@ -125,7 +125,7 @@ async function main() {
   try {
     const bgRemovalResult = await client.augmentImage({
       req_type: "bg-removal",
-      image: path.join(__dirname, 'reference', 'sample.png'),
+      image: path.join(__dirname, 'reference', 'input.jpeg'),
       // width/height は自動検出
       save_dir: OUTPUT_DIR,
     });
@@ -141,7 +141,7 @@ async function main() {
   console.log('\n🔍 アップスケールテスト（⚠️ 常にアンラス消費）...');
   try {
     const upscaleResult = await client.upscaleImage({
-      image: path.join(__dirname, 'reference', 'sample.png'),
+      image: path.join(__dirname, 'reference', 'input.jpeg'),
       // width/height は自動検出
       scale: 4,  // 4倍拡大 (2 or 4)
       save_dir: OUTPUT_DIR,

@@ -164,3 +164,55 @@ export const ENHANCE_LEVEL_PRESETS = {
 } as const;
 
 export type EnhanceLevel = keyof typeof ENHANCE_LEVEL_PRESETS;
+
+
+// =============================================================================
+// Anlas コスト計算定数
+// =============================================================================
+
+// Opus無料条件
+export const OPUS_FREE_PIXELS = 1_048_576;        // 1024×1024
+export const OPUS_FREE_MAX_STEPS = 28;
+export const OPUS_MIN_TIER = 3;
+
+// 1枚あたりコスト制限
+export const MAX_COST_PER_IMAGE = 140;
+export const MIN_COST_PER_IMAGE = 2;
+
+// グリッドサイズ（Inpaint用）
+export const GRID_SIZE = 64;
+
+// Vibeコスト
+export const VIBE_BATCH_PRICE = 2;
+export const VIBE_FREE_THRESHOLD = 4;
+export const VIBE_ENCODE_PRICE = 2;
+
+// キャラクター参照コスト
+export const CHAR_REF_PRICE = 5;
+
+// Inpaint閾値
+export const INPAINT_THRESHOLD_RATIO = 0.8;
+
+// V4コスト計算係数
+export const V4_COST_COEFF_LINEAR = 2.951823174884865e-6;
+export const V4_COST_COEFF_STEP = 5.753298233447344e-7;
+
+// Augment固定パラメータ
+export const AUGMENT_FIXED_STEPS = 28;
+export const AUGMENT_MIN_PIXELS = 1_048_576;
+
+// 背景削除特別計算
+export const BG_REMOVAL_MULTIPLIER = 3;
+export const BG_REMOVAL_ADDEND = 5;
+
+// アップスケールコストテーブル [最大ピクセル数, コスト]
+export const UPSCALE_COST_TABLE: ReadonlyArray<readonly [number, number]> = [
+  [1_048_576, 7],
+  [786_432, 5],
+  [524_288, 3],
+  [409_600, 2],
+  [262_144, 1],
+] as const;
+
+// アップスケールOpus無料ピクセル上限
+export const UPSCALE_OPUS_FREE_PIXELS = 409_600;

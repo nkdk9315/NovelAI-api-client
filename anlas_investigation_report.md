@@ -51,7 +51,18 @@ While the *call site* of the pricing function was successfully identified, the *
 *   **Sampler:** Does not affect cost.
 *   **Model:** V4.5 (latest).
 
-## Recommendation for Future Work
-To extract the exact pricing formula (e.g., `(width * height / C1) * steps / C2`), one would need to:
-1.  Locate the file containing the definition of webpack module `27868`.
-2.  Reverse engineer the `t1` function within that module.
+## Resolution
+
+**This investigation has been completed.** The full pricing formula was extracted and documented in [`anlas_cost_calculation_analysis.md`](./anlas_cost_calculation_analysis.md).
+
+The function `t1` (export name) was found to be the **Opus free check** function (`eW` in minified code), not the cost calculator itself. The actual cost calculation function is `eX` (export name `GI`), located in the updated `_app-3519e562baaa896c.js` chunk at position ~879060.
+
+### Key Formula (V4/V4.5 models)
+
+```
+baseCost = ⌈ 2.951823174884865×10⁻⁶ × W×H + 5.753298233447344×10⁻⁷ × W×H × steps ⌉
+perImageCost = baseCost × smMultiplier × strengthMultiplier
+totalCost = perImageCost × (n_samples - opusFreeDiscount) + additionalCosts
+```
+
+See the full analysis document for complete details including Augment tools, Vibe costs, and character reference costs.

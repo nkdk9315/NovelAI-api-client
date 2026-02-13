@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NovelAI Anlas Calculator</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #13111c;
+  --bg-card: #1c1a2e;
+  --bg-input: #252336;
+  --border: #3a3555;
+  --text: #e4e2f0;
+  --text-dim: #9895b0;
+  --accent: #7c6bf0;
+  --accent-hover: #9585ff;
+  --green: #4ade80;
+  --red: #f87171;
+  --amber: #fbbf24;
+  --radius: 8px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+.container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+
+h1 { font-size: 1.4rem; font-weight: 600; margin-bottom: 4px; }
+h1 span { color: var(--accent); }
+.subtitle { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 16px; }
+
+/* Tabs */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.tab {
+  padding: 8px 20px; cursor: pointer; border: none; background: none;
+  color: var(--text-dim); font-size: 0.9rem; border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Layout */
+.two-col { display: grid; grid-template-columns: 380px 1fr; gap: 20px; }
+@media (max-width: 860px) { .two-col { grid-template-columns: 1fr; } }
+
+/* Cards */
+.card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px; margin-bottom: 12px;
+}
+.card-title { font-size: 0.8rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; }
+
+/* Form */
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 0.82rem; color: var(--text-dim); margin-bottom: 4px; }
+.field input[type="number"], .field select {
+  width: 100%; padding: 7px 10px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text); font-size: 0.9rem; outline: none;
+}
+.field input:focus, .field select:focus { border-color: var(--accent); }
+.field-row { display: flex; gap: 10px; }
+.field-row .field { flex: 1; }
+.field-hint { font-size: 0.75rem; color: var(--text-dim); margin-top: 2px; }
+.field-warn { font-size: 0.75rem; color: var(--amber); margin-top: 2px; }
+
+/* Range */
+.range-wrap { display: flex; align-items: center; gap: 10px; }
+.range-wrap input[type="range"] { flex: 1; accent-color: var(--accent); }
+.range-val {
+  min-width: 44px; text-align: center; padding: 4px 8px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: 0.85rem; font-variant-numeric: tabular-nums;
+}
+
+/* Radio group */
+.radio-group { display: flex; gap: 6px; flex-wrap: wrap; }
+.radio-group label {
+  padding: 5px 14px; border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: 0.82rem; cursor: pointer; transition: all 0.15s; color: var(--text-dim);
+}
+.radio-group input { display: none; }
+.radio-group input:checked + label { border-color: var(--accent); color: var(--accent); background: rgba(124,107,240,0.1); }
+
+/* Result displays */
+.result-total {
+  text-align: center; padding: 20px; font-size: 2.2rem; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.result-total small { display: block; font-size: 0.75rem; font-weight: 400; color: var(--text-dim); }
+.result-total .unit { font-size: 1rem; color: var(--text-dim); font-weight: 400; }
+
+.badge {
+  display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.78rem; font-weight: 600;
+}
+.badge-free { background: rgba(74,222,128,0.15); color: var(--green); }
+.badge-paid { background: rgba(248,113,113,0.15); color: var(--red); }
+.badge-error { background: rgba(248,113,113,0.2); color: var(--red); }
+
+.check-list { list-style: none; font-size: 0.85rem; }
+.check-list li { padding: 2px 0; }
+.check-list .pass::before { content: "\2713 "; color: var(--green); }
+.check-list .fail::before { content: "\2717 "; color: var(--red); }
+
+/* Formula display */
+.formula {
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 14px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem;
+  line-height: 1.7; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+}
+.formula .dim { color: var(--text-dim); }
+.formula .val { color: var(--accent); }
+.formula .res { color: var(--green); font-weight: 600; }
+.formula .err { color: var(--red); font-weight: 600; }
+
+/* Disabled overlay */
+.disabled-section { opacity: 0.4; pointer-events: none; position: relative; }
+
+/* Test results */
+.test-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.test-table th, .test-table td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; }
+.test-table th { background: var(--bg-input); color: var(--text-dim); font-weight: 500; }
+.test-pass { color: var(--green); }
+.test-fail { color: var(--red); font-weight: 600; }
+
+/* Reference tables */
+.ref-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin: 10px 0; }
+.ref-table th, .ref-table td { padding: 6px 10px; border: 1px solid var(--border); }
+.ref-table th { background: var(--bg-input); color: var(--text-dim); text-align: left; }
+
+.section-title { font-size: 1rem; font-weight: 600; margin: 16px 0 8px; }
+
+/* Conditional visibility */
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1><span>NovelAI</span> Anlas Calculator</h1>
+<p class="subtitle">anlas_cost_calculation_analysis.md に基づく消費計算検証ツール</p>
+
+<div class="tabs">
+  <button class="tab active" data-tab="gen">画像生成</button>
+  <button class="tab" data-tab="augment">Augment ツール</button>
+  <button class="tab" data-tab="ref">リファレンス / 検証</button>
+</div>
+
+<!-- ========== Tab 1: Image Generation ========== -->
+<div id="tab-gen" class="tab-content active">
+<div class="two-col">
+<div class="inputs-col">
+
+  <div class="card">
+    <div class="card-title">画像サイズ</div>
+    <div class="field">
+      <label>プリセット</label>
+      <select id="preset">
+        <option value="832,1216">832 x 1216 (デフォルト縦)</option>
+        <option value="1216,832">1216 x 832 (デフォルト横)</option>
+        <option value="1024,1024">1024 x 1024 (正方形)</option>
+        <option value="768,1360">768 x 1360 (縦長)</option>
+        <option value="1360,768">1360 x 768 (横長)</option>
+        <option value="1536,1024">1536 x 1024 (ワイド)</option>
+        <option value="1024,1536">1024 x 1536 (トール)</option>
+        <option value="2048,1536">2048 x 1536 (最大)</option>
+        <option value="custom">カスタム</option>
+      </select>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Width</label>
+        <input type="number" id="width" value="832" min="64" max="2048" step="64">
+      </div>
+      <div class="field">
+        <label>Height</label>
+        <input type="number" id="height" value="1216" min="64" max="2048" step="64">
+      </div>
+    </div>
+    <div class="field-hint" id="pixel-info">1,011,712 px</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">生成パラメータ</div>
+    <div class="field">
+      <label>Steps: <span id="steps-val">23</span></label>
+      <div class="range-wrap">
+        <input type="range" id="steps" min="1" max="50" value="23">
+      </div>
+    </div>
+    <div class="field">
+      <label>SMEA</label>
+      <div class="radio-group">
+        <input type="radio" name="smea" id="smea-off" value="off" checked>
+        <label for="smea-off">Off (x1.0)</label>
+        <input type="radio" name="smea" id="smea-on" value="smea">
+        <label for="smea-on">SMEA (x1.2)</label>
+        <input type="radio" name="smea" id="smea-dyn" value="smea_dyn">
+        <label for="smea-dyn">SMEA+Dyn (x1.4)</label>
+      </div>
+    </div>
+    <div class="field">
+      <label>生成モード</label>
+      <div class="radio-group">
+        <input type="radio" name="mode" id="mode-txt" value="txt2img" checked>
+        <label for="mode-txt">txt2img</label>
+        <input type="radio" name="mode" id="mode-img" value="img2img">
+        <label for="mode-img">img2img</label>
+        <input type="radio" name="mode" id="mode-inp" value="inpaint">
+        <label for="mode-inp">inpaint</label>
+      </div>
+    </div>
+    <div class="field hidden" id="strength-field">
+      <label>Strength: <span id="strength-val">0.62</span></label>
+      <div class="range-wrap">
+        <input type="range" id="strength" min="0.01" max="1.0" step="0.01" value="0.62">
+      </div>
+    </div>
+    <div class="field">
+      <label>生成枚数 (n_samples)</label>
+      <div class="range-wrap">
+        <input type="range" id="nsamples" min="1" max="4" value="1">
+        <span class="range-val" id="nsamples-val">1</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">サブスクリプション</div>
+    <div class="field">
+      <label>ティア</label>
+      <select id="tier">
+        <option value="0">Free (Tier 0)</option>
+        <option value="1">Tablet (Tier 1)</option>
+        <option value="2">Scroll (Tier 2)</option>
+        <option value="3" selected>Opus (Tier 3)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">キャラクター参照</div>
+    <div class="field">
+      <label>参照数</label>
+      <input type="number" id="charref" value="0" min="0" max="6">
+    </div>
+  </div>
+
+  <div class="card" id="vibe-card">
+    <div class="card-title">Vibe Transfer</div>
+    <div id="vibe-disabled-msg" class="field-warn hidden">キャラ参照使用中またはinpaintモードのため無効</div>
+    <div id="vibe-fields">
+      <div class="field-row">
+        <div class="field">
+          <label>有効Vibe数</label>
+          <input type="number" id="vibe-count" value="0" min="0" max="10">
+        </div>
+        <div class="field">
+          <label>未エンコード数 (キャッシュなし)</label>
+          <input type="number" id="vibe-unencoded" value="0" min="0" max="10">
+        </div>
+      </div>
+      <div class="field-hint">5個以上で追加コスト: (N-4) x 2 Anlas</div>
+    </div>
+  </div>
+
+  <div class="card hidden" id="inpaint-card">
+    <div class="card-title">Inpaint マスクサイズ補正</div>
+    <div class="field-row">
+      <div class="field">
+        <label>マスク幅 (px)</label>
+        <input type="number" id="mask-w" value="512" min="64" step="8">
+      </div>
+      <div class="field">
+        <label>マスク高さ (px)</label>
+        <input type="number" id="mask-h" value="512" min="64" step="8">
+      </div>
+    </div>
+    <div class="field-hint">mask_width x 8, mask_height x 8 の値を入力</div>
+    <div id="inpaint-correction" class="formula" style="margin-top:8px;"></div>
+  </div>
+
+</div><!-- inputs-col -->
+
+<div class="results-col">
+
+  <div class="card">
+    <div class="result-total" id="total-display">
+      <small>合計コスト</small>
+      <span id="total-cost">0</span> <span class="unit">Anlas</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Opus 無料判定</div>
+    <div id="opus-badge" style="margin-bottom:8px;"></div>
+    <ul class="check-list" id="opus-checks"></ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">1枚あたりコスト計算</div>
+    <div class="formula" id="per-image-formula"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">生成コスト</div>
+    <div class="formula" id="gen-cost-formula"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">追加コスト</div>
+    <div class="formula" id="additional-formula"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">コスト内訳</div>
+    <div class="formula" id="breakdown-formula"></div>
+  </div>
+
+</div><!-- results-col -->
+</div><!-- two-col -->
+</div><!-- tab-gen -->
+
+<!-- ========== Tab 2: Augment ========== -->
+<div id="tab-augment" class="tab-content">
+<div class="two-col">
+<div class="inputs-col">
+
+  <div class="card">
+    <div class="card-title">Augment ツール</div>
+    <div class="field">
+      <label>ツール</label>
+      <select id="aug-tool">
+        <option value="lineart">線画抽出 (lineart)</option>
+        <option value="sketch">スケッチ (sketch)</option>
+        <option value="colorize">カラー化 (colorize)</option>
+        <option value="emotion">表情変更 (emotion)</option>
+        <option value="declutter">デクラッター (declutter)</option>
+        <option value="bg-removal">背景削除 (bg-removal) ※常に有料</option>
+        <option value="upscale">アップスケール (upscale)</option>
+      </select>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>元画像 Width</label>
+        <input type="number" id="aug-w" value="832" min="64" step="64">
+      </div>
+      <div class="field">
+        <label>元画像 Height</label>
+        <input type="number" id="aug-h" value="1216" min="64" step="64">
+      </div>
+    </div>
+    <div class="field-hint" id="aug-pixel-info">1,011,712 px</div>
+    <div class="field">
+      <label>サブスクリプション</label>
+      <select id="aug-tier">
+        <option value="0">Free (Tier 0)</option>
+        <option value="1">Tablet (Tier 1)</option>
+        <option value="2">Scroll (Tier 2)</option>
+        <option value="3" selected>Opus (Tier 3)</option>
+      </select>
+    </div>
+  </div>
+
+</div><!-- inputs-col -->
+
+<div class="results-col">
+
+  <div class="card">
+    <div class="result-total" id="aug-total-display">
+      <small>Augment コスト</small>
+      <span id="aug-total-cost">0</span> <span class="unit">Anlas</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">計算詳細</div>
+    <div class="formula" id="aug-formula"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Upscale コストテーブル</div>
+    <table class="ref-table">
+      <tr><th>ピクセル数</th><th>コスト</th><th>Opus無料</th></tr>
+      <tr><td>&le; 262,144</td><td>1 Anlas</td><td>無料</td></tr>
+      <tr><td>&le; 409,600</td><td>2 Anlas</td><td>無料</td></tr>
+      <tr><td>&le; 524,288</td><td>3 Anlas</td><td>有料</td></tr>
+      <tr><td>&le; 786,432</td><td>5 Anlas</td><td>有料</td></tr>
+      <tr><td>&le; 1,048,576</td><td>7 Anlas</td><td>有料</td></tr>
+      <tr><td>&gt; 1,048,576</td><td>エラー</td><td>-</td></tr>
+    </table>
+  </div>
+
+</div>
+</div>
+</div><!-- tab-augment -->
+
+<!-- ========== Tab 3: Reference ========== -->
+<div id="tab-ref" class="tab-content">
+
+<div class="card">
+  <div class="card-title">自動検証テスト</div>
+  <button id="run-tests" style="padding:8px 20px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);cursor:pointer;font-size:0.85rem;margin-bottom:12px;">テスト実行</button>
+  <div id="test-results"></div>
+</div>
+
+<div class="card">
+  <div class="section-title">V4/V4.5 ベースコスト計算式</div>
+  <div class="formula">baseCost = ceil( 2.951823174884865e-6 x W x H + 5.753298233447344e-7 x W x H x steps )
+perImageCost = baseCost x smMultiplier
+adjustedCost = max( ceil(perImageCost x strengthMultiplier), 2 )
+※ adjustedCost > 140 でエラー (-3)</div>
+
+  <div class="section-title">SMEA 倍率</div>
+  <table class="ref-table">
+    <tr><th>設定</th><th>倍率</th></tr>
+    <tr><td>Off</td><td>1.0</td></tr>
+    <tr><td>SMEA</td><td>1.2</td></tr>
+    <tr><td>SMEA + Dynamic</td><td>1.4</td></tr>
+  </table>
+
+  <div class="section-title">Opus 無料条件</div>
+  <div class="formula">isOpusFree = !characterRef && W x H &le; 1,048,576 && steps &le; 28 && tier &ge; 3
+課金枚数 = n_samples - (opusFree ? 1 : 0)</div>
+
+  <div class="section-title">Vibe Transfer コスト</div>
+  <div class="formula">エンコードコスト = 未エンコード(キャッシュなし) x 2 Anlas
+バッチコスト    = max(0, enabledVibeCount - 4) x 2 Anlas
+条件: キャラ参照なし, inpaintでない</div>
+
+  <div class="section-title">キャラクター参照コスト</div>
+  <div class="formula">charRefCost = 5 x charRefCount x n_samples</div>
+
+  <div class="section-title">Inpaint サイズ補正</div>
+  <div class="formula">if (maskPixels &lt; 0.8 x 1,048,576):
+  scale = sqrt(1,048,576 / maskPixels)
+  newW = floor(floor(maskW x scale) / 64) x 64
+  newH = floor(floor(maskH x scale) / 64) x 64</div>
+
+  <div class="section-title">V4 ベースコスト (Augment用)</div>
+  <div class="formula">baseCost = ceil( 2.951823174884865e-6 x pixels + 5.753298233447344e-7 x pixels x 28 )
+※ Augment: steps=28 固定, smea=off, pixels &ge; 1,048,576 に拡大 (Rj関数)
+※ nai-diffusion-3 は stableDiffusionXL ファミリーのため V4 計算式が適用される</div>
+
+  <div class="section-title">Augment bg-removal</div>
+  <div class="formula">finalCost = 3 x baseCost + 5  (Opusでも常に有料)</div>
+
+  <div class="section-title">定数一覧</div>
+  <table class="ref-table">
+    <tr><th>定数</th><th>値</th><th>用途</th></tr>
+    <tr><td>MAX_PIXELS</td><td>3,145,728</td><td>W x H 絶対上限 (2048x1536)</td></tr>
+    <tr><td>OPUS_FREE_PIXELS</td><td>1,048,576</td><td>Opus無料ピクセル上限</td></tr>
+    <tr><td>MAX_COST_PER_IMAGE</td><td>140</td><td>1枚あたり上限</td></tr>
+    <tr><td>GRID_SIZE</td><td>64</td><td>次元グリッドサイズ</td></tr>
+    <tr><td>VIBE_BATCH_PRICE</td><td>2</td><td>Vibe 5個以上の追加単価</td></tr>
+    <tr><td>CHAR_REF_PRICE</td><td>5</td><td>キャラ参照1件の単価</td></tr>
+    <tr><td>MIN_COST</td><td>2</td><td>1枚あたり最低コスト</td></tr>
+  </table>
+</div>
+
+</div><!-- tab-ref -->
+
+</div><!-- container -->
+
+<script src="anlas.bundle.js"></script>
+<script>
+// =====================================================================
+// DOM Helpers
+// =====================================================================
+
+const $ = id => document.getElementById(id);
+const fmt = n => typeof n === 'number' ? n.toLocaleString() : n;
+const fmtF = (n, d = 4) => typeof n === 'number' ? n.toFixed(d) : n;
+
+function val(id) { return parseFloat($(id).value) || 0; }
+function intVal(id) { return parseInt($(id).value) || 0; }
+function radioVal(name) { return document.querySelector(`input[name="${name}"]:checked`)?.value || ''; }
+
+function s(cls, text) { return `<span class="${cls}">${text}</span>`; }
+
+// =====================================================================
+// Tab switching
+// =====================================================================
+
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+        tab.classList.add('active');
+        $('tab-' + tab.dataset.tab).classList.add('active');
+    });
+});
+
+// =====================================================================
+// Tab 1: Image Generation - Update
+// =====================================================================
+
+function updateGeneration() {
+    const w = intVal('width');
+    const h = intVal('height');
+    const steps = intVal('steps');
+    const smeaMode = radioVal('smea');
+    const mode = radioVal('mode');
+    const strength = parseFloat($('strength').value) || 1.0;
+    const nSamples = intVal('nsamples');
+    const tier = intVal('tier');
+    const charRefCount = intVal('charref');
+    const vibeCount = intVal('vibe-count');
+    const vibeUnencoded = intVal('vibe-unencoded');
+
+    // Pixel info (same as before)
+    const px = w * h;
+    let pxHint = fmt(px) + ' px';
+    if (px > 3145728) pxHint += ' <span style="color:var(--red)">上限超過!</span>';
+    else if (px > 1048576) pxHint += ' <span style="color:var(--amber)">Opus無料範囲外</span>';
+    $('pixel-info').innerHTML = pxHint;
+
+    // Strength field visibility (same as before)
+    const showStrength = mode === 'img2img' || mode === 'inpaint';
+    $('strength-field').classList.toggle('hidden', !showStrength);
+    if (mode === 'img2img' && $('strength').dataset.lastMode !== 'img2img') {
+        $('strength').value = 0.62; $('strength-val').textContent = '0.62';
+    } else if (mode === 'inpaint' && $('strength').dataset.lastMode !== 'inpaint') {
+        $('strength').value = 1.0; $('strength-val').textContent = '1.00';
+    }
+    $('strength').dataset.lastMode = mode;
+
+    // Inpaint card (same as before)
+    $('inpaint-card').classList.toggle('hidden', mode !== 'inpaint');
+
+    // Vibe section - inline check since anlas.ts doesn't export areVibesActive
+    const vibesActive = charRefCount === 0 && mode !== 'inpaint';
+    $('vibe-disabled-msg').classList.toggle('hidden', vibesActive);
+    $('vibe-fields').classList.toggle('disabled-section', !vibesActive);
+
+    // === Main calculation via Anlas module ===
+    const result = Anlas.calculateGenerationCost({
+        width: w, height: h, steps,
+        smea: smeaMode,
+        mode: mode,
+        strength: showStrength ? strength : 1.0,
+        nSamples: nSamples,
+        tier: tier,
+        charRefCount: charRefCount,
+        vibeCount: vibeCount,
+        vibeUnencodedCount: vibeUnencoded,
+    });
+
+    // --- Per-image cost formula display ---
+    // Compute display-only intermediate values
+    const pixels = w * h;
+    const term1 = Anlas.V4_COST_COEFF_LINEAR * pixels;
+    const term2 = Anlas.V4_COST_COEFF_STEP * pixels * steps;
+
+    let picHtml = '';
+    picHtml += `${s('dim','pixels')} = ${fmt(w)} x ${fmt(h)} = ${s('val', fmt(pixels))}\n`;
+    picHtml += `${s('dim','term1')} = 2.951823e-6 x ${fmt(pixels)} = ${s('val', fmtF(term1, 6))}\n`;
+    picHtml += `${s('dim','term2')} = 5.753298e-7 x ${fmt(pixels)} x ${steps} = ${s('val', fmtF(term2, 6))}\n`;
+    picHtml += `${s('dim','baseCost')} = ceil(${fmtF(term1, 6)} + ${fmtF(term2, 6)}) = ceil(${fmtF(term1 + term2, 6)}) = ${s('val', result.baseCost)}\n`;
+    picHtml += `${s('dim','smMultiplier')} = ${s('val', result.smeaMultiplier)}\n`;
+    picHtml += `${s('dim','perImageCost')} = ${result.baseCost} x ${result.smeaMultiplier} = ${s('val', fmtF(result.perImageCost, 1))}\n`;
+    if (showStrength) {
+        picHtml += `${s('dim','strengthMultiplier')} = ${s('val', result.strengthMultiplier)} (${mode})\n`;
+        picHtml += `${s('dim','adjustedCost')} = max(ceil(${fmtF(result.perImageCost, 1)} x ${result.strengthMultiplier}), 2) = max(ceil(${fmtF(result.perImageCost * result.strengthMultiplier, 4)}), 2) = `;
+    } else {
+        picHtml += `${s('dim','adjustedCost')} = max(ceil(${fmtF(result.perImageCost, 1)} x 1.0), 2) = `;
+    }
+    if (result.error) {
+        picHtml += `${s('err', result.adjustedCost + ' > 140 ERROR')}`;
+    } else {
+        picHtml += `${s('res', result.adjustedCost + ' Anlas/枚')}`;
+    }
+    $('per-image-formula').innerHTML = picHtml;
+
+    // --- Opus free ---
+    $('opus-badge').innerHTML = result.isOpusFree
+        ? '<span class="badge badge-free">FREE (Opus)</span>'
+        : '<span class="badge badge-paid">PAID</span>';
+
+    const checks = [
+        { pass: charRefCount === 0, text: `キャラクター参照なし (現在: ${charRefCount})` },
+        { pass: px <= 1048576, text: `W x H &le; 1,048,576 (現在: ${fmt(px)})` },
+        { pass: steps <= 28, text: `Steps &le; 28 (現在: ${steps})` },
+        { pass: tier >= 3, text: `Tier &ge; 3 / Opus (現在: Tier ${tier})` },
+    ];
+    $('opus-checks').innerHTML = checks.map(c =>
+        `<li class="${c.pass ? 'pass' : 'fail'}">${c.text}</li>`
+    ).join('');
+
+    // --- Generation cost ---
+    let genHtml = '';
+    genHtml += `${s('dim','opusFree')} = ${s('val', result.isOpusFree)}\n`;
+    genHtml += `${s('dim','課金枚数')} = ${nSamples} - ${result.isOpusFree ? 1 : 0} = ${s('val', result.billableImages)}\n`;
+    genHtml += `${s('dim','生成コスト')} = ${result.adjustedCost} x ${result.billableImages} = ${s('res', result.generationCost + ' Anlas')}`;
+    $('gen-cost-formula').innerHTML = genHtml;
+
+    // --- Additional costs ---
+    let addHtml = '';
+    if (charRefCount > 0) {
+        addHtml += `${s('dim','キャラ参照')} = 5 x ${charRefCount} x ${nSamples} = ${s('val', result.charRefCost + ' Anlas')}\n`;
+    } else {
+        addHtml += `${s('dim','キャラ参照')} = ${s('val', '0 Anlas')} (未使用)\n`;
+    }
+    if (vibesActive && vibeCount > 0) {
+        addHtml += `${s('dim','Vibeエンコード')} = ${vibeUnencoded} x 2 = ${s('val', result.vibeEncodeCost + ' Anlas')}\n`;
+        addHtml += `${s('dim','Vibeバッチ')} = max(0, ${vibeCount} - 4) x 2 = ${s('val', result.vibeBatchCost + ' Anlas')}\n`;
+    } else if (!vibesActive) {
+        addHtml += `${s('dim','Vibe')} = ${s('val', '無効')} (${charRefCount > 0 ? 'キャラ参照使用中' : 'inpaintモード'})\n`;
+    } else {
+        addHtml += `${s('dim','Vibe')} = ${s('val', '0 Anlas')} (未使用)\n`;
+    }
+    const addTotal = result.charRefCost + result.vibeEncodeCost + result.vibeBatchCost;
+    addHtml += `${s('dim','追加コスト合計')} = ${s('res', addTotal + ' Anlas')}`;
+    $('additional-formula').innerHTML = addHtml;
+
+    // --- Total ---
+    let breakHtml = '';
+    breakHtml += `${s('dim','生成コスト')}     = ${result.generationCost} Anlas\n`;
+    breakHtml += `${s('dim','キャラ参照コスト')} = ${result.charRefCost} Anlas\n`;
+    breakHtml += `${s('dim','Vibeエンコード')}   = ${result.vibeEncodeCost} Anlas\n`;
+    breakHtml += `${s('dim','Vibeバッチ')}       = ${result.vibeBatchCost} Anlas\n`;
+    breakHtml += `${s('dim','───────────────────')}\n`;
+    breakHtml += `${s('dim','合計')} = ${s('res', result.totalCost + ' Anlas')}`;
+    $('breakdown-formula').innerHTML = breakHtml;
+
+    $('total-cost').textContent = result.error ? 'ERROR' : result.totalCost;
+    $('total-cost').style.color = result.error ? 'var(--red)' : '';
+
+    // --- Inpaint correction ---
+    if (mode === 'inpaint') {
+        const mw = intVal('mask-w');
+        const mh = intVal('mask-h');
+        const corr = Anlas.calcInpaintSizeCorrection(mw, mh);
+        const maskPx = mw * mh;
+        let inpHtml = '';
+        inpHtml += `${s('dim','maskPixels')} = ${fmt(mw)} x ${fmt(mh)} = ${s('val', fmt(maskPx))}\n`;
+        inpHtml += `${s('dim','threshold')} = 0.8 x 1,048,576 = ${s('val', fmt(838861))}\n`;
+        if (corr.corrected) {
+            const scale = Math.sqrt(Anlas.OPUS_FREE_PIXELS / maskPx);
+            inpHtml += `maskPixels < threshold → ${s('val', '補正あり')}\n`;
+            inpHtml += `${s('dim','scale')} = sqrt(1048576 / ${fmt(maskPx)}) = ${s('val', fmtF(scale, 6))}\n`;
+            inpHtml += `${s('dim','補正後')} = ${s('res', corr.width + ' x ' + corr.height)} (${fmt(corr.width * corr.height)} px)`;
+        } else {
+            inpHtml += `maskPixels >= threshold → ${s('val', '補正なし (元サイズ使用)')}`;
+        }
+        $('inpaint-correction').innerHTML = inpHtml;
+    }
+}
+
+// =====================================================================
+// Tab 2: Augment - Update
+// =====================================================================
+
+function updateAugment() {
+    const tool = $('aug-tool').value;
+    const w = intVal('aug-w');
+    const h = intVal('aug-h');
+    const tier = intVal('aug-tier');
+    const px = w * h;
+
+    $('aug-pixel-info').textContent = fmt(px) + ' px';
+
+    let html = '';
+
+    if (tool === 'upscale') {
+        const result = Anlas.calculateUpscaleCost({ width: w, height: h, tier });
+        html += `${s('dim','ツール')} = ${s('val', 'upscale')}\n`;
+        html += `${s('dim','pixels')} = ${fmt(w)} x ${fmt(h)} = ${s('val', fmt(result.pixels))}\n`;
+        if (result.error) {
+            html += `${s('err', 'ERROR: ピクセル数がテーブル上限を超過')}\n`;
+        } else if (result.isOpusFree) {
+            html += `${s('dim','Opus無料')} = pixels &le; 409,600 && tier &ge; 3 → ${s('res', 'FREE')}\n`;
+        } else {
+            html += `${s('dim','テーブル参照')} → ${s('res', result.cost + ' Anlas')}\n`;
+        }
+        const effectiveCost = result.isOpusFree ? 0 : result.cost;
+        $('aug-total-cost').textContent = result.error ? 'ERROR' : effectiveCost;
+        $('aug-total-cost').style.color = result.error ? 'var(--red)' : '';
+    } else {
+        const result = Anlas.calculateAugmentCost({ tool, width: w, height: h, tier });
+        // Compute rawCost for display
+        const rawCost = Anlas.V4_COST_COEFF_LINEAR * result.adjustedPixels
+            + Anlas.V4_COST_COEFF_STEP * result.adjustedPixels * Anlas.AUGMENT_FIXED_STEPS;
+
+        html += `${s('dim','ツール')} = ${s('val', tool)}\n\n`;
+        html += `--- サイズ調整 ---\n`;
+        html += `${s('dim','元pixels')} = ${fmt(result.originalPixels)}\n`;
+        if (result.originalPixels < 1048576) {
+            html += `${s('dim','1,048,576px以上に拡大 (Rj関数)')}\n`;
+        } else {
+            html += `${s('dim','1,048,576px以上のためそのまま')}\n`;
+        }
+        html += `${s('dim','調整後')} = ${result.adjustedWidth} x ${result.adjustedHeight} = ${s('val', fmt(result.adjustedPixels))} px\n\n`;
+
+        html += `--- V4ベースコスト (steps=28, smea=off) ---\n`;
+        html += `${s('dim','rawCost')} = 2.951823e-6 x ${fmt(result.adjustedPixels)} + 5.753298e-7 x ${fmt(result.adjustedPixels)} x 28\n`;
+        html += `        = ${s('val', fmtF(rawCost, 6))}\n`;
+        html += `${s('dim','baseCost')} = max(ceil(${fmtF(rawCost, 6)}), 2) = ${s('val', result.baseCost)}\n\n`;
+
+        if (tool === 'bg-removal') {
+            html += `--- bg-removal 特別計算 ---\n`;
+            html += `${s('dim','finalCost')} = 3 x ${result.baseCost} + 5 = ${s('val', result.finalCost)}\n`;
+            html += `${s('dim','Opus無料')} = ${s('err', 'bg-removal は常に有料')}\n`;
+        } else {
+            html += `${s('dim','finalCost')} = baseCost = ${s('val', result.finalCost)}\n`;
+            html += `${s('dim','Opus無料')} = pixels &le; 1,048,576 && tier &ge; 3 → ${result.isOpusFree ? s('res', 'FREE') : s('val', 'PAID')}\n`;
+        }
+
+        html += `\n${s('dim','最終コスト')} = ${s('res', result.effectiveCost + ' Anlas')}`;
+
+        $('aug-total-cost').textContent = result.effectiveCost;
+        $('aug-total-cost').style.color = '';
+    }
+
+    $('aug-formula').innerHTML = html;
+}
+
+// =====================================================================
+// Tab 3: Tests
+// =====================================================================
+
+function runTests() {
+    const tests = [
+        {
+            name: 'Opus デフォルト (832x1216, 23steps, 1枚)',
+            params: { w: 832, h: 1216, steps: 23, smea: 'off', mode: 'txt2img', str: 1.0, n: 1, tier: 3, charRef: 0, vibeCount: 0, vibeUn: 0 },
+            expected: 0
+        },
+        {
+            name: '非Opus デフォルト (832x1216, 23steps, 1枚)',
+            params: { w: 832, h: 1216, steps: 23, smea: 'off', mode: 'txt2img', str: 1.0, n: 1, tier: 0, charRef: 0, vibeCount: 0, vibeUn: 0 },
+            expected: 17
+        },
+        {
+            name: 'Opus 上限 (1024x1024, 28steps)',
+            params: { w: 1024, h: 1024, steps: 28, smea: 'off', mode: 'txt2img', str: 1.0, n: 1, tier: 3, charRef: 0, vibeCount: 0, vibeUn: 0 },
+            expected: 0
+        },
+        {
+            name: '最大サイズ (2048x1536, 50steps)',
+            params: { w: 2048, h: 1536, steps: 50, smea: 'off', mode: 'txt2img', str: 1.0, n: 1, tier: 0, charRef: 0, vibeCount: 0, vibeUn: 0 },
+            expected: 100
+        },
+        {
+            name: 'Opus 2枚生成 (832x1216, 23steps)',
+            params: { w: 832, h: 1216, steps: 23, smea: 'off', mode: 'txt2img', str: 1.0, n: 2, tier: 3, charRef: 0, vibeCount: 0, vibeUn: 0 },
+            expected: 17
+        },
+        {
+            name: 'SMEA のみ (832x1216, 23steps)',
+            params: { w: 832, h: 1216, steps: 23, smea: 'smea', mode: 'txt2img', str: 1.0, n: 1, tier: 0, charRef: 0, vibeCount: 0, vibeUn: 0 },
+            expected: 21
+        },
+        {
+            name: 'SMEA + Dynamic (832x1216, 23steps)',
+            params: { w: 832, h: 1216, steps: 23, smea: 'smea_dyn', mode: 'txt2img', str: 1.0, n: 1, tier: 0, charRef: 0, vibeCount: 0, vibeUn: 0 },
+            expected: 24
+        },
+        {
+            name: 'img2img (832x1216, 23steps, str=0.62)',
+            params: { w: 832, h: 1216, steps: 23, smea: 'off', mode: 'img2img', str: 0.62, n: 1, tier: 0, charRef: 0, vibeCount: 0, vibeUn: 0 },
+            expected: 11
+        },
+        {
+            name: 'キャラ参照2件 + Opus (832x1216, 23steps, 1枚)',
+            params: { w: 832, h: 1216, steps: 23, smea: 'off', mode: 'txt2img', str: 1.0, n: 1, tier: 3, charRef: 2, vibeCount: 0, vibeUn: 0 },
+            expected: 17 + 10  // charRef disables opusFree, gen=17, charRef=5*2*1=10
+        },
+        {
+            name: 'Vibe 6個 + 未エンコード2個 (832x1216, Opus)',
+            params: { w: 832, h: 1216, steps: 23, smea: 'off', mode: 'txt2img', str: 1.0, n: 1, tier: 3, charRef: 0, vibeCount: 6, vibeUn: 2 },
+            expected: 0 + 4 + 4  // gen=0(opusFree), vibeEncode=2*2=4, vibeBatch=(6-4)*2=4
+        },
+        {
+            name: 'baseCost 検算: 1024x1024, 28steps',
+            params: { w: 1024, h: 1024, steps: 28, smea: 'off', mode: 'txt2img', str: 1.0, n: 1, tier: 0, charRef: 0, vibeCount: 0, vibeUn: 0 },
+            expected: 20  // baseCost = ceil(3.0946 + 16.889) = ceil(19.984) = 20
+        },
+    ];
+
+    let html = '<table class="test-table">';
+    html += '<tr><th>テスト</th><th>期待値</th><th>計算値</th><th>結果</th></tr>';
+
+    let passCount = 0;
+
+    for (const t of tests) {
+        const p = t.params;
+        const result = Anlas.calculateGenerationCost({
+            width: p.w, height: p.h, steps: p.steps,
+            smea: p.smea, mode: p.mode, strength: p.str,
+            nSamples: p.n, tier: p.tier,
+            charRefCount: p.charRef,
+            vibeCount: p.vibeCount,
+            vibeUnencodedCount: p.vibeUn,
+        });
+        const total = result.totalCost;
+        const pass = total === t.expected;
+        if (pass) passCount++;
+
+        html += `<tr>`;
+        html += `<td>${t.name}</td>`;
+        html += `<td>${t.expected} Anlas</td>`;
+        html += `<td>${total} Anlas</td>`;
+        html += `<td class="${pass ? 'test-pass' : 'test-fail'}">${pass ? 'PASS' : 'FAIL'}</td>`;
+        html += `</tr>`;
+    }
+
+    html += '</table>';
+    html += `<p style="margin-top:10px;font-size:0.9rem;">${passCount}/${tests.length} テスト通過 ${passCount === tests.length ? '<span style="color:var(--green)">All Passed!</span>' : '<span style="color:var(--red)">一部失敗</span>'}</p>`;
+
+    $('test-results').innerHTML = html;
+}
+
+// =====================================================================
+// Event Wiring
+// =====================================================================
+
+// Preset
+$('preset').addEventListener('change', function() {
+    if (this.value === 'custom') return;
+    const [w, h] = this.value.split(',').map(Number);
+    $('width').value = w;
+    $('height').value = h;
+    updateGeneration();
+});
+
+// Snap to 64 on blur
+['width', 'height'].forEach(id => {
+    $(id).addEventListener('blur', function() {
+        this.value = Math.max(64, Math.floor(this.value / 64) * 64);
+        updateGeneration();
+    });
+});
+
+// Steps
+$('steps').addEventListener('input', function() {
+    $('steps-val').textContent = this.value;
+    updateGeneration();
+});
+
+// Strength
+$('strength').addEventListener('input', function() {
+    $('strength-val').textContent = parseFloat(this.value).toFixed(2);
+    updateGeneration();
+});
+
+// n_samples
+$('nsamples').addEventListener('input', function() {
+    $('nsamples-val').textContent = this.value;
+    updateGeneration();
+});
+
+// All inputs trigger update
+['width', 'height', 'tier', 'charref', 'vibe-count', 'vibe-unencoded', 'mask-w', 'mask-h']
+    .forEach(id => $(id).addEventListener('input', updateGeneration));
+
+document.querySelectorAll('input[name="smea"], input[name="mode"]')
+    .forEach(el => el.addEventListener('change', updateGeneration));
+
+// Augment inputs
+['aug-tool', 'aug-w', 'aug-h', 'aug-tier']
+    .forEach(id => $(id).addEventListener('input', updateAugment));
+$('aug-tool').addEventListener('change', updateAugment);
+
+// Test button
+$('run-tests').addEventListener('click', runTests);
+
+// Width/Height sync preset to "custom" if manually edited
+['width', 'height'].forEach(id => {
+    $(id).addEventListener('input', () => {
+        const w = $('width').value;
+        const h = $('height').value;
+        const match = [...$('preset').options].find(o => o.value === `${w},${h}`);
+        $('preset').value = match ? match.value : 'custom';
+    });
+});
+
+// Initial render
+updateGeneration();
+updateAugment();
+
+</script>
+</body>
+</html>
