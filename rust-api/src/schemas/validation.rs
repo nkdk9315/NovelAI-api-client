@@ -1,5 +1,6 @@
 use crate::constants::*;
 use crate::error::{NovelAIError, Result};
+use crate::tokenizer::cache::get_t5_tokenizer;
 use super::types::*;
 
 // =============================================================================
@@ -161,10 +162,60 @@ impl GenerateParams {
         Ok(())
     }
 
-    /// Stub for Session 4: async validation including token count checks.
-    pub fn validate_async(&self) -> crate::error::Result<()> {
+    /// Async validation including token count checks.
+    /// Runs all synchronous validations first, then checks token counts.
+    pub async fn validate_async(&self) -> Result<()> {
         self.validate()?;
-        // TODO: Session 4 - Token count validation (positive/negative prompt token limits)
+        self.validate_token_counts().await?;
+        Ok(())
+    }
+
+    async fn validate_token_counts(&self) -> Result<()> {
+        let tokenizer = match get_t5_tokenizer(false).await {
+            Ok(t) => t,
+            Err(_) => return Ok(()), // Skip if tokenizer unavailable (matches TS behavior)
+        };
+
+        // Positive prompt total
+        let mut positive_total = 0usize;
+        if !self.prompt.is_empty() {
+            positive_total += tokenizer.count_tokens(&self.prompt);
+        }
+        if let Some(chars) = &self.characters {
+            for c in chars {
+                if !c.prompt.is_empty() {
+                    positive_total += tokenizer.count_tokens(&c.prompt);
+                }
+            }
+        }
+        if positive_total > MAX_TOKENS {
+            return Err(NovelAIError::Validation(format!(
+                "Total positive prompt token count ({}) exceeds maximum ({})",
+                positive_total, MAX_TOKENS
+            )));
+        }
+
+        // Negative prompt total
+        let mut negative_total = 0usize;
+        if let Some(neg) = &self.negative_prompt {
+            if !neg.is_empty() {
+                negative_total += tokenizer.count_tokens(neg);
+            }
+        }
+        if let Some(chars) = &self.characters {
+            for c in chars {
+                if !c.negative_prompt.is_empty() {
+                    negative_total += tokenizer.count_tokens(&c.negative_prompt);
+                }
+            }
+        }
+        if negative_total > MAX_TOKENS {
+            return Err(NovelAIError::Validation(format!(
+                "Total negative prompt token count ({}) exceeds maximum ({})",
+                negative_total, MAX_TOKENS
+            )));
+        }
+
         Ok(())
     }
 

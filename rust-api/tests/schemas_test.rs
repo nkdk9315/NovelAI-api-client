@@ -4,7 +4,7 @@
 //! Validates all schema types and their validation logic.
 //! Tests for non-integer values (width: 512.5, steps: 23.5, seed: 123.4, defry: 2.5)
 //! and negative u32 values (defry: -1) are SKIPPED because Rust's type system handles them.
-//! Token count tests are #[ignore] until tokenizer is implemented.
+//! Token count tests use async validate_async() with the T5 tokenizer.
 
 #[cfg(test)]
 mod tests {
@@ -843,32 +843,29 @@ mod tests {
         }
 
         // -----------------------------------------------------------------
-        // Token Count Validation (all ignored)
+        // Token Count Validation
         // -----------------------------------------------------------------
         mod token_count {
             use super::super::*;
 
-            #[test]
-            #[ignore] // TODO: Session 4 - enable when tokenizer is implemented
-            fn should_accept_short_prompts_under_512_tokens() {
+            #[tokio::test]
+            async fn should_accept_short_prompts_under_512_tokens() {
                 let params = make_generate_params(
                     "a beautiful landscape with mountains and rivers",
                 );
-                assert!(params.validate().is_ok());
+                assert!(params.validate_async().await.is_ok());
             }
 
-            #[test]
-            #[ignore] // TODO: Session 4 - enable when tokenizer is implemented
-            fn should_reject_prompts_exceeding_512_tokens() {
+            #[tokio::test]
+            async fn should_reject_prompts_exceeding_512_tokens() {
                 let long_prompt = vec!["masterpiece beautiful detailed anime girl"; 600]
                     .join(", ");
                 let params = make_generate_params(&long_prompt);
-                assert!(params.validate().is_err());
+                assert!(params.validate_async().await.is_err());
             }
 
-            #[test]
-            #[ignore] // TODO: Session 4 - enable when tokenizer is implemented
-            fn should_accept_combined_positive_prompts_under_512_tokens() {
+            #[tokio::test]
+            async fn should_accept_combined_positive_prompts_under_512_tokens() {
                 let mut params = make_generate_params("masterpiece, best quality, 1girl");
                 params.characters = Some(vec![
                     CharacterConfig {
@@ -880,12 +877,11 @@ mod tests {
                         ..Default::default()
                     },
                 ]);
-                assert!(params.validate().is_ok());
+                assert!(params.validate_async().await.is_ok());
             }
 
-            #[test]
-            #[ignore] // TODO: Session 4 - enable when tokenizer is implemented
-            fn should_reject_combined_positive_prompts_exceeding_512_tokens() {
+            #[tokio::test]
+            async fn should_reject_combined_positive_prompts_exceeding_512_tokens() {
                 let base_prompt =
                     vec!["masterpiece beautiful"; 250].join(", ");
                 let char_prompt1 =
@@ -904,13 +900,12 @@ mod tests {
                         ..Default::default()
                     },
                 ]);
-                let err = params.validate().unwrap_err();
+                let err = params.validate_async().await.err().unwrap();
                 assert!(err.to_string().contains("token count"));
             }
 
-            #[test]
-            #[ignore] // TODO: Session 4 - enable when tokenizer is implemented
-            fn should_accept_combined_negative_prompts_under_512_tokens() {
+            #[tokio::test]
+            async fn should_accept_combined_negative_prompts_under_512_tokens() {
                 let mut params = make_generate_params("1girl");
                 params.negative_prompt =
                     Some("lowres, bad anatomy".to_string());
@@ -926,12 +921,11 @@ mod tests {
                         ..Default::default()
                     },
                 ]);
-                assert!(params.validate().is_ok());
+                assert!(params.validate_async().await.is_ok());
             }
 
-            #[test]
-            #[ignore] // TODO: Session 4 - enable when tokenizer is implemented
-            fn should_reject_combined_negative_prompts_exceeding_512_tokens() {
+            #[tokio::test]
+            async fn should_reject_combined_negative_prompts_exceeding_512_tokens() {
                 let base_negative =
                     vec!["lowres bad anatomy"; 250].join(", ");
                 let char_negative1 =
@@ -953,13 +947,12 @@ mod tests {
                         ..Default::default()
                     },
                 ]);
-                let err = params.validate().unwrap_err();
+                let err = params.validate_async().await.err().unwrap();
                 assert!(err.to_string().contains("token count"));
             }
 
-            #[test]
-            #[ignore] // TODO: Session 4 - enable when tokenizer is implemented
-            fn should_validate_positive_and_negative_prompts_independently() {
+            #[tokio::test]
+            async fn should_validate_positive_and_negative_prompts_independently() {
                 let long_positive =
                     vec!["masterpiece beautiful"; 600].join(", ");
 
@@ -971,12 +964,11 @@ mod tests {
                     ..Default::default()
                 }]);
                 // Should fail for positive prompt only
-                assert!(params.validate().is_err());
+                assert!(params.validate_async().await.is_err());
             }
 
-            #[test]
-            #[ignore] // TODO: Session 4 - enable when tokenizer is implemented
-            fn should_count_only_character_prompts_when_base_prompt_is_empty() {
+            #[tokio::test]
+            async fn should_count_only_character_prompts_when_base_prompt_is_empty() {
                 let char_prompt1 =
                     vec!["detailed anime girl"; 300].join(", ");
                 let char_prompt2 =
@@ -993,7 +985,7 @@ mod tests {
                         ..Default::default()
                     },
                 ]);
-                assert!(params.validate().is_err());
+                assert!(params.validate_async().await.is_err());
             }
         }
     }

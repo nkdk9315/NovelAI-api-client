@@ -87,10 +87,11 @@ pub const VALID_NOISE_SCHEDULES: &[&str] = &[
 ];
 
 /// Sampler enum
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Sampler {
     #[serde(rename = "k_euler")]
     KEuler,
+    #[default]
     #[serde(rename = "k_euler_ancestral")]
     KEulerAncestral,
     #[serde(rename = "k_dpmpp_2s_ancestral")]
@@ -116,14 +117,8 @@ impl Sampler {
     }
 }
 
-impl Default for Sampler {
-    fn default() -> Self {
-        Sampler::KEulerAncestral
-    }
-}
-
 /// Model enum
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Model {
     #[serde(rename = "nai-diffusion-4-curated-preview")]
     NaiDiffusion4CuratedPreview,
@@ -131,6 +126,7 @@ pub enum Model {
     NaiDiffusion4Full,
     #[serde(rename = "nai-diffusion-4-5-curated")]
     NaiDiffusion45Curated,
+    #[default]
     #[serde(rename = "nai-diffusion-4-5-full")]
     NaiDiffusion45Full,
 }
@@ -156,12 +152,6 @@ impl Model {
     }
 }
 
-impl Default for Model {
-    fn default() -> Self {
-        Model::NaiDiffusion45Full
-    }
-}
-
 /// Get model key from model name string
 pub fn model_key_from_str(model: &str) -> Option<&'static str> {
     match model {
@@ -174,8 +164,9 @@ pub fn model_key_from_str(model: &str) -> Option<&'static str> {
 }
 
 /// Noise schedule enum
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NoiseSchedule {
+    #[default]
     #[serde(rename = "karras")]
     Karras,
     #[serde(rename = "exponential")]
@@ -191,12 +182,6 @@ impl NoiseSchedule {
             NoiseSchedule::Exponential => "exponential",
             NoiseSchedule::Polyexponential => "polyexponential",
         }
-    }
-}
-
-impl Default for NoiseSchedule {
-    fn default() -> Self {
-        NoiseSchedule::Karras
     }
 }
 
