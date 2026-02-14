@@ -22,9 +22,7 @@ venv/
 # Generated images (必要に応じて)
 *.png
 *.webp
-
-# Vibe files (必要に応じて)
-*.naiv4vibe
+*.jpeg
 
 # Node modules
 node_modules/

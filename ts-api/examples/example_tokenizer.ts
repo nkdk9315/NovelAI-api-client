@@ -14,7 +14,7 @@ import {
     getT5Tokenizer,
     preprocessT5,
     NovelAIClipTokenizer,
-} from './src/tokenizer';
+} from '../src/tokenizer';
 import { Tokenizer } from 'tokenizers';
 
 // =============================================================================
@@ -64,7 +64,7 @@ async function t5TokenizerExample(text: string): Promise<void> {
     // getT5Tokenizer() は現在、公式ロジックをカプセル化した NovelAIT5Tokenizer を返します。
     // これにより、内部で preprocessT5() が実行され、EOSトークンも自動的に追加されます。
     const tokenizer = await getT5Tokenizer();
-    
+
     // 3. エンコード
     // 戻り値は number[] (Token IDs) です。
     const ids = await tokenizer.encode(textWithTags);
@@ -98,13 +98,16 @@ async function cacheExample(): Promise<void> {
 
 async function countTokensExample() {
     const tokenizer = await getT5Tokenizer();
-    
+
     // countTokens() を使用（公式UIと一致）
     const count1 = await tokenizer.countTokens("3::rosa (pokemon)::, 2::smile::, 1::artist:ixy, artist:ahemaru::, {{sitting}}");
-    console.log(`Token count: ${count1}`); // → 25
+    console.log(`Token count: ${count1} Expected: 25`);
 
-    const count2 = await tokenizer.countTokens("2::girls::, 2::smile, standing, ::, {{ scared }}, 0.8::artist:ixy, artist:ahemaru::, -2::multiple views::, target#hands in skirt");
-    console.log(`Token count: ${count2}`);
+    const count2 = await tokenizer.countTokens("1girl, graphite (medium), plaid background, from side, cowboy shot, stuffed animal, stuffed lion, mimikaki, candle, offering hand");
+    console.log(`Token count: ${count2} Expected: 38`);
+
+    const count3 = await tokenizer.countTokens("2::girls::, 2::smile, standing, ::, {{ scared }}, 3::sitting::, 3::spread arms, spread wings::");
+    console.log(`Token count: ${count3} Expected: 19`);
 }
 // =============================================================================
 // メイン処理

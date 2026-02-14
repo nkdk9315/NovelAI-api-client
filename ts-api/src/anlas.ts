@@ -43,22 +43,28 @@ export type GenerationMode = 'txt2img' | 'img2img' | 'inpaint';
 /** Augmentツールタイプ */
 export type AugmentToolType = 'colorize' | 'declutter' | 'emotion' | 'sketch' | 'lineart' | 'bg-removal';
 
-/** 画像生成コスト計算パラメータ */
-export type GenerationCostParams = {
+/** 画像生成コスト計算パラメータ (基本) */
+type BaseCostParams = {
   width: number;
   height: number;
   steps: number;
   smea?: SmeaMode;              // デフォルト: 'off'
-  mode?: GenerationMode;        // デフォルト: 'txt2img'
-  strength?: number;            // デフォルト: 1.0
   nSamples?: number;            // デフォルト: 1
   tier?: SubscriptionTier;      // デフォルト: 0
-  charRefCount?: number;        // デフォルト: 0
   vibeCount?: number;           // デフォルト: 0
   vibeUnencodedCount?: number;  // デフォルト: 0
-  maskWidth?: number;           // Inpaintマスク寸法
+};
+
+type Txt2ImgCostParams = BaseCostParams & { mode?: 'txt2img'; charRefCount?: number; };
+type Img2ImgCostParams = BaseCostParams & { mode: 'img2img'; strength?: number; };
+type InpaintCostParams = BaseCostParams & {
+  mode: 'inpaint';
+  strength?: number;
+  maskWidth?: number;
   maskHeight?: number;
 };
+
+export type GenerationCostParams = Txt2ImgCostParams | Img2ImgCostParams | InpaintCostParams;
 
 /** 画像生成コスト計算結果（内訳付き） */
 export type GenerationCostResult = {
@@ -123,6 +129,29 @@ export type InpaintCorrectionResult = {
 
 
 // =============================================================================
+// バリデーション
+// =============================================================================
+
+function assertPositiveFiniteInt(value: number, name: string): void {
+  if (!Number.isFinite(value) || value <= 0 || !Number.isInteger(value)) {
+    throw new RangeError(`${name} must be a positive finite integer, got ${value}`);
+  }
+}
+
+function assertFiniteRange(value: number, min: number, max: number, name: string): void {
+  if (!Number.isFinite(value) || value < min || value > max) {
+    throw new RangeError(`${name} must be a finite number between ${min} and ${max}, got ${value}`);
+  }
+}
+
+function assertNonNegativeFiniteInt(value: number, name: string): void {
+  if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
+    throw new RangeError(`${name} must be a non-negative finite integer, got ${value}`);
+  }
+}
+
+
+// =============================================================================
 // 基本計算関数
 // =============================================================================
 
@@ -167,8 +196,10 @@ export function isOpusFreeGeneration(
   steps: number,
   charRefCount: number,
   tier: SubscriptionTier,
+  vibeCount: number = 0,
 ): boolean {
   return charRefCount === 0
+    && vibeCount === 0
     && width * height <= OPUS_FREE_PIXELS
     && steps <= OPUS_FREE_MAX_STEPS
     && tier >= OPUS_MIN_TIER;
@@ -217,8 +248,12 @@ export function expandToMinPixels(
     return { width, height, pixels };
   }
   const scale = Math.sqrt(minPixels / pixels);
-  const newW = Math.floor(width * scale);
-  const newH = Math.floor(height * scale);
+  let newW = Math.ceil(width * scale);
+  let newH = Math.floor(height * scale);
+  // Ensure we actually meet the minPixels requirement
+  if (newW * newH < minPixels) {
+    newH = Math.ceil(height * scale);
+  }
   return { width: newW, height: newH, pixels: newW * newH };
 }
 
@@ -261,6 +296,10 @@ export function calcInpaintSizeCorrection(
   maskWidth: number,
   maskHeight: number,
 ): InpaintCorrectionResult {
+  if (maskWidth <= 0 || maskHeight <= 0) {
+    return { corrected: false, width: maskWidth, height: maskHeight };
+  }
+
   const pixels = maskWidth * maskHeight;
   const threshold = OPUS_FREE_PIXELS * INPAINT_THRESHOLD_RATIO;
 
@@ -288,21 +327,37 @@ export function calcInpaintSizeCorrection(
  * @returns コスト内訳を含む計算結果
  */
 export function calculateGenerationCost(params: GenerationCostParams): GenerationCostResult {
+  // 入力バリデーション
+  assertPositiveFiniteInt(params.width, 'width');
+  assertPositiveFiniteInt(params.height, 'height');
+  assertPositiveFiniteInt(params.steps, 'steps');
+  if ('strength' in params && params.strength != null) assertFiniteRange(params.strength, 0, 1, 'strength');
+  if (params.nSamples != null) assertNonNegativeFiniteInt(params.nSamples, 'nSamples');
+
   // デフォルト値の適用
   const smea = params.smea ?? 'off';
   const mode = params.mode ?? 'txt2img';
-  const strength = params.strength ?? 1.0;
+  const strength = ('strength' in params ? params.strength : 1.0) ?? 1.0;
   const nSamples = params.nSamples ?? 1;
   const tier = params.tier ?? 0;
-  const charRefCount = params.charRefCount ?? 0;
+  const charRefCount = ('charRefCount' in params ? params.charRefCount : 0) ?? 0;
   const vibeCount = params.vibeCount ?? 0;
   const vibeUnencodedCount = params.vibeUnencodedCount ?? 0;
+
+  // Validate maskWidth/maskHeight pair
+  if (mode === 'inpaint') {
+    const hasMaskW = 'maskWidth' in params && params.maskWidth != null;
+    const hasMaskH = 'maskHeight' in params && params.maskHeight != null;
+    if (hasMaskW !== hasMaskH) {
+      throw new RangeError('maskWidth and maskHeight must both be specified or both omitted for inpaint mode');
+    }
+  }
 
   // 有効な幅・高さの決定（Inpaintマスク補正）
   let effectiveWidth = params.width;
   let effectiveHeight = params.height;
 
-  if (mode === 'inpaint' && params.maskWidth != null && params.maskHeight != null) {
+  if (mode === 'inpaint' && 'maskWidth' in params && params.maskWidth != null && 'maskHeight' in params && params.maskHeight != null) {
     const correction = calcInpaintSizeCorrection(params.maskWidth, params.maskHeight);
     if (correction.corrected) {
       effectiveWidth = correction.width;
@@ -327,6 +382,10 @@ export function calculateGenerationCost(params: GenerationCostParams): Generatio
     case 'inpaint':
       strengthMultiplier = strength;
       break;
+    default: {
+      const _exhaustive: never = mode;
+      throw new Error(`Unknown generation mode: ${_exhaustive}`);
+    }
   }
 
   // 調整後コスト（最低MIN_COST_PER_IMAGE保証）
@@ -343,6 +402,7 @@ export function calculateGenerationCost(params: GenerationCostParams): Generatio
     params.steps,
     charRefCount,
     tier,
+    vibeCount,
   );
 
   // 課金対象枚数
@@ -360,8 +420,8 @@ export function calculateGenerationCost(params: GenerationCostParams): Generatio
   // キャラクター参照コスト
   const charRefCost = charRefCount > 0 ? calcCharRefCost(charRefCount, nSamples) : 0;
 
-  // 合計コスト
-  const totalCost = generationCost + charRefCost + vibeEncodeCost + vibeBatchCost;
+  // 合計コスト（エラー時は信頼できないため0）
+  const totalCost = error ? 0 : generationCost + charRefCost + vibeEncodeCost + vibeBatchCost;
 
   return {
     baseCost,
@@ -394,6 +454,10 @@ export function calculateGenerationCost(params: GenerationCostParams): Generatio
  * @returns コスト計算結果
  */
 export function calculateAugmentCost(params: AugmentCostParams): AugmentCostResult {
+  // 入力バリデーション
+  assertPositiveFiniteInt(params.width, 'width');
+  assertPositiveFiniteInt(params.height, 'height');
+
   const tier = params.tier ?? 0;
   const originalPixels = params.width * params.height;
 
@@ -409,7 +473,7 @@ export function calculateAugmentCost(params: AugmentCostParams): AugmentCostResu
   // bg-removalは特別計算
   let finalCost: number;
   if (params.tool === 'bg-removal') {
-    finalCost = BG_REMOVAL_MULTIPLIER * baseCost + BG_REMOVAL_ADDEND;
+    finalCost = Math.ceil(BG_REMOVAL_MULTIPLIER * baseCost + BG_REMOVAL_ADDEND);
   } else {
     finalCost = baseCost;
   }
@@ -445,6 +509,10 @@ export function calculateAugmentCost(params: AugmentCostParams): AugmentCostResu
  * @returns コスト計算結果
  */
 export function calculateUpscaleCost(params: UpscaleCostParams): UpscaleCostResult {
+  // 入力バリデーション
+  assertPositiveFiniteInt(params.width, 'width');
+  assertPositiveFiniteInt(params.height, 'height');
+
   const tier = params.tier ?? 0;
   const pixels = params.width * params.height;
 
@@ -453,19 +521,13 @@ export function calculateUpscaleCost(params: UpscaleCostParams): UpscaleCostResu
     return { pixels, cost: 0, isOpusFree: true, error: false, errorCode: null };
   }
 
-  // コストテーブルから該当価格を検索（降順テーブル、最後にマッチしたものが最小閾値）
-  let cost: number | null = null;
+  // コストテーブルから該当価格を検索（昇順テーブル、最初にマッチした時点で即リターン）
   for (const [threshold, price] of UPSCALE_COST_TABLE) {
     if (pixels <= threshold) {
-      cost = price;
+      return { pixels, cost: price, isOpusFree: false, error: false, errorCode: null };
     }
   }
 
-  return {
-    pixels,
-    cost,
-    isOpusFree: false,
-    error: cost === null,
-    errorCode: cost === null ? -3 : null,
-  };
+  // テーブルに該当なし → エラー
+  return { pixels, cost: null, isOpusFree: false, error: true, errorCode: -3 };
 }

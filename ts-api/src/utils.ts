@@ -11,104 +11,96 @@ import * as Constants from './constants';
 import { VibeEncodeResult, CharacterReferenceConfig } from './schemas';
 
 // =============================================================================
+// Custom Errors
+// =============================================================================
+
+export class ImageFileSizeError extends Error {
+  public readonly fileSizeMB: number;
+  public readonly maxSizeMB: number;
+  constructor(fileSizeMB: number, maxSizeMB: number, source?: string) {
+    const suffix = source ? `: ${source}` : '';
+    super(`Image file size (${fileSizeMB.toFixed(2)} MB) exceeds maximum allowed size (${maxSizeMB} MB)${suffix}`);
+    this.name = 'ImageFileSizeError';
+    this.fileSizeMB = fileSizeMB;
+    this.maxSizeMB = maxSizeMB;
+  }
+}
+
+// =============================================================================
+// Internal Helpers
+// =============================================================================
+
+const DATA_URL_PREFIX_REGEX = /^data:image\/[\w+.-]+;base64,/;
+
+function sanitizeFilePath(filePath: string): string {
+  const normalized = path.normalize(filePath);
+  if (normalized.replace(/\\/g, '/').includes('..')) {
+    throw new Error(`Invalid file path (path traversal detected): ${filePath}`);
+  }
+  return normalized;
+}
+
+function decodeBase64Image(base64Str: string): Buffer {
+  const stripped = base64Str.replace(DATA_URL_PREFIX_REGEX, '');
+  if (!/^[A-Za-z0-9+/]*=*$/.test(stripped) || stripped.length === 0) {
+    throw new Error('Invalid Base64 string: contains characters outside the Base64 alphabet or is empty');
+  }
+  return Buffer.from(stripped, 'base64');
+}
+
+// =============================================================================
 // Image Helpers
 // =============================================================================
 
 /**
+ * 画像データのサイズを検証
+ * @throws ImageFileSizeError if data exceeds MAX_REF_IMAGE_SIZE_MB
+ */
+export function validateImageDataSize(data: Buffer, source?: string): void {
+  const sizeMB = data.length / (1024 * 1024);
+  if (sizeMB > Constants.MAX_REF_IMAGE_SIZE_MB) {
+    throw new ImageFileSizeError(sizeMB, Constants.MAX_REF_IMAGE_SIZE_MB, source);
+  }
+}
+
+/**
  * 画像データをBufferに変換
  */
-export function getImageBuffer(image: string | Buffer): Buffer {
+export function getImageBuffer(image: string | Buffer | Uint8Array): Buffer {
   if (Buffer.isBuffer(image)) {
     return image;
   }
 
+  if (image instanceof Uint8Array) {
+    return Buffer.from(image);
+  }
+
   if (typeof image === 'string') {
-    // Check if it's a file path
-    if (fs.existsSync(image) && fs.lstatSync(image).isFile()) {
-      return fs.readFileSync(image);
+    if (looksLikeFilePath(image)) {
+      const safePath = sanitizeFilePath(image);
+      try {
+        return fs.readFileSync(safePath);
+      } catch {
+        throw new Error(`Image file not found or not readable: ${image}`);
+      }
     }
 
-    // Treat as Base64 string
-    // Remove data URL prefix if present
-    const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
-    return Buffer.from(base64Data, 'base64');
+    return decodeBase64Image(image);
   }
 
   throw new Error(`Invalid image type: ${typeof image}`);
 }
 
 /**
- * 画像ファイルのサイズをチェック
- * @throws Error if file size exceeds MAX_REF_IMAGE_SIZE_MB
- */
-export function validateImageFileSize(filePath: string): void {
-  try {
-    const stats = fs.statSync(filePath);
-    const sizeMB = stats.size / (1024 * 1024);
-    
-    if (sizeMB > Constants.MAX_REF_IMAGE_SIZE_MB) {
-      throw new Error(
-        `Image file size (${sizeMB.toFixed(2)} MB) exceeds maximum allowed size (${Constants.MAX_REF_IMAGE_SIZE_MB} MB): ${filePath}`
-      );
-    }
-  } catch (err: any) {
-    if (err.message.includes('exceeds maximum allowed size')) {
-      throw err; // Re-throw our validation error
-    }
-    // File doesn't exist or can't be read - will be handled by readFileSync later
-  }
-}
-
-/**
  * 画像の存在確認と寸法を取得
  * @throws Error if image doesn't exist, cannot be read, or exceeds size limit
  */
-export async function getImageDimensions(image: string | Buffer): Promise<{ width: number; height: number; buffer: Buffer }> {
-  let buffer: Buffer;
+export async function getImageDimensions(image: string | Buffer | Uint8Array): Promise<{ width: number; height: number; buffer: Buffer }> {
+  const buffer = getImageBuffer(image);
+  validateImageDataSize(buffer, typeof image === 'string' && looksLikeFilePath(image) ? image : undefined);
 
-  if (Buffer.isBuffer(image)) {
-    // Check buffer size for in-memory images
-    const sizeMB = image.length / (1024 * 1024);
-    if (sizeMB > Constants.MAX_REF_IMAGE_SIZE_MB) {
-      throw new Error(
-        `Image buffer size (${sizeMB.toFixed(2)} MB) exceeds maximum allowed size (${Constants.MAX_REF_IMAGE_SIZE_MB} MB)`
-      );
-    }
-    buffer = image;
-  } else if (typeof image === 'string') {
-    // Use helper to determine if this looks like a file path
-    const isLikelyFilePath = looksLikeFilePath(image);
-    
-    if (isLikelyFilePath) {
-      // Validate file size before reading
-      validateImageFileSize(image);
-      
-      try {
-        // Single atomic file read operation (avoids TOCTOU)
-        buffer = fs.readFileSync(image);
-      } catch (err) {
-        throw new Error(`Image file not found or not readable: ${image}`);
-      }
-    } else {
-      // Treat as Base64 string
-      const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
-      buffer = Buffer.from(base64Data, 'base64');
-      
-      // Check decoded size
-      const sizeMB = buffer.length / (1024 * 1024);
-      if (sizeMB > Constants.MAX_REF_IMAGE_SIZE_MB) {
-        throw new Error(
-          `Decoded image size (${sizeMB.toFixed(2)} MB) exceeds maximum allowed size (${Constants.MAX_REF_IMAGE_SIZE_MB} MB)`
-        );
-      }
-    }
-  } else {
-    throw new Error(`Invalid image type: ${typeof image}`);
-  }
-
-  // Get dimensions using sharp
   const metadata = await sharp(buffer).metadata();
-  
+
   if (!metadata.width || !metadata.height) {
     throw new Error("Could not determine image dimensions. The file may be corrupted or not a valid image.");
   }
@@ -129,32 +121,39 @@ function looksLikeFilePath(str: string): boolean {
   if (str.startsWith('data:')) {
     return false;
   }
-  
-  // Absolute paths (Unix or Windows)
-  if (str.startsWith('/') || /^[A-Za-z]:[\\/]/.test(str)) {
+
+  // Short-circuit: long Base64-only strings are not paths
+  const base64Regex = /^[A-Za-z0-9+/\-_]+=*$/;
+  if (base64Regex.test(str) && str.length > 64) {
+    return false;
+  }
+
+  // Absolute paths (Unix or Windows) — require extension or directory structure
+  if (str.startsWith('/')) {
+    if (/\.(png|jpg|jpeg|webp|gif|bmp|naiv4vibe)$/i.test(str)) {
+      return true;
+    }
+    // Has at least two path segments (e.g., /dir/file)
+    if (/^\/[^/]+\//.test(str)) {
+      return true;
+    }
+    return false;
+  }
+  if (/^[A-Za-z]:[\\/]/.test(str)) {
     return true;
   }
-  
+
   // Relative paths with directory separators and file extension
-  // Check for common image extensions to reduce false positives
-  if ((str.includes('/') || str.includes('\\')) && 
+  if ((str.includes('/') || str.includes('\\')) &&
       /\.(png|jpg|jpeg|webp|gif|bmp|naiv4vibe)$/i.test(str)) {
     return true;
   }
-  
-  // Check if valid Base64: only contains Base64 chars and optional padding
-  // A pure Base64 string without path-like characteristics
-  const base64Regex = /^[A-Za-z0-9+/]+=*$/;
-  if (base64Regex.test(str) && str.length > 100) {
-    // Long string with only Base64 chars is likely Base64, not a path
-    return false;
-  }
-  
-  // If it has a file extension and no Base64-invalid chars for paths, assume path
+
+  // If it has a file extension, assume path
   if (/\.(png|jpg|jpeg|webp|gif|bmp|naiv4vibe)$/i.test(str)) {
     return true;
   }
-  
+
   // Default: if it contains directory separator, try as path
   return str.includes('/') || str.includes('\\');
 }
@@ -162,21 +161,8 @@ function looksLikeFilePath(str: string): boolean {
 /**
  * 画像をBase64文字列に変換
  */
-export function getImageBase64(image: string | Buffer): string {
-  if (Buffer.isBuffer(image)) {
-    return image.toString('base64');
-  }
-
-  if (typeof image === 'string') {
-    if (fs.existsSync(image) && fs.lstatSync(image).isFile()) {
-      return fs.readFileSync(image).toString('base64');
-    }
-    // Assuming it's already base64, clean it just in case?
-    // Or just return as is if it looks like base64
-    return image.replace(/^data:image\/\w+;base64,/, "");
-  }
-
-  throw new Error(`Invalid image type: ${typeof image}`);
+export function getImageBase64(image: string | Buffer | Uint8Array): string {
+  return getImageBuffer(image).toString('base64');
 }
 
 
@@ -185,7 +171,8 @@ export function getImageBase64(image: string | Buffer): string {
 // =============================================================================
 
 export function loadVibeFile(vibePath: string): any {
-  const content = fs.readFileSync(vibePath, 'utf-8');
+  const safePath = sanitizeFilePath(vibePath);
+  const content = fs.readFileSync(safePath, 'utf-8');
   return JSON.parse(content);
 }
 
@@ -193,7 +180,7 @@ export function extractEncoding(
   vibeData: any,
   model: string = "nai-diffusion-4-5-full"
 ): { encoding: string; information_extracted: number } {
-  const modelKey = Constants.MODEL_KEY_MAP[model] || "v4-5full";
+  const modelKey = (Constants.MODEL_KEY_MAP as Record<string, string>)[model] || "v4-5full";
 
   const encodings = vibeData.encodings || {};
   const modelEncodings = encodings[modelKey] || {};
@@ -226,13 +213,13 @@ export async function processVibes(
   const info_extracted_list: number[] = [];
 
   for (const vibe of vibes) {
-    if (typeof vibe === 'object' && 'encoding' in vibe) {
+    if (vibe !== null && typeof vibe === 'object' && 'encoding' in vibe) {
       // VibeEncodeResult object
       encodings.push(vibe.encoding);
       info_extracted_list.push(vibe.information_extracted);
     } else if (typeof vibe === 'string') {
-      if (vibe.endsWith('.naiv4vibe') && fs.existsSync(vibe)) {
-        // File path
+      if (vibe.endsWith('.naiv4vibe')) {
+        // File path — loadVibeFile handles sanitization and throws on read failure
         const data = loadVibeFile(vibe);
         const { encoding, information_extracted } = extractEncoding(data, model);
         encodings.push(encoding);
@@ -242,6 +229,8 @@ export async function processVibes(
         encodings.push(vibe);
         info_extracted_list.push(1.0);
       }
+    } else {
+      throw new Error(`Invalid vibe type: expected string or VibeEncodeResult, got ${typeof vibe}`);
     }
   }
 
@@ -272,11 +261,11 @@ export async function prepareCharacterReferenceImage(imageBuffer: Buffer): Promi
   let targetHeight: number;
 
   // Choose target size based on aspect ratio
-  if (aspectRatio < 0.8) {
+  if (aspectRatio < Constants.CHARREF_PORTRAIT_THRESHOLD) {
     // Portrait
     targetWidth = Constants.CHARREF_PORTRAIT_SIZE.width;
     targetHeight = Constants.CHARREF_PORTRAIT_SIZE.height;
-  } else if (aspectRatio > 1.25) {
+  } else if (aspectRatio > Constants.CHARREF_LANDSCAPE_THRESHOLD) {
     // Landscape
     targetWidth = Constants.CHARREF_LANDSCAPE_SIZE.width;
     targetHeight = Constants.CHARREF_LANDSCAPE_SIZE.height;
@@ -386,7 +375,7 @@ export async function resizeMaskImage(
 /**
  * 矩形領域のマスク画像をプログラマティックに生成
  * @param width 元画像の幅
- * @param height 元画像の高さ  
+ * @param height 元画像の高さ
  * @param region マスク領域（0.0-1.0の相対座標）
  * @returns マスク画像のBuffer（白=変更領域、黒=保持領域）
  */
@@ -395,6 +384,15 @@ export async function createRectangularMask(
   height: number,
   region: { x: number; y: number; w: number; h: number }
 ): Promise<Buffer> {
+  if (width <= 0 || height <= 0) {
+    throw new Error(`Invalid dimensions: width (${width}) and height (${height}) must be positive`);
+  }
+  for (const [key, val] of Object.entries(region) as [string, number][]) {
+    if (val < 0.0 || val > 1.0) {
+      throw new Error(`Invalid region.${key}: ${val} (must be between 0.0 and 1.0)`);
+    }
+  }
+
   // マスクサイズは元画像の1/8
   const maskWidth = Math.floor(width / 8);
   const maskHeight = Math.floor(height / 8);
@@ -443,19 +441,30 @@ export async function createCircularMask(
   center: { x: number; y: number },
   radius: number
 ): Promise<Buffer> {
+  if (width <= 0 || height <= 0) {
+    throw new Error(`Invalid dimensions: width (${width}) and height (${height}) must be positive`);
+  }
+  if (center.x < 0.0 || center.x > 1.0 || center.y < 0.0 || center.y > 1.0) {
+    throw new Error(`Invalid center: (${center.x}, ${center.y}) (values must be between 0.0 and 1.0)`);
+  }
+  if (radius < 0.0 || radius > 1.0) {
+    throw new Error(`Invalid radius: ${radius} (must be between 0.0 and 1.0)`);
+  }
+
   const maskWidth = Math.floor(width / 8);
   const maskHeight = Math.floor(height / 8);
 
   const centerX = center.x * maskWidth;
   const centerY = center.y * maskHeight;
-  const radiusPx = radius * maskWidth;
+  const radiusPxSq = (radius * maskWidth) ** 2;
 
   const canvas = Buffer.alloc(maskWidth * maskHeight, 0);
 
   for (let y = 0; y < maskHeight; y++) {
     for (let x = 0; x < maskWidth; x++) {
-      const dist = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2));
-      if (dist <= radiusPx) {
+      const dx = x - centerX;
+      const dy = y - centerY;
+      if (dx * dx + dy * dy <= radiusPxSq) {
         canvas[y * maskWidth + x] = 255;
       }
     }

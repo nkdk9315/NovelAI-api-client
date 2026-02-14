@@ -3,6 +3,7 @@
  * 統合されたVibe Transfer & Image2Image APIクライアント
  */
 import fs from 'fs';
+import fsp from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import AdmZip from 'adm-zip';
@@ -10,6 +11,16 @@ import { Unpackr } from 'msgpackr';
 import * as Constants from './constants';
 import * as Schemas from './schemas';
 import * as Utils from './utils';
+
+export interface Logger {
+  warn(message: string, ...args: unknown[]): void;
+  error(message: string, ...args: unknown[]): void;
+}
+
+const defaultLogger: Logger = {
+  warn: console.warn.bind(console),
+  error: console.error.bind(console),
+};
 
 // Helper types for return values
 export interface AnlasBalance {
@@ -19,15 +30,55 @@ export interface AnlasBalance {
   tier: number;
 }
 
+interface GenerationPayloadParameters {
+  params_version: number;
+  width: number;
+  height: number;
+  scale: number;
+  sampler: string;
+  steps: number;
+  n_samples: number;
+  ucPreset: number;
+  qualityToggle: boolean;
+  autoSmea: boolean;
+  dynamic_thresholding: boolean;
+  controlnet_strength: number;
+  legacy: boolean;
+  add_original_image: boolean;
+  cfg_rescale: number;
+  noise_schedule: string;
+  legacy_v3_extend: boolean;
+  skip_cfg_above_sigma: null;
+  use_coords: boolean;
+  legacy_uc: boolean;
+  normalize_reference_strength_multiple: boolean;
+  inpaintImg2ImgStrength: number;
+  seed: number;
+  negative_prompt: string;
+  deliberate_euler_ancestral_bug: boolean;
+  prefer_brownian: boolean;
+  [key: string]: unknown;  // Allow additional properties during migration
+}
+
+interface GenerationPayload {
+  input: string;
+  model: string;
+  action: string;
+  parameters: GenerationPayloadParameters;
+  use_new_shared_trial: boolean;
+}
+
 export class NovelAIClient {
   private apiKey: string;
-  
+  private logger: Logger;
+
   // Retry configuration for rate limiting
   private readonly maxRetries = 3;
   private readonly baseRetryDelayMs = 1000;
 
-  constructor(apiKey?: string) {
+  constructor(apiKey?: string, options?: { logger?: Logger }) {
     this.apiKey = apiKey || process.env.NOVELAI_API_KEY || "";
+    this.logger = options?.logger ?? defaultLogger;
     if (!this.apiKey) {
       throw new Error(
         "API key is required. Set NOVELAI_API_KEY environment variable or pass apiKey parameter."
@@ -44,27 +95,53 @@ export class NovelAIClient {
 
   /**
    * ユーティリティ: リトライ付きでリクエストを実行
-   * 429エラー (Too Many Requests / Concurrent generation locked) に対応
+   * 429エラー (Too Many Requests / Concurrent generation locked) およびネットワークエラーに対応
    */
   private async fetchWithRetry(
     url: string,
     options: RequestInit,
     operationName: string = 'Request'
   ): Promise<Response> {
-    let lastError: Error | null = null;
-    
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      const response = await fetch(url, options);
-      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), Constants.DEFAULT_REQUEST_TIMEOUT_MS);
+
+      let response: Response;
+      try {
+        response = await fetch(url, { ...options, signal: controller.signal });
+      } catch (error) {
+        clearTimeout(timeoutId);
+        // Retry on network errors (timeout, connection refused, DNS failure, etc.)
+        const isRetryable = error instanceof Error && (
+          error.name === 'AbortError' ||
+          error.name === 'TypeError' ||
+          error.message.includes('ECONNREFUSED') ||
+          error.message.includes('ENOTFOUND')
+        );
+        if (isRetryable && attempt < this.maxRetries) {
+          const baseDelay = this.baseRetryDelayMs * Math.pow(2, attempt);
+          const retryDelay = Math.round(baseDelay * (1 + Math.random() * 0.3));
+          this.logger.warn(
+            `[NovelAI] ${operationName}: Network error (${error instanceof Error ? error.message : 'Unknown'}). Retrying in ${retryDelay}ms... (attempt ${attempt + 1}/${this.maxRetries})`
+          );
+          await this.sleep(retryDelay);
+          continue;
+        }
+        throw error;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
       if (response.ok) {
         return response;
       }
-      
+
       // Handle 429 (rate limit / concurrent lock)
       if (response.status === 429) {
         if (attempt < this.maxRetries) {
-          const retryDelay = this.baseRetryDelayMs * Math.pow(2, attempt);
-          console.warn(
+          const baseDelay = this.baseRetryDelayMs * Math.pow(2, attempt);
+          const retryDelay = Math.round(baseDelay * (1 + Math.random() * 0.3));
+          this.logger.warn(
             `[NovelAI] ${operationName}: Rate limited (429). Retrying in ${retryDelay}ms... (attempt ${attempt + 1}/${this.maxRetries})`
           );
           await this.sleep(retryDelay);
@@ -73,47 +150,46 @@ export class NovelAIClient {
         // Max retries reached
         const text = await response.text();
         const sanitizedText = text.length > 200 ? text.slice(0, 200) + '...[truncated]' : text;
-        console.error(`[NovelAI] ${operationName} error after ${this.maxRetries} retries (${response.status}): ${sanitizedText}`);
+        this.logger.error(`[NovelAI] ${operationName} error after ${this.maxRetries} retries (${response.status}): ${sanitizedText}`);
         throw new Error(`${operationName} failed after ${this.maxRetries} retries: ${response.status} ${response.statusText}`);
       }
-      
-      // Other errors - don't retry
+
+      // Other HTTP errors - don't retry
       const text = await response.text();
       const sanitizedText = text.length > 200 ? text.slice(0, 200) + '...[truncated]' : text;
-      console.error(`[NovelAI] ${operationName} error (${response.status}): ${sanitizedText}`);
+      this.logger.error(`[NovelAI] ${operationName} error (${response.status}): ${sanitizedText}`);
       throw new Error(`${operationName} failed: ${response.status} ${response.statusText}`);
     }
-    
-    // Should not reach here, but just in case
-    throw lastError || new Error(`${operationName} failed: Unknown error`);
+
+    throw new Error(`${operationName} failed: Unknown error after ${this.maxRetries} retries`);
   }
 
   /**
    * 残りアンラス（Training Steps）を取得
    */
   async getAnlasBalance(): Promise<AnlasBalance> {
-    const response = await fetch(Constants.SUBSCRIPTION_URL, {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${this.apiKey}`,
-        "Accept": "application/json",
+    const response = await this.fetchWithRetry(
+      Constants.SUBSCRIPTION_URL,
+      {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${this.apiKey}`,
+          "Accept": "application/json",
+        },
       },
-    });
+      'GetAnlasBalance'
+    );
 
-    if (!response.ok) {
-      throw new Error(`Failed to get subscription data: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    const trainingSteps = data.trainingStepsLeft || {};
-    const fixed = trainingSteps.fixedTrainingStepsLeft || 0;
-    const purchased = trainingSteps.purchasedTrainingSteps || 0;
+    const raw = await response.json();
+    const data = Schemas.AnlasBalanceResponseSchema.parse(raw);
+    const fixed = data.trainingStepsLeft.fixedTrainingStepsLeft;
+    const purchased = data.trainingStepsLeft.purchasedTrainingSteps;
 
     return {
       fixed,
       purchased,
       total: fixed + purchased,
-      tier: data.tier || 0,
+      tier: data.tier,
     };
   }
 
@@ -138,7 +214,7 @@ export class NovelAIClient {
       anlasBefore = balance.total;
     } catch (e) {
       // Log but continue - Anlas tracking is optional
-      console.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
+      this.logger.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     const payload = {
@@ -147,22 +223,22 @@ export class NovelAIClient {
       model: validatedParams.model,
     };
 
-    const response = await fetch(Constants.ENCODE_URL, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-        "Accept": "*/*",
+    const response = await this.fetchWithRetry(
+      Constants.ENCODE_URL,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+          "Accept": "*/*",
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
-    });
+      'VibeEncode'
+    );
 
-    if (!response.ok) {
-      throw new Error(`Vibe encoding failed: ${response.status} ${response.statusText}`);
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    const encoding = Buffer.from(arrayBuffer).toString('base64');
+    const responseBuffer = await this.getResponseBuffer(response);
+    const encoding = responseBuffer.toString('base64');
 
     // Get final balance
     let anlasRemaining: number | null = null;
@@ -175,7 +251,7 @@ export class NovelAIClient {
       }
     } catch (e) {
       // Log but continue - Anlas tracking is optional
-      console.warn('[NovelAI] Failed to get final Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
+      this.logger.warn('[NovelAI] Failed to get final Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     const result: Schemas.VibeEncodeResult = {
@@ -191,38 +267,70 @@ export class NovelAIClient {
     };
 
     // Save if requested
-    if (validatedParams.save_path) {
-      this.saveVibe(result, validatedParams.save_path);
-      result.saved_path = validatedParams.save_path;
-    } else if (validatedParams.save_dir) {
-      const dir = validatedParams.save_dir;
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
+    try {
+      if (validatedParams.save_path) {
+        await this.saveVibe(result, validatedParams.save_path);
+        result.saved_path = validatedParams.save_path;
+      } else if (validatedParams.save_dir) {
+        const dir = validatedParams.save_dir;
+        await this.ensureDir(dir);
 
-      let filename: string;
-      if (validatedParams.save_filename) {
-        // Use custom filename, ensure .naiv4vibe extension
-        const baseName = validatedParams.save_filename.replace(/\.naiv4vibe$/i, '');
-        filename = `${baseName}.naiv4vibe`;
-      } else {
-        // Auto-generate filename
-        const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 15);
-        filename = `${sourceHash.slice(0, 12)}_${timestamp}.naiv4vibe`;
-      }
-      const savePath = path.join(dir, filename);
+        let filename: string;
+        if (validatedParams.save_filename) {
+          // Use custom filename, ensure .naiv4vibe extension
+          const baseName = validatedParams.save_filename.replace(/\.naiv4vibe$/i, '');
+          filename = `${baseName}.naiv4vibe`;
+        } else {
+          // Auto-generate filename
+          const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 15);
+          filename = `${sourceHash.slice(0, 12)}_${timestamp}.naiv4vibe`;
+        }
+        const savePath = path.join(dir, filename);
 
-      this.saveVibe(result, savePath);
-      result.saved_path = savePath;
+        await this.saveVibe(result, savePath);
+        result.saved_path = savePath;
+      }
+    } catch (e) {
+      this.logger.warn('[NovelAI] Failed to save vibe file:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     return result;
   }
 
-  private saveVibe(result: Schemas.VibeEncodeResult, savePath: string) {
-    const dir = path.dirname(savePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  /**
+   * パストラバーサル防止: normalize後に".."が含まれていないか検証
+   */
+  private validateSavePath(savePath: string): string {
+    const normalized = path.normalize(savePath);
+    if (normalized.includes('..')) {
+      throw new Error(`Invalid save path (path traversal detected): ${savePath}`);
+    }
+    return normalized;
+  }
 
+  private async ensureDir(dir: string): Promise<void> {
+    await fsp.mkdir(dir, { recursive: true });
+  }
+
+  private async saveToFile(savePath: string, data: string | Buffer | Uint8Array): Promise<void> {
+    savePath = this.validateSavePath(savePath);
+    await this.ensureDir(path.dirname(savePath));
+    await fsp.writeFile(savePath, data);
+  }
+
+  private async getResponseBuffer(response: Response, maxSize: number = Constants.MAX_RESPONSE_SIZE): Promise<Buffer> {
+    const contentLength = response.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > maxSize) {
+      throw new Error(`Response too large: ${contentLength} bytes (max ${maxSize})`);
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > maxSize) {
+      throw new Error(`Response too large: ${buffer.length} bytes (max ${maxSize})`);
+    }
+    return buffer;
+  }
+
+  private async saveVibe(result: Schemas.VibeEncodeResult, savePath: string) {
     const modelKey = Constants.MODEL_KEY_MAP[result.model] || "v4-5full";
 
     const vibeData = {
@@ -249,7 +357,7 @@ export class NovelAIClient {
       },
     };
 
-    fs.writeFileSync(savePath, JSON.stringify(vibeData, null, 2), 'utf-8');
+    await this.saveToFile(savePath, JSON.stringify(vibeData, null, 2));
   }
 
   // ===========================================================================
@@ -263,18 +371,18 @@ export class NovelAIClient {
     validatedParams: Schemas.GenerateParams & { width: number; height: number; model: string },
     seed: number,
     negativePrompt: string
-  ): any {
+  ): GenerationPayload {
     return {
       input: validatedParams.prompt,
       model: validatedParams.model,
-      action: validatedParams.action,
+      action: validatedParams.action!,
       parameters: {
         params_version: 3,
         width: validatedParams.width,
         height: validatedParams.height,
-        scale: validatedParams.scale,
-        sampler: validatedParams.sampler,
-        steps: validatedParams.steps,
+        scale: validatedParams.scale!,
+        sampler: validatedParams.sampler!,
+        steps: validatedParams.steps!,
         n_samples: 1,
         ucPreset: 0,
         qualityToggle: true,
@@ -283,8 +391,8 @@ export class NovelAIClient {
         controlnet_strength: 1,
         legacy: false,
         add_original_image: true,
-        cfg_rescale: validatedParams.cfg_rescale,
-        noise_schedule: validatedParams.noise_schedule,
+        cfg_rescale: validatedParams.cfg_rescale!,
+        noise_schedule: validatedParams.noise_schedule!,
         legacy_v3_extend: false,
         skip_cfg_above_sigma: null,
         use_coords: false,
@@ -304,7 +412,7 @@ export class NovelAIClient {
    * Apply Img2Img parameters to the payload
    */
   private applyImg2ImgParams(
-    payload: any,
+    payload: GenerationPayload,
     validatedParams: Schemas.GenerateParams,
     seed: number
   ): void {
@@ -312,7 +420,7 @@ export class NovelAIClient {
       payload.parameters.image = Utils.getImageBase64(validatedParams.source_image);
       payload.parameters.strength = validatedParams.img2img_strength;
       payload.parameters.noise = validatedParams.img2img_noise;
-      payload.parameters.extra_noise_seed = seed - 1;
+      payload.parameters.extra_noise_seed = seed === 0 ? Constants.MAX_SEED : seed - 1;
     }
   }
 
@@ -320,7 +428,7 @@ export class NovelAIClient {
    * Apply Infill/Inpaint parameters to the payload
    */
   private async applyInfillParams(
-    payload: any,
+    payload: GenerationPayload,
     validatedParams: Schemas.GenerateParams & { width: number; height: number; model: string },
     seed: number
   ): Promise<void> {
@@ -328,8 +436,10 @@ export class NovelAIClient {
       return;
     }
 
-    // モデル名に-inpaintingサフィックスを追加
-    payload.model = validatedParams.model + "-inpainting";
+    // モデル名に-inpaintingサフィックスを追加（重複防止）
+    if (!validatedParams.model.endsWith('-inpainting')) {
+      payload.model = validatedParams.model + "-inpainting";
+    }
     
     // 元画像を取得
     const sourceImageBuffer = Utils.getImageBuffer(validatedParams.source_image);
@@ -349,7 +459,10 @@ export class NovelAIClient {
     const maskCacheSecretKey = Utils.calculateCacheSecretKey(resizedMask);
     
     // パラメータ設定
-    const maskStrength = validatedParams.mask_strength!;
+    if (validatedParams.mask_strength == null) {
+      throw new Error('mask_strength is required for infill action');
+    }
+    const maskStrength = validatedParams.mask_strength;
     const hybridStrength = validatedParams.hybrid_img2img_strength ?? maskStrength;
     const hybridNoise = validatedParams.hybrid_img2img_noise ?? 0;
     
@@ -359,7 +472,7 @@ export class NovelAIClient {
     payload.parameters.strength = hybridStrength;
     payload.parameters.noise = hybridNoise;
     payload.parameters.add_original_image = false;
-    payload.parameters.extra_noise_seed = seed - 1;
+    payload.parameters.extra_noise_seed = seed === 0 ? Constants.MAX_SEED : seed - 1;
     payload.parameters.inpaintImg2ImgStrength = maskStrength;
     payload.parameters.img2img = {
       strength: maskStrength,
@@ -375,7 +488,7 @@ export class NovelAIClient {
    * Apply Vibe Transfer parameters to the payload
    */
   private applyVibeParams(
-    payload: any,
+    payload: GenerationPayload,
     vibeEncodings: string[],
     vibeStrengths: number[] | null | undefined,
     vibeInfoList: number[]
@@ -392,7 +505,7 @@ export class NovelAIClient {
    * Apply Character Reference parameters to the payload
    */
   private applyCharRefParams(
-    payload: any,
+    payload: GenerationPayload,
     charRefData: Awaited<ReturnType<typeof Utils.processCharacterReferences>>
   ): void {
     const { images, descriptions, info_extracted, strength_values, secondary_strength_values } = charRefData;
@@ -409,7 +522,7 @@ export class NovelAIClient {
    * Build V4 prompt structure for the payload
    */
   private buildV4PromptStructure(
-    payload: any,
+    payload: GenerationPayload,
     prompt: string,
     negativePrompt: string,
     charCaptions: ReturnType<typeof Schemas.characterToCaptionDict>[],
@@ -436,7 +549,7 @@ export class NovelAIClient {
    * Apply character prompts (use_coords) to the payload
    */
   private applyCharacterPrompts(
-    payload: any,
+    payload: GenerationPayload,
     charConfigs: Schemas.CharacterConfig[]
   ): void {
     if (charConfigs.length > 0) {
@@ -523,7 +636,7 @@ export class NovelAIClient {
       const balance = await this.getAnlasBalance();
       anlasBefore = balance.total;
     } catch (e) {
-      console.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
+      this.logger.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     // Make Request
@@ -544,7 +657,7 @@ export class NovelAIClient {
       'Generation'
     );
 
-    const responseBuffer = Buffer.from(await response.arrayBuffer());
+    const responseBuffer = await this.getResponseBuffer(response);
     const imageData = useStream ? this.parseStreamResponse(responseBuffer) : this.parseZipResponse(responseBuffer);
 
     // Get final balance
@@ -557,7 +670,7 @@ export class NovelAIClient {
         anlasConsumed = anlasBefore - anlasRemaining;
       }
     } catch (e) {
-      console.warn('[NovelAI] Failed to get final Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
+      this.logger.warn('[NovelAI] Failed to get final Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     const result: Schemas.GenerateResult = {
@@ -569,39 +682,51 @@ export class NovelAIClient {
     };
 
     // Save
-    if (validatedParams.save_path) {
-      this.saveImage(result, validatedParams.save_path);
-      result.saved_path = validatedParams.save_path;
-    } else if (validatedParams.save_dir) {
-      const dir = validatedParams.save_dir;
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    try {
+      if (validatedParams.save_path) {
+        await this.saveImage(result, validatedParams.save_path);
+        result.saved_path = validatedParams.save_path;
+      } else if (validatedParams.save_dir) {
+        const dir = validatedParams.save_dir;
+        await this.ensureDir(dir);
 
-      let prefix = validatedParams.action === "img2img" ? "img2img" : "gen";
-      if (charConfigs.length > 0) prefix += "_multi";
+        let prefix = validatedParams.action === "img2img" ? "img2img" : "gen";
+        if (charConfigs.length > 0) prefix += "_multi";
 
-      const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 15);
-      const filename = `${prefix}_${timestamp}_${seed}.png`;
-      const savePath = path.join(dir, filename);
+        const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 15);
+        const filename = `${prefix}_${timestamp}_${seed}.png`;
+        const savePath = path.join(dir, filename);
 
-      this.saveImage(result, savePath);
-      result.saved_path = savePath;
+        await this.saveImage(result, savePath);
+        result.saved_path = savePath;
+      }
+    } catch (e) {
+      this.logger.warn('[NovelAI] Failed to save image:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     return result;
   }
 
-  private saveImage(result: { image_data: Buffer }, savePath: string) {
-      const dir = path.dirname(savePath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(savePath, result.image_data);
+  private async saveImage(result: { image_data: Buffer | Uint8Array }, savePath: string) {
+      await this.saveToFile(savePath, result.image_data);
   }
 
   private parseZipResponse(content: Buffer): Buffer {
     const zip = new AdmZip(content);
     const zipEntries = zip.getEntries();
 
+    if (zipEntries.length > Constants.MAX_ZIP_ENTRIES) {
+      throw new Error(`Too many ZIP entries: ${zipEntries.length} (max ${Constants.MAX_ZIP_ENTRIES})`);
+    }
+
     for (const entry of zipEntries) {
       if (entry.entryName.match(/\.(png|webp|jpg|jpeg)$/i)) {
+        if (entry.header.size > Constants.MAX_DECOMPRESSED_IMAGE_SIZE) {
+          throw new Error(`Decompressed image too large (${entry.header.size} bytes, max ${Constants.MAX_DECOMPRESSED_IMAGE_SIZE})`);
+        }
+        if (entry.header.compressedSize > 0 && entry.header.size / entry.header.compressedSize > Constants.MAX_COMPRESSION_RATIO) {
+          throw new Error(`Suspicious compression ratio detected`);
+        }
         return entry.getData();
       }
     }
@@ -632,12 +757,19 @@ export class NovelAIClient {
              }
         }
     } catch (e) {
-        // ignore and fallback
+        this.logger.warn('[NovelAI] msgpack parse failed, falling back to PNG detection:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     // Fallback: search for PNG magic bytes
     const pngStart = content.indexOf(pngSignature);
     if (pngStart !== -1) {
+        // Search for IEND chunk to get exact PNG end
+        const iendMarker = Buffer.from([0x49, 0x45, 0x4e, 0x44]);
+        const iendPos = content.indexOf(iendMarker, pngStart);
+        if (iendPos !== -1) {
+            // IEND chunk: 4 bytes length + 4 bytes "IEND" + 4 bytes CRC
+            return content.subarray(pngStart, iendPos + 8);
+        }
         return content.subarray(pngStart);
     }
 
@@ -664,7 +796,7 @@ export class NovelAIClient {
       anlasBefore = balance.total;
     } catch (e) {
       // Log but continue - Anlas tracking is optional
-      console.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
+      this.logger.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     // Build payload with auto-detected dimensions
@@ -704,7 +836,7 @@ export class NovelAIClient {
       'Augment'
     );
 
-    const responseBuffer = Buffer.from(await response.arrayBuffer());
+    const responseBuffer = await this.getResponseBuffer(response);
     const imageData = this.parseZipResponse(responseBuffer);
 
     // Get final balance
@@ -718,7 +850,7 @@ export class NovelAIClient {
       }
     } catch (e) {
       // Log but continue - Anlas tracking is optional
-      console.warn('[NovelAI] Failed to get final Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
+      this.logger.warn('[NovelAI] Failed to get final Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     const result: Schemas.AugmentResult = {
@@ -730,19 +862,24 @@ export class NovelAIClient {
     };
 
     // Save if requested
-    if (validatedParams.save_path) {
-      this.saveImage(result, validatedParams.save_path);
-      result.saved_path = validatedParams.save_path;
-    } else if (validatedParams.save_dir) {
-      const dir = validatedParams.save_dir;
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    try {
+      if (validatedParams.save_path) {
+        await this.saveImage(result, validatedParams.save_path);
+        result.saved_path = validatedParams.save_path;
+      } else if (validatedParams.save_dir) {
+        const dir = validatedParams.save_dir;
+        await this.ensureDir(dir);
 
-      const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 15);
-      const filename = `${validatedParams.req_type}_${timestamp}.png`;
-      const savePath = path.join(dir, filename);
+        const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 15);
+        const rand = crypto.randomBytes(2).toString('hex');
+        const filename = `${validatedParams.req_type}_${timestamp}_${rand}.png`;
+        const savePath = path.join(dir, filename);
 
-      this.saveImage(result, savePath);
-      result.saved_path = savePath;
+        await this.saveImage(result, savePath);
+        result.saved_path = savePath;
+      }
+    } catch (e) {
+      this.logger.warn('[NovelAI] Failed to save augmented image:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     return result;
@@ -768,7 +905,7 @@ export class NovelAIClient {
       anlasBefore = balance.total;
     } catch (e) {
       // Log but continue - Anlas tracking is optional
-      console.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
+      this.logger.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     const payload = {
@@ -792,7 +929,7 @@ export class NovelAIClient {
     );
 
     // Response can be ZIP or raw image
-    const responseBuffer = Buffer.from(await response.arrayBuffer());
+    const responseBuffer = await this.getResponseBuffer(response);
     let imageData: Buffer;
 
     // Check for ZIP signature (PK)
@@ -813,7 +950,7 @@ export class NovelAIClient {
       }
     } catch (e) {
       // Log but continue - Anlas tracking is optional
-      console.warn('[NovelAI] Failed to get final Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
+      this.logger.warn('[NovelAI] Failed to get final Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     const outputWidth = width * validatedParams.scale;
@@ -830,19 +967,24 @@ export class NovelAIClient {
     };
 
     // Save if requested
-    if (validatedParams.save_path) {
-      this.saveImage(result, validatedParams.save_path);
-      result.saved_path = validatedParams.save_path;
-    } else if (validatedParams.save_dir) {
-      const dir = validatedParams.save_dir;
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    try {
+      if (validatedParams.save_path) {
+        await this.saveImage(result, validatedParams.save_path);
+        result.saved_path = validatedParams.save_path;
+      } else if (validatedParams.save_dir) {
+        const dir = validatedParams.save_dir;
+        await this.ensureDir(dir);
 
-      const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 15);
-      const filename = `upscale_${validatedParams.scale}x_${timestamp}.png`;
-      const savePath = path.join(dir, filename);
+        const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 15);
+        const rand = crypto.randomBytes(2).toString('hex');
+        const filename = `upscale_${validatedParams.scale}x_${timestamp}_${rand}.png`;
+        const savePath = path.join(dir, filename);
 
-      this.saveImage(result, savePath);
-      result.saved_path = savePath;
+        await this.saveImage(result, savePath);
+        result.saved_path = savePath;
+      }
+    } catch (e) {
+      this.logger.warn('[NovelAI] Failed to save upscaled image:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     return result;

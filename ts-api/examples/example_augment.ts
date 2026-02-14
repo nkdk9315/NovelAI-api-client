@@ -5,14 +5,14 @@
  * 
  * 注意: width/height は画像から自動検出されるため、指定不要です
  */
-import { NovelAIClient } from './src/client';
+import { NovelAIClient } from '../src/client';
 import path from 'path';
 import dotenv from 'dotenv';
 
 // .envファイルを読み込み
 dotenv.config();
 
-const OUTPUT_DIR = path.join(__dirname, 'output', 'augment');
+const OUTPUT_DIR = path.join(__dirname, '..', 'output', 'augment');
 
 async function main() {
   const client = new NovelAIClient();
@@ -29,7 +29,7 @@ async function main() {
   try {
     const colorizeResult = await client.augmentImage({
       req_type: "colorize",
-      image: path.join(__dirname, 'reference', 'input.jpeg'),  // モノクロ画像
+      image: path.join(__dirname, '..', 'reference', 'input.jpeg'),  // モノクロ画像
       // width/height は自動検出
       prompt: "vibrant colors, detailed shading",  // カラー化のヒント
       defry: 3,  // 中程度の変更 (0=最強, 5=最弱)
@@ -55,7 +55,7 @@ async function main() {
   try {
     const emotionResult = await client.augmentImage({
       req_type: "emotion",
-      image: path.join(__dirname, 'reference', 'input.jpeg'),  // 顔画像
+      image: path.join(__dirname, '..', 'reference', 'input.jpeg'),  // 顔画像
       // width/height は自動検出
       prompt: "happy",  // 表情キーワード
       defry: 0,  // 最強の変更
@@ -74,7 +74,7 @@ async function main() {
   try {
     const sketchResult = await client.augmentImage({
       req_type: "sketch",
-      image: path.join(__dirname, 'reference', 'input.jpeg'),
+      image: path.join(__dirname, '..', 'reference', 'input.jpeg'),
       // width/height は自動検出
       save_dir: OUTPUT_DIR,
     });
@@ -91,7 +91,7 @@ async function main() {
   try {
     const lineartResult = await client.augmentImage({
       req_type: "lineart",
-      image: path.join(__dirname, 'reference', 'input.jpeg'),
+      image: path.join(__dirname, '..', 'reference', 'input.jpeg'),
       // width/height は自動検出
       save_dir: OUTPUT_DIR,
     });
@@ -108,7 +108,7 @@ async function main() {
   try {
     const declutterResult = await client.augmentImage({
       req_type: "declutter",
-      image: path.join(__dirname, 'reference', 'input.jpeg'),
+      image: path.join(__dirname, '..', 'reference', 'input.jpeg'),
       // width/height は自動検出
       save_dir: OUTPUT_DIR,
     });
@@ -125,7 +125,7 @@ async function main() {
   try {
     const bgRemovalResult = await client.augmentImage({
       req_type: "bg-removal",
-      image: path.join(__dirname, 'reference', 'input.jpeg'),
+      image: path.join(__dirname, '..', 'reference', 'input.jpeg'),
       // width/height は自動検出
       save_dir: OUTPUT_DIR,
     });
@@ -141,7 +141,7 @@ async function main() {
   console.log('\n🔍 アップスケールテスト（⚠️ 常にアンラス消費）...');
   try {
     const upscaleResult = await client.upscaleImage({
-      image: path.join(__dirname, 'reference', 'input.jpeg'),
+      image: path.join(__dirname, '..', 'reference', 'input.jpeg'),
       // width/height は自動検出
       scale: 4,  // 4倍拡大 (2 or 4)
       save_dir: OUTPUT_DIR,

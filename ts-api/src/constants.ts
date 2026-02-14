@@ -7,12 +7,12 @@
 // API URLs
 // =============================================================================
 
-export const API_URL = "https://image.novelai.net/ai/generate-image";
-export const STREAM_URL = "https://image.novelai.net/ai/generate-image-stream";
-export const ENCODE_URL = "https://image.novelai.net/ai/encode-vibe";
-export const SUBSCRIPTION_URL = "https://api.novelai.net/user/subscription";
-export const AUGMENT_URL = "https://image.novelai.net/ai/augment-image";
-export const UPSCALE_URL = "https://api.novelai.net/ai/upscale";
+export const API_URL = process.env.NOVELAI_API_URL ?? "https://image.novelai.net/ai/generate-image";
+export const STREAM_URL = process.env.NOVELAI_STREAM_URL ?? "https://image.novelai.net/ai/generate-image-stream";
+export const ENCODE_URL = process.env.NOVELAI_ENCODE_URL ?? "https://image.novelai.net/ai/encode-vibe";
+export const SUBSCRIPTION_URL = process.env.NOVELAI_SUBSCRIPTION_URL ?? "https://api.novelai.net/user/subscription";
+export const AUGMENT_URL = process.env.NOVELAI_AUGMENT_URL ?? "https://image.novelai.net/ai/augment-image";
+export const UPSCALE_URL = process.env.NOVELAI_UPSCALE_URL ?? "https://api.novelai.net/ai/upscale";
 
 
 // =============================================================================
@@ -20,10 +20,10 @@ export const UPSCALE_URL = "https://api.novelai.net/ai/upscale";
 // =============================================================================
 
 export const DEFAULT_NEGATIVE = [
-    "nsfw, lowres, artistic error, film grain, scan artifacts, ",
-    "worst quality, bad quality, jpeg artifacts, very displeasing, ",
-    "chromatic aberration, dithering, halftone, screentone"
-].join("");
+    "nsfw", "lowres", "artistic error", "film grain", "scan artifacts",
+    "worst quality", "bad quality", "jpeg artifacts", "very displeasing",
+    "chromatic aberration", "dithering", "halftone", "screentone"
+].join(", ");
 
 export const DEFAULT_MODEL = "nai-diffusion-4-5-full";
 export const DEFAULT_WIDTH = 832;
@@ -73,12 +73,12 @@ export const VALID_NOISE_SCHEDULES = [
 ] as const;
 
 // モデルキーマップ（Vibeファイル用）
-export const MODEL_KEY_MAP: Record<string, string> = {
+export const MODEL_KEY_MAP = {
     "nai-diffusion-4-curated-preview": "v4curated",
     "nai-diffusion-4-full": "v4full",
     "nai-diffusion-4-5-curated": "v4-5curated",
     "nai-diffusion-4-5-full": "v4-5full",
-};
+} as const;
 
 
 // =============================================================================
@@ -86,14 +86,13 @@ export const MODEL_KEY_MAP: Record<string, string> = {
 // =============================================================================
 
 // プロンプト
-export const MAX_PROMPT_CHARS = 2000;  // 文字数制限（512トークン×4文字の目安）
 export const MAX_TOKENS = 512;  // トークン数制限（T5 Tokenizer）
 
 
 // ピクセル
 export const MAX_PIXELS = 3_145_728;  // 2048 * 1536 (サーバー側生成制限)
 export const MIN_DIMENSION = 64;
-export const MAX_DIMENSION = 1024;
+export const MAX_GENERATION_DIMENSION = 2048;  // 単辺の最大値（MAX_PIXELSと合わせて制約）
 
 // キャラクター
 export const MAX_CHARACTERS = 6;
@@ -113,9 +112,11 @@ export const MAX_REF_IMAGE_SIZE_MB = 10;
 export const MAX_REF_IMAGE_DIMENSION = 4096;
 
 // キャラクター参照画像サイズ
-export const CHARREF_PORTRAIT_SIZE = { width: 1024, height: 1536 };  // 縦長
-export const CHARREF_LANDSCAPE_SIZE = { width: 1536, height: 1024 };  // 横長
-export const CHARREF_SQUARE_SIZE = { width: 1472, height: 1472 };  // 正方形
+export const CHARREF_PORTRAIT_SIZE = { width: 1024, height: 1536 } as const;  // 縦長
+export const CHARREF_LANDSCAPE_SIZE = { width: 1536, height: 1024 } as const;  // 横長
+export const CHARREF_SQUARE_SIZE = { width: 1472, height: 1472 } as const;  // 正方形
+export const CHARREF_PORTRAIT_THRESHOLD = 0.8;
+export const CHARREF_LANDSCAPE_THRESHOLD = 1.25;
 
 
 // =============================================================================
@@ -205,14 +206,26 @@ export const AUGMENT_MIN_PIXELS = 1_048_576;
 export const BG_REMOVAL_MULTIPLIER = 3;
 export const BG_REMOVAL_ADDEND = 5;
 
-// アップスケールコストテーブル [最大ピクセル数, コスト]
+// アップスケールコストテーブル [最大ピクセル数, コスト]（昇順）
 export const UPSCALE_COST_TABLE: ReadonlyArray<readonly [number, number]> = [
-  [1_048_576, 7],
-  [786_432, 5],
-  [524_288, 3],
-  [409_600, 2],
   [262_144, 1],
+  [409_600, 2],
+  [524_288, 3],
+  [786_432, 5],
+  [1_048_576, 7],
 ] as const;
 
 // アップスケールOpus無料ピクセル上限
 export const UPSCALE_OPUS_FREE_PIXELS = 409_600;
+
+
+// =============================================================================
+// ネットワーク・セキュリティ定数
+// =============================================================================
+
+export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;  // 60秒
+export const MAX_DECOMPRESSED_IMAGE_SIZE = 50 * 1024 * 1024;  // 50MB
+export const MAX_RESPONSE_SIZE = 200 * 1024 * 1024;           // 200MB
+export const MAX_ZIP_ENTRIES = 10;
+export const MAX_COMPRESSION_RATIO = 100;
+export const MAX_VIBE_ENCODING_LENGTH = 5_000_000;            // ~3.5MB base64

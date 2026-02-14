@@ -7,14 +7,48 @@ import { z } from "zod";
 import * as Constants from "./constants";
 
 // =============================================================================
+// Shared Infrastructure
+// =============================================================================
+
+/** Path traversal prevention schema */
+const SafePathSchema = z.string().refine(
+  (val) => !val.replace(/\\/g, '/').includes('..'),
+  { message: "Path must not contain '..' (path traversal)" }
+);
+
+/** Browser-compatible binary data schema (Buffer | Uint8Array) */
+const BinaryDataSchema = z.union([z.instanceof(Buffer), z.instanceof(Uint8Array)]);
+
+// Type alias for refinement context
+type RefinementCtx = z.RefinementCtx;
+
+/**
+ * Validate save_path and save_dir are mutually exclusive.
+ * Shared across GenerateParams, EncodeVibeParams, AugmentParams, UpscaleParams.
+ */
+function validateSaveOptionsExclusive(
+  data: { save_path?: string | null; save_dir?: string | null },
+  ctx: RefinementCtx
+): void {
+  if (data.save_path && data.save_dir) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "save_path and save_dir cannot be specified together. Use one or the other.",
+      path: ["save_path"],
+    });
+  }
+}
+
+
+// =============================================================================
 // CharacterConfig
 // =============================================================================
 
 export const CharacterConfigSchema = z.object({
-  prompt: z.string().min(1).max(Constants.MAX_PROMPT_CHARS),
+  prompt: z.string().min(1),
   center_x: z.number().min(0.0).max(1.0).default(0.5),
   center_y: z.number().min(0.0).max(1.0).default(0.5),
-  negative_prompt: z.string().max(Constants.MAX_PROMPT_CHARS).default(""),
+  negative_prompt: z.string().default(""),
 });
 
 export type CharacterConfig = z.infer<typeof CharacterConfigSchema>;
@@ -39,8 +73,20 @@ export function characterToNegativeCaptionDict(config: CharacterConfig) {
 // CharacterReferenceConfig
 // =============================================================================
 
-// Image input can be string (path or base64) or Buffer
-const ImageInputSchema = z.union([z.string(), z.instanceof(Buffer)]);
+// Image input can be string (path or base64) or Buffer/Uint8Array
+const ImageInputSchema = z.union([
+  z.string().min(1).refine(
+    (val) => {
+      // Skip traversal check for data URLs and Base64 strings
+      if (val.startsWith('data:')) return true;
+      if (/^[A-Za-z0-9+/\-_]+=*$/.test(val) && val.length > 64) return true;
+      // For file-path-like strings, check for path traversal
+      return !val.replace(/\\/g, '/').includes('..');
+    },
+    { message: "Path must not contain '..' (path traversal)" }
+  ),
+  BinaryDataSchema,
+]);
 
 export const CHARREF_MODES = ["character", "character&style", "style"] as const;
 
@@ -59,18 +105,24 @@ export type CharacterReferenceConfig = z.infer<typeof CharacterReferenceConfigSc
 // =============================================================================
 
 export const VibeEncodeResultSchema = z.object({
-  encoding: z.string().min(1),
+  encoding: z.string().min(1).max(Constants.MAX_VIBE_ENCODING_LENGTH).refine(
+    (val) => /^[A-Za-z0-9+/]+=*$/.test(val),
+    { message: "encoding must be valid base64" }
+  ),
   model: z.enum(Constants.VALID_MODELS),
   information_extracted: z.number().min(0.0).max(1.0),
   strength: z.number().min(0.0).max(1.0),
-  source_image_hash: z.string().regex(/^[a-f0-9]{64}$/),
+  source_image_hash: z.string().regex(/^[a-fA-F0-9]{64}$/),
   created_at: z.date(),
-  saved_path: z.string().optional().nullable(),
-  anlas_remaining: z.number().min(0).optional().nullable(),
-  anlas_consumed: z.number().min(0).optional().nullable(),
+  saved_path: z.string().nullish(),
+  anlas_remaining: z.number().min(0).nullish(),
+  anlas_consumed: z.number().min(0).nullish(),
 });
 
 export type VibeEncodeResult = z.infer<typeof VibeEncodeResultSchema>;
+
+/** Typed vibe item: either a pre-encoded VibeEncodeResult or a file path string */
+const VibeItemSchema = z.union([VibeEncodeResultSchema, z.string().min(1)]);
 
 
 // =============================================================================
@@ -78,41 +130,82 @@ export type VibeEncodeResult = z.infer<typeof VibeEncodeResultSchema>;
 // =============================================================================
 
 export const GenerateResultSchema = z.object({
-  image_data: z.instanceof(Buffer),
-  seed: z.number().min(0).max(Constants.MAX_SEED),
-  anlas_remaining: z.number().min(0).optional().nullable(),
-  anlas_consumed: z.number().min(0).optional().nullable(),
-  saved_path: z.string().optional().nullable(),
+  image_data: BinaryDataSchema,
+  seed: z.number().int().min(0).max(Constants.MAX_SEED),
+  anlas_remaining: z.number().min(0).nullish(),
+  anlas_consumed: z.number().min(0).nullish(),
+  saved_path: z.string().nullish(),
 });
 
 export type GenerateResult = z.infer<typeof GenerateResultSchema>;
 
 
 // =============================================================================
-// GenerateParams - Validation Helper Functions
+// GenerateParams - Base Schema & Inferred Type
 // =============================================================================
 
-// Type alias for refinement context
-type RefinementCtx = z.RefinementCtx;
+const GenerateParamsBaseSchema = z.object({
+  // === 基本プロンプト ===
+  // .min(0): 空プロンプトは意図的に許容（vibes/img2imgのみの使用ケース）
+  prompt: z.string().min(0),
 
-// Raw input type before validation (used by validation helpers)
-type GenerateParamsRaw = {
-  prompt: string;
-  action: "generate" | "img2img" | "infill";
-  source_image?: string | Buffer | null;
-  mask?: string | Buffer | null;
-  mask_strength?: number | null;
-  vibes?: any[] | null;
-  vibe_strengths?: number[] | null;
-  vibe_info_extracted?: number[] | null;
-  character_reference?: z.infer<typeof CharacterReferenceConfigSchema> | null;
-  characters?: z.infer<typeof CharacterConfigSchema>[] | null;
-  negative_prompt?: string | null;
-  save_path?: string | null;
-  save_dir?: string | null;
-  width: number;
-  height: number;
-};
+  // === Action & Image2Image ===
+  action: z.enum(["generate", "img2img", "infill"]).default("generate"),
+  source_image: ImageInputSchema.nullish(),
+  img2img_strength: z.number().min(0.0).max(1.0).default(Constants.DEFAULT_IMG2IMG_STRENGTH),
+  img2img_noise: z.number().min(0.0).max(1.0).default(0.0),
+
+  // === Inpaint/Mask ===
+  mask: ImageInputSchema.nullish(),
+  /** Mask application strength (0.01-1). Required for infill action. */
+  mask_strength: z.number().min(0.01).max(1.0).nullish(),
+  inpaint_color_correct: z.boolean().default(Constants.DEFAULT_INPAINT_COLOR_CORRECT),
+
+  // === Hybrid Mode (Mask + Img2Img) ===
+  /** Img2Img strength when used with mask. Controls how much original image influences (0.01-0.99). */
+  hybrid_img2img_strength: z.number().min(0.01).max(0.99).nullish(),
+  /** Img2Img noise when used with mask (0-0.99). */
+  hybrid_img2img_noise: z.number().min(0.0).max(0.99).nullish(),
+
+  // === キャラクター設定 ===
+  characters: z.array(CharacterConfigSchema).max(Constants.MAX_CHARACTERS).nullish(),
+
+  // === Vibe Transfer ===
+  vibes: z.array(VibeItemSchema).max(Constants.MAX_VIBES).nullish(),
+  vibe_strengths: z.array(z.number().min(0.0).max(1.0)).nullish(),
+  vibe_info_extracted: z.array(z.number().min(0.0).max(1.0)).nullish(),
+
+  // === Character Reference ===
+  character_reference: CharacterReferenceConfigSchema.nullish(),
+
+  // === プロンプト ===
+  negative_prompt: z.string().nullish(),
+
+  // === 出力オプション ===
+  save_path: SafePathSchema.nullish(),
+  save_dir: SafePathSchema.nullish(),
+
+  // === 生成パラメータ ===
+  model: z.enum(Constants.VALID_MODELS).default(Constants.DEFAULT_MODEL),
+  width: z.number().int().min(Constants.MIN_DIMENSION).max(Constants.MAX_GENERATION_DIMENSION).default(Constants.DEFAULT_WIDTH)
+    .refine(val => val % 64 === 0, { message: "Width must be a multiple of 64" }),
+  height: z.number().int().min(Constants.MIN_DIMENSION).max(Constants.MAX_GENERATION_DIMENSION).default(Constants.DEFAULT_HEIGHT)
+    .refine(val => val % 64 === 0, { message: "Height must be a multiple of 64" }),
+  steps: z.number().int().min(Constants.MIN_STEPS).max(Constants.MAX_STEPS).default(Constants.DEFAULT_STEPS),
+  scale: z.number().min(Constants.MIN_SCALE).max(Constants.MAX_SCALE).default(Constants.DEFAULT_SCALE),
+  cfg_rescale: z.number().min(0).max(1).default(Constants.DEFAULT_CFG_RESCALE),
+  seed: z.number().int().min(0).max(Constants.MAX_SEED).nullish(),
+  sampler: z.enum(Constants.VALID_SAMPLERS).default(Constants.DEFAULT_SAMPLER),
+  noise_schedule: z.enum(Constants.VALID_NOISE_SCHEDULES).default(Constants.DEFAULT_NOISE_SCHEDULE),
+});
+
+/** Inferred type from base schema (used by validation helpers - no manual type needed) */
+type GenerateParamsRaw = z.infer<typeof GenerateParamsBaseSchema>;
+
+
+// =============================================================================
+// GenerateParams - Validation Helper Functions
+// =============================================================================
 
 /**
  * Validate action-dependent requirements (img2img, infill)
@@ -125,6 +218,11 @@ function validateActionDependencies(data: GenerateParamsRaw, ctx: RefinementCtx)
       message: "vibes and character_reference cannot be used together.",
       path: ["character_reference"],
     });
+  }
+
+  // action="generate" で source_image が指定されている場合は警告
+  if (data.action === "generate" && data.source_image) {
+    console.warn('[NovelAI] source_image is specified but action is "generate". Did you mean action="img2img"?');
   }
 
   // action="img2img" の場合は source_image が必須
@@ -178,7 +276,7 @@ function validateVibeParams(data: GenerateParamsRaw, ctx: RefinementCtx): void {
   const hasVibes = data.vibes && data.vibes.length > 0;
 
   // vibes なしで vibe_strengths が指定されている
-  if (data.vibe_strengths && !hasVibes) {
+  if (data.vibe_strengths && data.vibe_strengths.length > 0 && !hasVibes) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: "vibe_strengths cannot be specified without vibes",
@@ -187,7 +285,7 @@ function validateVibeParams(data: GenerateParamsRaw, ctx: RefinementCtx): void {
   }
 
   // vibes なしで vibe_info_extracted が指定されている
-  if (data.vibe_info_extracted && !hasVibes) {
+  if (data.vibe_info_extracted && data.vibe_info_extracted.length > 0 && !hasVibes) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: "vibe_info_extracted cannot be specified without vibes",
@@ -228,19 +326,6 @@ function validatePixelConstraints(data: GenerateParamsRaw, ctx: RefinementCtx): 
       code: z.ZodIssueCode.custom,
       message: `Total pixels (${totalPixels}) exceeds limit (${Constants.MAX_PIXELS}). Current: ${data.width}x${data.height}`,
       path: ["width"],
-    });
-  }
-}
-
-/**
- * Validate save options (save_path and save_dir are mutually exclusive)
- */
-function validateSaveOptions(data: GenerateParamsRaw, ctx: RefinementCtx): void {
-  if (data.save_path && data.save_dir) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "save_path and save_dir cannot be specified together. Use one or the other.",
-      path: ["save_path"],
     });
   }
 }
@@ -307,85 +392,36 @@ async function validateTokenCounts(data: GenerateParamsRaw, ctx: RefinementCtx):
       }
     }
   } catch (error: any) {
-    // Network errors or tokenizer errors are logged but don't block validation
-    if (error.name !== 'TokenValidationError' && error.name !== 'TokenizerError') {
-      console.warn('[NovelAI] Token validation skipped due to error:', error.message);
+    if (error.name === 'TokenValidationError') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error.message,
+        path: ["prompt"],
+      });
+    } else if (error.name === 'TokenizerError') {
+      console.warn('[NovelAI] Token validation skipped - tokenizer unavailable:', error.message);
+    } else {
+      console.warn('[NovelAI] Token validation skipped due to unexpected error:', error.message);
     }
   }
 }
 
 // =============================================================================
-// GenerateParams Schema Definition
+// GenerateParams Schema Definition (with validation)
 // =============================================================================
 
-export const GenerateParamsSchema = z.object({
-  // === 基本プロンプト ===
-  prompt: z.string().min(0).max(Constants.MAX_PROMPT_CHARS),
-
-  // === Action & Image2Image ===
-  action: z.enum(["generate", "img2img", "infill"]).default("generate"),
-  source_image: ImageInputSchema.optional().nullable(),
-  img2img_strength: z.number().min(0.0).max(1.0).default(Constants.DEFAULT_IMG2IMG_STRENGTH),
-  img2img_noise: z.number().min(0.0).max(1.0).default(0.0),
-
-  // === Inpaint/Mask ===
-  mask: ImageInputSchema.optional().nullable(),
-  /** Mask application strength (0.01-1). Required for infill action. */
-  mask_strength: z.number().min(0.01).max(1.0).optional().nullable(),
-  inpaint_color_correct: z.boolean().default(Constants.DEFAULT_INPAINT_COLOR_CORRECT),
-
-  // === Hybrid Mode (Mask + Img2Img) ===
-  /** Img2Img strength when used with mask. Controls how much original image influences (0.01-0.99). */
-  hybrid_img2img_strength: z.number().min(0.01).max(0.99).optional().nullable(),
-  /** Img2Img noise when used with mask (0-0.99). */
-  hybrid_img2img_noise: z.number().min(0.0).max(0.99).optional().nullable(),
-
-  // === キャラクター設定 ===
-  characters: z.array(CharacterConfigSchema).max(Constants.MAX_CHARACTERS).optional().nullable(),
-
-  // === Vibe Transfer ===
-  vibes: z.array(z.any()).max(Constants.MAX_VIBES).optional().nullable(),
-  vibe_strengths: z.array(z.number().min(0.0).max(1.0)).optional().nullable(),
-  vibe_info_extracted: z.array(z.number().min(0.0).max(1.0)).optional().nullable(),
-
-  // === Character Reference ===
-  character_reference: CharacterReferenceConfigSchema.optional().nullable(),
-
-  // === プロンプト ===
-  negative_prompt: z.string().max(Constants.MAX_PROMPT_CHARS).optional().nullable(),
-
-  // === 出力オプション ===
-  save_path: z.string().optional().nullable(),
-  save_dir: z.string().optional().nullable(),
-
-  // === 生成パラメータ ===
-  model: z.enum(Constants.VALID_MODELS).default(Constants.DEFAULT_MODEL),
-  width: z.number().int().min(Constants.MIN_DIMENSION).default(Constants.DEFAULT_WIDTH)
-    .refine(val => val % 64 === 0, { message: "Width must be a multiple of 64" }),
-  height: z.number().int().min(Constants.MIN_DIMENSION).default(Constants.DEFAULT_HEIGHT)
-    .refine(val => val % 64 === 0, { message: "Height must be a multiple of 64" }),
-  steps: z.number().int().min(Constants.MIN_STEPS).max(Constants.MAX_STEPS).default(Constants.DEFAULT_STEPS),
-  scale: z.number().min(Constants.MIN_SCALE).max(Constants.MAX_SCALE).default(Constants.DEFAULT_SCALE),
-  cfg_rescale: z.number().min(0).max(1).default(Constants.DEFAULT_CFG_RESCALE),
-  seed: z.number().int().min(0).max(Constants.MAX_SEED).optional().nullable(),
-  sampler: z.enum(Constants.VALID_SAMPLERS).default(Constants.DEFAULT_SAMPLER),
-  noise_schedule: z.enum(Constants.VALID_NOISE_SCHEDULES).default(Constants.DEFAULT_NOISE_SCHEDULE),
-})
+export const GenerateParamsSchema = GenerateParamsBaseSchema
 .superRefine(async (data, ctx) => {
   // Delegate to focused validation functions
-  validateActionDependencies(data as GenerateParamsRaw, ctx);
-  validateVibeParams(data as GenerateParamsRaw, ctx);
-  validatePixelConstraints(data as GenerateParamsRaw, ctx);
-  validateSaveOptions(data as GenerateParamsRaw, ctx);
-  await validateTokenCounts(data as GenerateParamsRaw, ctx);
+  validateActionDependencies(data, ctx);
+  validateVibeParams(data, ctx);
+  validatePixelConstraints(data, ctx);
+  validateSaveOptionsExclusive(data, ctx);
+  await validateTokenCounts(data, ctx);
 });
 
-// Helper type for validated params (all fields present after .parse())
-type GenerateParamsValidated = z.infer<typeof GenerateParamsSchema>;
-
-// Input type - fields with defaults are optional
-export type GenerateParams = Pick<GenerateParamsValidated, 'prompt'> & 
-  Partial<Omit<GenerateParamsValidated, 'prompt'>>;
+// Input type - reflects what callers pass in (before defaults are applied)
+export type GenerateParams = z.input<typeof GenerateParamsSchema>;
 
 
 // =============================================================================
@@ -397,18 +433,21 @@ export const EncodeVibeParamsSchema = z.object({
   model: z.enum(Constants.VALID_MODELS).default(Constants.DEFAULT_MODEL),
   information_extracted: z.number().min(0.0).max(1.0).default(0.7),
   strength: z.number().min(0.0).max(1.0).default(0.7),
-  save_path: z.string().optional().nullable(),
-  save_dir: z.string().optional().nullable(),
+  save_path: SafePathSchema.nullish(),
+  save_dir: SafePathSchema.nullish(),
   /** Custom filename for the .naiv4vibe file (without extension). If not provided, auto-generated. */
-  save_filename: z.string().optional().nullable(),
+  save_filename: z.string().nullish(),
 })
 .superRefine((data, ctx) => {
   // save_path と save_dir は同時指定不可
-  if (data.save_path && data.save_dir) {
+  validateSaveOptionsExclusive(data, ctx);
+
+  // save_filename と save_path は同時指定不可
+  if (data.save_filename && data.save_path) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "save_path and save_dir cannot be specified together. Use one or the other.",
-      path: ["save_path"],
+      message: "save_filename and save_path cannot be specified together. Use save_dir with save_filename instead.",
+      path: ["save_filename"],
     });
   }
 
@@ -422,12 +461,8 @@ export const EncodeVibeParamsSchema = z.object({
   }
 });
 
-// Helper type for validated params
-type EncodeVibeParamsValidated = z.infer<typeof EncodeVibeParamsSchema>;
-
-// Input type - fields with defaults are optional  
-export type EncodeVibeParams = Pick<EncodeVibeParamsValidated, 'image'> &
-  Partial<Omit<EncodeVibeParamsValidated, 'image'>>;
+// Input type - reflects what callers pass in (before defaults are applied)
+export type EncodeVibeParams = z.input<typeof EncodeVibeParamsSchema>;
 
 
 // =============================================================================
@@ -442,21 +477,21 @@ export type EncodeVibeParams = Pick<EncodeVibeParamsValidated, 'image'> &
 export const AugmentParamsSchema = z.object({
   req_type: z.enum(Constants.AUGMENT_REQ_TYPES),
   image: ImageInputSchema,
-  
+
   // colorize, emotion用のみ
-  prompt: z.string().optional().nullable(),
-  defry: z.number().int().min(Constants.MIN_DEFRY).max(Constants.MAX_DEFRY).optional().nullable(),
-  
+  prompt: z.string().nullish(),
+  defry: z.number().int().min(Constants.MIN_DEFRY).max(Constants.MAX_DEFRY).nullish(),
+
   // 出力オプション
-  save_path: z.string().optional().nullable(),
-  save_dir: z.string().optional().nullable(),
+  save_path: SafePathSchema.nullish(),
+  save_dir: SafePathSchema.nullish(),
 })
 .superRefine((data, ctx) => {
   const reqTypesRequiringDefry = ["colorize", "emotion"] as const;
   const reqTypesWithNoExtraParams = ["declutter", "sketch", "lineart", "bg-removal"] as const;
-  
+
   // === colorize / emotion の場合 ===
-  if (reqTypesRequiringDefry.includes(data.req_type as any)) {
+  if ((reqTypesRequiringDefry as readonly string[]).includes(data.req_type)) {
     // defry は必須
     if (data.defry === undefined || data.defry === null) {
       ctx.addIssue({
@@ -466,7 +501,7 @@ export const AugmentParamsSchema = z.object({
       });
     }
   }
-  
+
   // === emotion の場合 ===
   if (data.req_type === "emotion") {
     // prompt は必須
@@ -477,10 +512,10 @@ export const AugmentParamsSchema = z.object({
         path: ["prompt"],
       });
     }
-    
+
     // prompt は有効なキーワードである必要がある（キーワードのみ、;;は不要）
     if (data.prompt) {
-      if (!Constants.EMOTION_KEYWORDS.includes(data.prompt as any)) {
+      if (!(Constants.EMOTION_KEYWORDS as readonly string[]).includes(data.prompt)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: `Invalid emotion keyword '${data.prompt}'. Valid: ${Constants.EMOTION_KEYWORDS.join(", ")}`,
@@ -489,9 +524,9 @@ export const AugmentParamsSchema = z.object({
       }
     }
   }
-  
+
   // === declutter, sketch, lineart, bg-removal の場合 ===
-  if (reqTypesWithNoExtraParams.includes(data.req_type as any)) {
+  if ((reqTypesWithNoExtraParams as readonly string[]).includes(data.req_type)) {
     // prompt は使用不可
     if (data.prompt !== undefined && data.prompt !== null && data.prompt !== "") {
       ctx.addIssue({
@@ -500,7 +535,7 @@ export const AugmentParamsSchema = z.object({
         path: ["prompt"],
       });
     }
-    
+
     // defry は使用不可
     if (data.defry !== undefined && data.defry !== null) {
       ctx.addIssue({
@@ -510,24 +545,13 @@ export const AugmentParamsSchema = z.object({
       });
     }
   }
-  
+
   // save_path と save_dir は同時指定不可
-  if (data.save_path && data.save_dir) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "save_path and save_dir cannot be specified together.",
-      path: ["save_path"],
-    });
-  }
+  validateSaveOptionsExclusive(data, ctx);
 });
 
-// Helper type for validated params
-type AugmentParamsValidated = z.infer<typeof AugmentParamsSchema>;
-
-// Input type - req_type と image は必須、他はオプション
-// colorize/emotion の場合は defry が実質必須（superRefine でチェック）
-export type AugmentParams = Pick<AugmentParamsValidated, 'req_type' | 'image'> &
-  Partial<Omit<AugmentParamsValidated, 'req_type' | 'image'>>;
+// Input type - reflects what callers pass in
+export type AugmentParams = z.input<typeof AugmentParamsSchema>;
 
 
 // =============================================================================
@@ -535,11 +559,11 @@ export type AugmentParams = Pick<AugmentParamsValidated, 'req_type' | 'image'> &
 // =============================================================================
 
 export const AugmentResultSchema = z.object({
-  image_data: z.instanceof(Buffer),
+  image_data: BinaryDataSchema,
   req_type: z.enum(Constants.AUGMENT_REQ_TYPES),
-  anlas_remaining: z.number().min(0).optional().nullable(),
-  anlas_consumed: z.number().min(0).optional().nullable(),
-  saved_path: z.string().optional().nullable(),
+  anlas_remaining: z.number().min(0).nullish(),
+  anlas_consumed: z.number().min(0).nullish(),
+  saved_path: z.string().nullish(),
 });
 
 export type AugmentResult = z.infer<typeof AugmentResultSchema>;
@@ -552,30 +576,20 @@ export type AugmentResult = z.infer<typeof AugmentResultSchema>;
 export const UpscaleParamsSchema = z.object({
   image: ImageInputSchema,
   scale: z.number().int().refine(
-    (val) => Constants.VALID_UPSCALE_SCALES.includes(val as any),
+    (val) => (Constants.VALID_UPSCALE_SCALES as readonly number[]).includes(val),
     { message: `scale must be one of: ${Constants.VALID_UPSCALE_SCALES.join(", ")}` }
   ).default(Constants.DEFAULT_UPSCALE_SCALE),
-  
+
   // 出力オプション
-  save_path: z.string().optional().nullable(),
-  save_dir: z.string().optional().nullable(),
+  save_path: SafePathSchema.nullish(),
+  save_dir: SafePathSchema.nullish(),
 })
 .superRefine((data, ctx) => {
-  if (data.save_path && data.save_dir) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "save_path and save_dir cannot be specified together.",
-      path: ["save_path"],
-    });
-  }
+  validateSaveOptionsExclusive(data, ctx);
 });
 
-// Helper type for validated params
-type UpscaleParamsValidated = z.infer<typeof UpscaleParamsSchema>;
-
-// Input type - fields with defaults are optional
-export type UpscaleParams = Pick<UpscaleParamsValidated, 'image'> &
-  Partial<Omit<UpscaleParamsValidated, 'image'>>;
+// Input type - reflects what callers pass in (before defaults are applied)
+export type UpscaleParams = z.input<typeof UpscaleParamsSchema>;
 
 
 // =============================================================================
@@ -583,13 +597,30 @@ export type UpscaleParams = Pick<UpscaleParamsValidated, 'image'> &
 // =============================================================================
 
 export const UpscaleResultSchema = z.object({
-  image_data: z.instanceof(Buffer),
-  scale: z.number(),
-  output_width: z.number(),
-  output_height: z.number(),
-  anlas_remaining: z.number().min(0).optional().nullable(),
-  anlas_consumed: z.number().min(0).optional().nullable(),
-  saved_path: z.string().optional().nullable(),
+  image_data: BinaryDataSchema,
+  scale: z.number().int().refine(
+    (val) => (Constants.VALID_UPSCALE_SCALES as readonly number[]).includes(val),
+    { message: `scale must be one of: ${Constants.VALID_UPSCALE_SCALES.join(", ")}` }
+  ),
+  output_width: z.number().int().min(1).max(Constants.MAX_GENERATION_DIMENSION * 4),
+  output_height: z.number().int().min(1).max(Constants.MAX_GENERATION_DIMENSION * 4),
+  anlas_remaining: z.number().min(0).nullish(),
+  anlas_consumed: z.number().min(0).nullish(),
+  saved_path: z.string().nullish(),
 });
 
 export type UpscaleResult = z.infer<typeof UpscaleResultSchema>;
+
+// =============================================================================
+// AnlasBalanceResponseSchema (API response validation)
+// =============================================================================
+
+export const AnlasBalanceResponseSchema = z.object({
+  trainingStepsLeft: z.object({
+    fixedTrainingStepsLeft: z.number().default(0),
+    purchasedTrainingSteps: z.number().default(0),
+  }).default({}),
+  tier: z.number().int().min(0).max(3).default(0),
+});
+
+export type AnlasBalanceResponse = z.infer<typeof AnlasBalanceResponseSchema>;

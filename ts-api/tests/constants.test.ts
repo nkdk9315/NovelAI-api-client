@@ -137,7 +137,6 @@ describe('Limit Constants', () => {
   it('should have valid pixel limits', () => {
     expect(Constants.MAX_PIXELS).toBe(3_145_728);  // 2048 * 1536 (サーバー側制限)
     expect(Constants.MIN_DIMENSION).toBe(64);
-    expect(Constants.MAX_DIMENSION).toBe(1024);
   });
 
   it('should have valid step limits', () => {
@@ -155,7 +154,6 @@ describe('Limit Constants', () => {
   });
 
   it('should have valid token limits', () => {
-    expect(Constants.MAX_PROMPT_CHARS).toBe(2000);
     expect(Constants.MAX_TOKENS).toBe(512);
   });
 
@@ -223,8 +221,8 @@ describe('Anlas Cost Constants', () => {
 
   it('should have valid upscale cost table', () => {
     expect(Constants.UPSCALE_COST_TABLE).toHaveLength(5);
-    expect(Constants.UPSCALE_COST_TABLE[0]).toEqual([1_048_576, 7]);
-    expect(Constants.UPSCALE_COST_TABLE[4]).toEqual([262_144, 1]);
+    expect(Constants.UPSCALE_COST_TABLE[0]).toEqual([262_144, 1]);
+    expect(Constants.UPSCALE_COST_TABLE[4]).toEqual([1_048_576, 7]);
     expect(Constants.UPSCALE_OPUS_FREE_PIXELS).toBe(409_600);
   });
 
