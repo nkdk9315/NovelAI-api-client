@@ -30,3 +30,12 @@ node_modules/
 
 # reference images
 reference/
+
+# Rust build artifacts
+target/
+
+# Tokenizer cache (downloaded at runtime)
+.cache/
+
+# Generated output
+output/
