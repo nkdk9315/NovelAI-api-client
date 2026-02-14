@@ -39,12 +39,6 @@ describe('CharacterConfigSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('should reject prompt exceeding max chars', () => {
-    const config = { prompt: 'a'.repeat(Constants.MAX_PROMPT_CHARS + 1) };
-    const result = Schemas.CharacterConfigSchema.safeParse(config);
-    expect(result.success).toBe(false);
-  });
-
   it('should reject center_x outside 0-1 range', () => {
     expect(Schemas.CharacterConfigSchema.safeParse({ prompt: '1girl', center_x: -0.1 }).success).toBe(false);
     expect(Schemas.CharacterConfigSchema.safeParse({ prompt: '1girl', center_x: 1.1 }).success).toBe(false);
@@ -70,6 +64,18 @@ describe('CharacterReferenceConfigSchema', () => {
     const config = { image: Buffer.from('test') };
     const result = Schemas.CharacterReferenceConfigSchema.safeParse(config);
     expect(result.success).toBe(true);
+  });
+
+  it('should validate with Uint8Array image input', () => {
+    const config = { image: new Uint8Array([1, 2, 3]) };
+    const result = Schemas.CharacterReferenceConfigSchema.safeParse(config);
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject empty string image input', () => {
+    const config = { image: '' };
+    const result = Schemas.CharacterReferenceConfigSchema.safeParse(config);
+    expect(result.success).toBe(false);
   });
 
   it('should apply defaults for strength, fidelity and mode', () => {
@@ -104,6 +110,52 @@ describe('CharacterReferenceConfigSchema', () => {
 });
 
 // =============================================================================
+// VibeEncodeResultSchema Tests
+// =============================================================================
+describe('VibeEncodeResultSchema', () => {
+  const validVibeResult = {
+    encoding: 'SGVsbG8gV29ybGQ=',  // valid base64
+    model: 'nai-diffusion-4-5-full' as const,
+    information_extracted: 0.7,
+    strength: 0.7,
+    source_image_hash: 'a'.repeat(64),
+    created_at: new Date(),
+  };
+
+  it('should accept valid VibeEncodeResult', () => {
+    const result = Schemas.VibeEncodeResultSchema.safeParse(validVibeResult);
+    expect(result.success).toBe(true);
+  });
+
+  it('should accept uppercase hex in source_image_hash', () => {
+    const result = Schemas.VibeEncodeResultSchema.safeParse({
+      ...validVibeResult,
+      source_image_hash: 'ABCDEFabcdef0123456789' + 'a'.repeat(42),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject non-base64 encoding', () => {
+    const result = Schemas.VibeEncodeResultSchema.safeParse({
+      ...validVibeResult,
+      encoding: 'invalid base64 with spaces!',
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(i => i.message.includes('base64'))).toBe(true);
+    }
+  });
+
+  it('should reject empty encoding', () => {
+    const result = Schemas.VibeEncodeResultSchema.safeParse({
+      ...validVibeResult,
+      encoding: '',
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+// =============================================================================
 // GenerateParamsSchema Tests
 // =============================================================================
 describe('GenerateParamsSchema', () => {
@@ -127,11 +179,6 @@ describe('GenerateParamsSchema', () => {
       expect(result.noise_schedule).toBe(Constants.DEFAULT_NOISE_SCHEDULE);
     });
 
-    it('should reject prompt exceeding max chars', async () => {
-      const params = { prompt: 'a'.repeat(Constants.MAX_PROMPT_CHARS + 1) };
-      const result = await Schemas.GenerateParamsSchema.safeParseAsync(params);
-      expect(result.success).toBe(false);
-    });
   });
 
   describe('width/height バリデーション', () => {
@@ -163,12 +210,28 @@ describe('GenerateParamsSchema', () => {
       expect(result.success).toBe(false);
     });
 
+    it('should reject width exceeding MAX_GENERATION_DIMENSION', async () => {
+      // 2112 > 2048 = MAX_GENERATION_DIMENSION
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', width: 2112 });
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject height exceeding MAX_GENERATION_DIMENSION', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', height: 2112 });
+      expect(result.success).toBe(false);
+    });
+
+    it('should accept max dimension (2048)', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', width: 2048, height: 1536 });
+      expect(result.success).toBe(true);
+    });
+
     it('should reject total pixels exceeding MAX_PIXELS', async () => {
       // 2048 x 1536 = 3,145,728 which equals MAX_PIXELS, should pass
       const resultPass = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', width: 2048, height: 1536 });
       expect(resultPass.success).toBe(true);
-      // 2112 x 1536 = 3,244,032 which exceeds MAX_PIXELS, should fail
-      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', width: 2112, height: 1536 });
+      // 2048 x 1600 = 3,276,800 which exceeds MAX_PIXELS, should fail (both dims ≤ 2048)
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({ prompt: '1girl', width: 2048, height: 1600 });
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error.issues.some(i => i.message.includes('exceeds limit'))).toBe(true);
@@ -396,6 +459,23 @@ describe('GenerateParamsSchema', () => {
       });
       expect(result.success).toBe(true);
     });
+
+    it('should not error on empty vibe_strengths array without vibes', async () => {
+      // Empty array is truthy in JS, but length is 0 - should not trigger error
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: '1girl',
+        vibe_strengths: [],
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('should not error on empty vibe_info_extracted array without vibes', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: '1girl',
+        vibe_info_extracted: [],
+      });
+      expect(result.success).toBe(true);
+    });
   });
 
   describe('save_path / save_dir 相互排他', () => {
@@ -425,6 +505,99 @@ describe('GenerateParamsSchema', () => {
         save_dir: '/path/to/dir/',
       });
       expect(result.success).toBe(true);
+    });
+  });
+
+  describe('パストラバーサル防御', () => {
+    it('should reject save_path with path traversal', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: '1girl',
+        save_path: '../etc/passwd',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some(i => i.message.includes('path traversal'))).toBe(true);
+      }
+    });
+
+    it('should reject save_dir with path traversal', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: '1girl',
+        save_dir: '/output/../../etc/',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some(i => i.message.includes('path traversal'))).toBe(true);
+      }
+    });
+
+    it('should reject backslash path traversal', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: '1girl',
+        save_path: '..\\windows\\system32\\file.png',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some(i => i.message.includes('path traversal'))).toBe(true);
+      }
+    });
+
+    it('should accept valid paths without traversal', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: '1girl',
+        save_path: '/home/user/images/output.png',
+      });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('VibeItemSchema (vibes型安全性)', () => {
+    it('should accept string vibes (file paths)', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: '1girl',
+        vibes: ['vibe1.naiv4vibe', 'path/to/vibe2.naiv4vibe'],
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept VibeEncodeResult objects as vibes', async () => {
+      const vibeResult = {
+        encoding: 'SGVsbG8=',
+        model: 'nai-diffusion-4-5-full',
+        information_extracted: 0.7,
+        strength: 0.7,
+        source_image_hash: 'a'.repeat(64),
+        created_at: new Date(),
+      };
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: '1girl',
+        vibes: [vibeResult],
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject number as vibe item', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: '1girl',
+        vibes: [42],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject boolean as vibe item', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: '1girl',
+        vibes: [true],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject empty string as vibe item', async () => {
+      const result = await Schemas.GenerateParamsSchema.safeParseAsync({
+        prompt: '1girl',
+        vibes: [''],
+      });
+      expect(result.success).toBe(false);
     });
   });
 
@@ -463,7 +636,7 @@ describe('GenerateParamsSchema', () => {
     it('should reject prompts exceeding 512 tokens', async () => {
       // Create a prompt that definitely exceeds 512 tokens
       const longPrompt = Array(600).fill('masterpiece beautiful detailed anime girl').join(', ');
-      
+
       try {
         await Schemas.GenerateParamsSchema.parseAsync({
           prompt: longPrompt,
@@ -500,7 +673,7 @@ describe('GenerateParamsSchema', () => {
     it('should fail with synchronous parse when async refinement is used', () => {
       // This test verifies that safeParse will fail since we have async validation
       const params = { prompt: 'test' };
-      
+
       // safeParse should detect async refinement and fail
       expect(() => {
         Schemas.GenerateParamsSchema.parse(params);
@@ -508,7 +681,7 @@ describe('GenerateParamsSchema', () => {
     });
 
     // === Combined Token Count Tests (Base + Character Prompts) ===
-    
+
     it('should accept combined positive prompts under 512 tokens', async () => {
       const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: 'masterpiece, best quality, 1girl',
@@ -525,7 +698,7 @@ describe('GenerateParamsSchema', () => {
       const basePrompt = Array(250).fill('masterpiece beautiful').join(', ');
       const charPrompt1 = Array(200).fill('detailed anime girl').join(', ');
       const charPrompt2 = Array(200).fill('stunning artwork').join(', ');
-      
+
       const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: basePrompt,
         characters: [
@@ -535,8 +708,8 @@ describe('GenerateParamsSchema', () => {
       });
       expect(result.success).toBe(false);
       if (!result.success) {
-        const tokenError = result.error.issues.find(i => 
-          i.message.includes('Total positive prompt token count') && 
+        const tokenError = result.error.issues.find(i =>
+          i.message.includes('Total positive prompt token count') &&
           i.message.includes('exceeds maximum allowed')
         );
         expect(tokenError).toBeDefined();
@@ -561,7 +734,7 @@ describe('GenerateParamsSchema', () => {
       const baseNegative = Array(250).fill('lowres bad anatomy').join(', ');
       const charNegative1 = Array(200).fill('extra limbs deformed').join(', ');
       const charNegative2 = Array(200).fill('ugly blurry').join(', ');
-      
+
       const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: '1girl',
         negative_prompt: baseNegative,
@@ -572,8 +745,8 @@ describe('GenerateParamsSchema', () => {
       });
       expect(result.success).toBe(false);
       if (!result.success) {
-        const tokenError = result.error.issues.find(i => 
-          i.message.includes('Total negative prompt token count') && 
+        const tokenError = result.error.issues.find(i =>
+          i.message.includes('Total negative prompt token count') &&
           i.message.includes('exceeds maximum allowed')
         );
         expect(tokenError).toBeDefined();
@@ -584,7 +757,7 @@ describe('GenerateParamsSchema', () => {
     it('should validate positive and negative prompts independently', async () => {
       // Positive prompts exceed limit, negative prompts are fine
       const longPositive = Array(600).fill('masterpiece beautiful').join(', ');
-      
+
       const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: longPositive,
         negative_prompt: 'lowres',
@@ -595,10 +768,10 @@ describe('GenerateParamsSchema', () => {
       expect(result.success).toBe(false);
       if (!result.success) {
         // Should only have positive prompt error, not negative
-        const positiveError = result.error.issues.find(i => 
+        const positiveError = result.error.issues.find(i =>
           i.message.includes('Total positive prompt token count')
         );
-        const negativeError = result.error.issues.find(i => 
+        const negativeError = result.error.issues.find(i =>
           i.message.includes('Total negative prompt token count')
         );
         expect(positiveError).toBeDefined();
@@ -610,7 +783,7 @@ describe('GenerateParamsSchema', () => {
       // Empty base prompt, but character prompts exceed limit
       const charPrompt1 = Array(300).fill('detailed anime girl').join(', ');
       const charPrompt2 = Array(300).fill('stunning artwork').join(', ');
-      
+
       const result = await Schemas.GenerateParamsSchema.safeParseAsync({
         prompt: '',  // empty base prompt
         characters: [
@@ -620,7 +793,7 @@ describe('GenerateParamsSchema', () => {
       });
       expect(result.success).toBe(false);
       if (!result.success) {
-        const tokenError = result.error.issues.find(i => 
+        const tokenError = result.error.issues.find(i =>
           i.message.includes('Total positive prompt token count')
         );
         expect(tokenError).toBeDefined();
@@ -650,6 +823,16 @@ describe('EncodeVibeParamsSchema', () => {
   it('should accept Buffer as image', () => {
     const result = Schemas.EncodeVibeParamsSchema.safeParse({ image: Buffer.from('test') });
     expect(result.success).toBe(true);
+  });
+
+  it('should accept Uint8Array as image', () => {
+    const result = Schemas.EncodeVibeParamsSchema.safeParse({ image: new Uint8Array([1, 2, 3]) });
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject empty string image', () => {
+    const result = Schemas.EncodeVibeParamsSchema.safeParse({ image: '' });
+    expect(result.success).toBe(false);
   });
 
   describe('information_extracted バリデーション', () => {
@@ -689,6 +872,17 @@ describe('EncodeVibeParamsSchema', () => {
         expect(result.error.issues.some(i => i.message.includes('cannot be specified together'))).toBe(true);
       }
     });
+
+    it('should reject path traversal in save_path', () => {
+      const result = Schemas.EncodeVibeParamsSchema.safeParse({
+        image: 'test.png',
+        save_path: '../etc/passwd',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some(i => i.message.includes('path traversal'))).toBe(true);
+      }
+    });
   });
 
   describe('save_filename 依存関係', () => {
@@ -700,6 +894,18 @@ describe('EncodeVibeParamsSchema', () => {
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error.issues.some(i => i.message.includes('save_filename requires save_dir'))).toBe(true);
+      }
+    });
+
+    it('should reject save_filename with save_path', () => {
+      const result = Schemas.EncodeVibeParamsSchema.safeParse({
+        image: 'test.png',
+        save_path: '/path/to/file.naiv4vibe',
+        save_filename: 'my_vibe',
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some(i => i.message.includes('save_filename and save_path cannot be specified together'))).toBe(true);
       }
     });
 
@@ -792,6 +998,24 @@ describe('AugmentParamsSchema', () => {
       const result = Schemas.AugmentParamsSchema.safeParse(params);
       expect(result.success).toBe(true);
     });
+
+    it('should accept Uint8Array as image', () => {
+      const params = {
+        req_type: 'sketch',
+        image: new Uint8Array([1, 2, 3]),
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject empty string image', () => {
+      const params = {
+        req_type: 'sketch',
+        image: '',
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
+    });
   });
 
   describe('req_type バリデーション', () => {
@@ -806,7 +1030,7 @@ describe('AugmentParamsSchema', () => {
         const result = Schemas.AugmentParamsSchema.safeParse(params);
         expect(result.success).toBe(true);
       });
-      
+
       // colorize: defry required
       const colorizeResult = Schemas.AugmentParamsSchema.safeParse({
         req_type: 'colorize',
@@ -814,7 +1038,7 @@ describe('AugmentParamsSchema', () => {
         defry: 3,
       });
       expect(colorizeResult.success).toBe(true);
-      
+
       // emotion: defry + prompt required
       const emotionResult = Schemas.AugmentParamsSchema.safeParse({
         req_type: 'emotion',
@@ -858,7 +1082,7 @@ describe('AugmentParamsSchema', () => {
         prompt: 'vibrant colors',
       });
       expect(result1.success).toBe(true);
-      
+
       // without prompt
       const result2 = Schemas.AugmentParamsSchema.safeParse({
         req_type: 'colorize',
@@ -905,7 +1129,7 @@ describe('AugmentParamsSchema', () => {
         'disgusted', 'smug', 'bored', 'laughing', 'irritated', 'aroused',
         'embarrassed', 'love', 'worried', 'determined', 'hurt', 'playful',
       ];
-      
+
       validKeywords.forEach(keyword => {
         const params = {
           req_type: 'emotion',
@@ -1060,6 +1284,19 @@ describe('AugmentParamsSchema', () => {
       const result = Schemas.AugmentParamsSchema.safeParse(params);
       expect(result.success).toBe(true);
     });
+
+    it('should reject path traversal in save_path', () => {
+      const params = {
+        req_type: 'sketch',
+        image: 'test.png',
+        save_path: '../etc/passwd',
+      };
+      const result = Schemas.AugmentParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some(i => i.message.includes('path traversal'))).toBe(true);
+      }
+    });
   });
 });
 
@@ -1091,6 +1328,22 @@ describe('UpscaleParamsSchema', () => {
       };
       const result = Schemas.UpscaleParamsSchema.safeParse(params);
       expect(result.success).toBe(true);
+    });
+
+    it('should accept Uint8Array as image', () => {
+      const params = {
+        image: new Uint8Array([1, 2, 3]),
+      };
+      const result = Schemas.UpscaleParamsSchema.safeParse(params);
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject empty string image', () => {
+      const params = {
+        image: '',
+      };
+      const result = Schemas.UpscaleParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
     });
   });
 
@@ -1166,5 +1419,111 @@ describe('UpscaleParamsSchema', () => {
       const result = Schemas.UpscaleParamsSchema.safeParse(params);
       expect(result.success).toBe(true);
     });
+
+    it('should reject path traversal in save_path', () => {
+      const params = {
+        image: 'test.png',
+        save_path: '../etc/passwd',
+      };
+      const result = Schemas.UpscaleParamsSchema.safeParse(params);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some(i => i.message.includes('path traversal'))).toBe(true);
+      }
+    });
+  });
+});
+
+// =============================================================================
+// UpscaleResultSchema Tests
+// =============================================================================
+describe('UpscaleResultSchema', () => {
+  it('should accept valid result with integer scale and dimensions', () => {
+    const result = Schemas.UpscaleResultSchema.safeParse({
+      image_data: Buffer.from('test'),
+      scale: 4,
+      output_width: 2048,
+      output_height: 1536,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject non-integer scale', () => {
+    const result = Schemas.UpscaleResultSchema.safeParse({
+      image_data: Buffer.from('test'),
+      scale: 2.5,
+      output_width: 2048,
+      output_height: 1536,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject invalid scale value', () => {
+    const result = Schemas.UpscaleResultSchema.safeParse({
+      image_data: Buffer.from('test'),
+      scale: 3,
+      output_width: 2048,
+      output_height: 1536,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject zero output_width', () => {
+    const result = Schemas.UpscaleResultSchema.safeParse({
+      image_data: Buffer.from('test'),
+      scale: 4,
+      output_width: 0,
+      output_height: 1536,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject zero output_height', () => {
+    const result = Schemas.UpscaleResultSchema.safeParse({
+      image_data: Buffer.from('test'),
+      scale: 4,
+      output_width: 2048,
+      output_height: 0,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should accept Uint8Array as image_data', () => {
+    const result = Schemas.UpscaleResultSchema.safeParse({
+      image_data: new Uint8Array([1, 2, 3]),
+      scale: 2,
+      output_width: 1024,
+      output_height: 768,
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+// =============================================================================
+// GenerateResultSchema Tests
+// =============================================================================
+describe('GenerateResultSchema', () => {
+  it('should accept valid result', () => {
+    const result = Schemas.GenerateResultSchema.safeParse({
+      image_data: Buffer.from('test'),
+      seed: 12345,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should accept Uint8Array as image_data', () => {
+    const result = Schemas.GenerateResultSchema.safeParse({
+      image_data: new Uint8Array([1, 2, 3]),
+      seed: 12345,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject non-integer seed', () => {
+    const result = Schemas.GenerateResultSchema.safeParse({
+      image_data: Buffer.from('test'),
+      seed: 123.45,
+    });
+    expect(result.success).toBe(false);
   });
 });

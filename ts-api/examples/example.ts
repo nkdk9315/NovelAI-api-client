@@ -8,9 +8,9 @@
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
-import { NovelAIClient } from './src/client';
-import * as Schemas from './src/schemas';
-import * as Constants from './src/constants';
+import { NovelAIClient } from '../src/client';
+import * as Schemas from '../src/schemas';
+import * as Constants from '../src/constants';
 import { ZodError } from 'zod';
 
 // Load environment variables
@@ -410,13 +410,13 @@ async function main() {
 
   // await exampleImg2img();
 
-  // await exampleImg2imgWithVibes();
+  await exampleImg2imgWithVibes();
 
   // await exampleMultiCharacter();
 
   // await exampleEncodeVibe();
 
-  // await exampleCharacterReference();
+  await exampleCharacterReference();
 
   // await exampleCharacterReferenceStyles();
 

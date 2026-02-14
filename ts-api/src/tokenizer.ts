@@ -6,7 +6,16 @@ import he from 'he';
 import { MAX_TOKENS } from './constants';
 
 // Cache directory for tokenizer data (relative to project root)
-const CACHE_DIR = path.join(__dirname, '..', '.cache', 'tokenizers');
+const CACHE_DIR = path.resolve(__dirname, '..', '.cache', 'tokenizers');
+
+// Cache TTL: 7 days
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Maximum response size: 50MB
+const MAX_RESPONSE_SIZE = 50 * 1024 * 1024;
+
+// BPE cache size limit
+const BPE_CACHE_MAX_SIZE = 10_000;
 
 // Re-export MAX_TOKENS from constants for backward compatibility
 export { MAX_TOKENS };
@@ -27,9 +36,9 @@ export class TokenValidationError extends Error {
     }
 }
 
-// Singleton cache for tokenizers
-let cachedClipTokenizer: NovelAIClipTokenizer | null = null;
-let cachedT5Tokenizer: NovelAIT5Tokenizer | null = null;
+// Singleton cache for tokenizers (caching Promises prevents duplicate concurrent requests)
+let cachedClipTokenizerPromise: Promise<NovelAIClipTokenizer> | null = null;
+let cachedT5TokenizerPromise: Promise<NovelAIT5Tokenizer> | null = null;
 
 // Dynamic import for native tokenizer (tokenizers package)
 let nativeTokenizerModule: any = null;
@@ -43,7 +52,6 @@ async function tryLoadNativeTokenizer(): Promise<any> {
         return nativeTokenizerModule;
     } catch {
         nativeTokenizerUnavailable = true;
-        console.warn('[NovelAI] Native tokenizer unavailable, using pure JS fallback');
         return null;
     }
 }
@@ -83,10 +91,12 @@ export class NovelAIClipTokenizer {
     private encoder: { [key: string]: number };
     private decoder: { [key: number]: string };
     private bpeRanks: { [key: string]: number };
-    private cache: { [key: string]: string };
+    private cache: Map<string, string>;
     private pat: RegExp;
+    private textEncoder: TextEncoder;
 
     constructor(definitionText: string) {
+        this.textEncoder = new TextEncoder();
         this.byteEncoder = bytesToUnicode();
 
         const lines = definitionText.split('\n');
@@ -122,10 +132,10 @@ export class NovelAIClipTokenizer {
             this.bpeRanks[pair.join(separator)] = i;
         });
 
-        this.cache = {
-            "<|startoftext|>": "<|startoftext|>",
-            "<|endoftext|>": "<|endoftext|>"
-        };
+        this.cache = new Map<string, string>([
+            ["<|startoftext|>", "<|startoftext|>"],
+            ["<|endoftext|>", "<|endoftext|>"],
+        ]);
 
         // Regex pattern from Python:
         // r"""<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+"""
@@ -134,8 +144,12 @@ export class NovelAIClipTokenizer {
     }
 
     private bpe(token: string): string {
-        if (token in this.cache) {
-            return this.cache[token];
+        const cached = this.cache.get(token);
+        if (cached !== undefined) {
+            // LRU: move to end
+            this.cache.delete(token);
+            this.cache.set(token, cached);
+            return cached;
         }
 
         let word = [...token.slice(0, -1)]; // split into chars
@@ -203,7 +217,14 @@ export class NovelAIClipTokenizer {
         }
 
         const result = word.join(" ");
-        this.cache[token] = result;
+        // LRU eviction: remove oldest entry when at capacity
+        if (this.cache.size >= BPE_CACHE_MAX_SIZE) {
+            const firstKey = this.cache.keys().next().value;
+            if (firstKey !== undefined) {
+                this.cache.delete(firstKey);
+            }
+        }
+        this.cache.set(token, result);
         return result;
     }
 
@@ -243,9 +264,7 @@ export class NovelAIClipTokenizer {
 
         for (const token of matches) {
              // token_bytes = token.encode("utf-8")
-             // In JS, we can get bytes using TextEncoder
-             const encoder = new TextEncoder();
-             const tokenBytes = encoder.encode(token);
+             const tokenBytes = this.textEncoder.encode(token);
 
              // token_translated = "".join([self.byte_encoder[b] for b in token_bytes])
              let tokenTranslated = "";
@@ -268,26 +287,54 @@ export class NovelAIClipTokenizer {
 }
 
 /**
+ * Sanitize a string to only allow safe filename characters.
+ * Allows alphanumeric, dot, hyphen, underscore.
+ */
+function sanitizeFilenameComponent(s: string): string {
+    return s.replace(/[^a-zA-Z0-9._-]/g, '');
+}
+
+/**
  * Generate a cache filename from a URL.
  * Extracts the tokenizer name and version from the URL.
  */
-function getCacheFilename(url: string): string {
+export function getCacheFilename(url: string): string {
     const urlObj = new URL(url);
     const pathname = urlObj.pathname; // e.g., /tokenizer/compressed/t5_tokenizer.def
-    const basename = path.basename(pathname, '.def'); // e.g., t5_tokenizer
-    const version = urlObj.searchParams.get('v') || 'unknown';
+    const rawBasename = path.basename(pathname, '.def'); // e.g., t5_tokenizer
+    const rawVersion = urlObj.searchParams.get('v') || 'unknown';
+    const basename = sanitizeFilenameComponent(rawBasename);
+    const version = sanitizeFilenameComponent(rawVersion);
+    if (!basename) {
+        throw new TokenizerError('Invalid tokenizer URL: empty basename after sanitization');
+    }
     return `${basename}_v${version}.json`;
 }
 
 /**
+ * Validate that a resolved cache path is within CACHE_DIR.
+ * Prevents path traversal attacks.
+ */
+function validateCachePath(cachePath: string): void {
+    const resolved = path.resolve(cachePath);
+    if (!resolved.startsWith(CACHE_DIR + path.sep) && resolved !== CACHE_DIR) {
+        throw new TokenizerError(`Cache path traversal detected: ${cachePath}`);
+    }
+}
+
+/**
  * Check if a cached file exists and read it.
- * Returns null if cache doesn't exist.
+ * Returns null if cache doesn't exist or is expired.
  */
 async function readFromCache(cacheFile: string): Promise<string | null> {
     const cachePath = path.join(CACHE_DIR, cacheFile);
+    validateCachePath(cachePath);
     try {
+        const stat = await fs.stat(cachePath);
+        if (Date.now() - stat.mtimeMs > CACHE_TTL_MS) {
+            return null;
+        }
         const data = await fs.readFile(cachePath, 'utf-8');
-        console.log(`Loading tokenizer from cache: ${cachePath}`);
         return data;
     } catch {
         // Cache file doesn't exist or can't be read
@@ -300,14 +347,13 @@ async function readFromCache(cacheFile: string): Promise<string | null> {
  */
 async function writeToCache(cacheFile: string, data: string): Promise<void> {
     const cachePath = path.join(CACHE_DIR, cacheFile);
+    validateCachePath(cachePath);
     try {
         // Ensure cache directory exists
         await fs.mkdir(CACHE_DIR, { recursive: true });
         await fs.writeFile(cachePath, data, 'utf-8');
-        console.log(`Tokenizer data cached to: ${cachePath}`);
-    } catch (error) {
-        // Cache write failure is not fatal, just log and continue
-        console.warn(`Failed to write tokenizer cache: ${error}`);
+    } catch {
+        // Cache write failure is not fatal, silently continue
     }
 }
 
@@ -326,14 +372,14 @@ async function fetchData(targetUrl: string, forceRefresh = false): Promise<strin
         }
     }
     
-    console.log(`Fetching ${targetUrl}...`);
-    
     let response;
     try {
         response = await axios.get(targetUrl, {
             responseType: 'arraybuffer',
-            headers: { "User-Agent": "Mozilla/5.0" },
+            headers: { "User-Agent": "novelai-ts-api/1.0" },
             timeout: 30000, // 30 second timeout
+            maxContentLength: MAX_RESPONSE_SIZE,
+            maxBodyLength: MAX_RESPONSE_SIZE,
         });
     } catch (error) {
         if (axios.isAxiosError(error)) {
@@ -351,12 +397,10 @@ async function fetchData(targetUrl: string, forceRefresh = false): Promise<strin
     const buffer = Buffer.from(response.data);
     let data: Buffer;
 
-    console.log("Decompressing data...");
     try {
         // Try raw deflate first (most common for this API)
         data = zlib.inflateRawSync(buffer);
     } catch (rawError) {
-        console.log("Raw inflate failed, trying standard inflate...");
         try {
             data = zlib.inflateSync(buffer);
         } catch (standardError) {
@@ -376,26 +420,37 @@ async function fetchData(targetUrl: string, forceRefresh = false): Promise<strin
 }
 
 export async function getClipTokenizer(forceRefresh = false): Promise<NovelAIClipTokenizer> {
-    if (cachedClipTokenizer && !forceRefresh) {
-        return cachedClipTokenizer;
+    if (cachedClipTokenizerPromise && !forceRefresh) {
+        return cachedClipTokenizerPromise;
     }
-    
-    const tokenUrl = "https://novelai.net/tokenizer/compressed/clip_tokenizer.def?v=2&static=true";
-    const dataStr = await fetchData(tokenUrl, forceRefresh);
-    
-    let jsonData;
-    try {
-        jsonData = JSON.parse(dataStr);
-    } catch (error) {
-        throw new TokenizerError('Failed to parse CLIP tokenizer data as JSON', error);
-    }
-    
-    if (!jsonData['text']) {
-        throw new TokenizerError('CLIP tokenizer data missing "text" field');
-    }
-    
-    cachedClipTokenizer = new NovelAIClipTokenizer(jsonData['text']);
-    return cachedClipTokenizer;
+
+    const promise = (async () => {
+        const tokenUrl = "https://novelai.net/tokenizer/compressed/clip_tokenizer.def?v=2&static=true";
+        const dataStr = await fetchData(tokenUrl, forceRefresh);
+
+        let jsonData;
+        try {
+            jsonData = JSON.parse(dataStr);
+        } catch (error) {
+            throw new TokenizerError('Failed to parse CLIP tokenizer data as JSON', error);
+        }
+
+        if (!jsonData['text']) {
+            throw new TokenizerError('CLIP tokenizer data missing "text" field');
+        }
+
+        return new NovelAIClipTokenizer(jsonData['text']);
+    })();
+
+    cachedClipTokenizerPromise = promise;
+    promise.catch(() => {
+        // On failure, clear the cached promise so retries can succeed
+        if (cachedClipTokenizerPromise === promise) {
+            cachedClipTokenizerPromise = null;
+        }
+    });
+
+    return promise;
 }
 
 // Abstraction for tokenizer backends (native vs pure JS)
@@ -432,8 +487,9 @@ export class PureJSUnigram implements TokenizerBackend {
             const [piece, score] = vocabEntries[i];
             this.vocab.set(piece, score);
             this.pieceToId.set(piece, i);
-            if (piece.length > this.maxPieceLength) {
-                this.maxPieceLength = piece.length;
+            const pieceCodePointLength = Array.from(piece).length;
+            if (pieceCodePointLength > this.maxPieceLength) {
+                this.maxPieceLength = pieceCodePointLength;
             }
             if (score !== 0 && score < minScore) {
                 minScore = score;
@@ -472,12 +528,15 @@ export class PureJSUnigram implements TokenizerBackend {
     /**
      * Viterbi algorithm for optimal Unigram segmentation.
      * Finds the highest-scoring segmentation of the input text into vocab pieces.
+     * Uses code point iteration to correctly handle BMP-external characters (e.g., emoji).
      */
     private viterbi(text: string): number[] {
-        const len = text.length;
+        // Split into code points to handle surrogate pairs correctly
+        const chars = Array.from(text);
+        const len = chars.length;
         if (len === 0) return [];
 
-        // best[i] = { score, prev } for position i (characters 0..i processed)
+        // best[i] = { score, prev } for position i (code points 0..i processed)
         const best: Array<{ score: number; prev: number }> = new Array(len + 1);
         best[0] = { score: 0, prev: -1 };
 
@@ -485,7 +544,7 @@ export class PureJSUnigram implements TokenizerBackend {
             best[i] = { score: -Infinity, prev: 0 };
 
             for (let l = 1; l <= Math.min(this.maxPieceLength, i); l++) {
-                const substr = text.substring(i - l, i);
+                const substr = chars.slice(i - l, i).join('');
                 const score = this.vocab.get(substr);
 
                 if (score !== undefined) {
@@ -507,7 +566,7 @@ export class PureJSUnigram implements TokenizerBackend {
         let pos = len;
         while (pos > 0) {
             const prev = best[pos].prev;
-            pieces.push(text.substring(prev, pos));
+            pieces.push(chars.slice(prev, pos).join(''));
             pos = prev;
         }
         pieces.reverse();
@@ -579,50 +638,67 @@ export class NovelAIT5Tokenizer {
 
     /**
      * Count tokens matching official NovelAI UI display.
-     * Returns token count EXCLUDING EOS token.
+     * Returns token count INCLUDING EOS token.
      *
      * This is what the NovelAI website shows in the token counter.
      */
     public async countTokens(text: string): Promise<number> {
         const ids = await this.encode(text);
-        // Subtract 1 for EOS token (official UI doesn't count it)
-        return Math.max(0, ids.length - 1);
+        return ids.length;
     }
 }
 
 export async function getT5Tokenizer(forceRefresh = false): Promise<NovelAIT5Tokenizer> {
-    if (cachedT5Tokenizer && !forceRefresh) {
-        return cachedT5Tokenizer;
+    if (cachedT5TokenizerPromise && !forceRefresh) {
+        return cachedT5TokenizerPromise;
     }
 
-    const tokenUrl = "https://novelai.net/tokenizer/compressed/t5_tokenizer.def?v=2&static=true";
-    const dataStr = await fetchData(tokenUrl, forceRefresh);
+    const promise = (async () => {
+        const tokenUrl = "https://novelai.net/tokenizer/compressed/t5_tokenizer.def?v=2&static=true";
+        const dataStr = await fetchData(tokenUrl, forceRefresh);
 
-    // Try native tokenizer first
-    const nativeMod = await tryLoadNativeTokenizer();
-    if (nativeMod) {
-        try {
-            const tokenizer = await nativeMod.Tokenizer.fromString(dataStr);
-            cachedT5Tokenizer = NovelAIT5Tokenizer.createFromNative(tokenizer);
-            return cachedT5Tokenizer;
-        } catch (error) {
-            console.warn('[NovelAI] Native tokenizer fromString failed, falling back to pure JS:', error);
+        // Try native tokenizer first
+        const nativeMod = await tryLoadNativeTokenizer();
+        if (nativeMod) {
+            try {
+                const tokenizer = await nativeMod.Tokenizer.fromString(dataStr);
+                return NovelAIT5Tokenizer.createFromNative(tokenizer);
+            } catch {
+                // Fall back to pure JS implementation
+            }
         }
-    }
 
-    // Fallback: Pure JS Unigram
-    let json: any;
-    try {
-        json = JSON.parse(dataStr);
-    } catch (error) {
-        throw new TokenizerError('Failed to parse T5 tokenizer data as JSON', error);
-    }
+        // Fallback: Pure JS Unigram
+        let json: any;
+        try {
+            json = JSON.parse(dataStr);
+        } catch (error) {
+            throw new TokenizerError('Failed to parse T5 tokenizer data as JSON', error);
+        }
 
-    const vocab: [string, number][] = json.model.vocab;
-    const unkId: number = json.model.unk_id;
-    const pureJS = new PureJSUnigram(vocab, unkId);
-    cachedT5Tokenizer = NovelAIT5Tokenizer.createFromPureJS(pureJS);
-    return cachedT5Tokenizer;
+        // Validate JSON structure
+        if (!json?.model?.vocab || !Array.isArray(json.model.vocab)) {
+            throw new TokenizerError('T5 tokenizer data missing or invalid "model.vocab" array');
+        }
+        if (typeof json.model.unk_id !== 'number') {
+            throw new TokenizerError('T5 tokenizer data missing or invalid "model.unk_id" number');
+        }
+
+        const vocab: [string, number][] = json.model.vocab;
+        const unkId: number = json.model.unk_id;
+        const pureJS = new PureJSUnigram(vocab, unkId);
+        return NovelAIT5Tokenizer.createFromPureJS(pureJS);
+    })();
+
+    cachedT5TokenizerPromise = promise;
+    promise.catch(() => {
+        // On failure, clear the cached promise so retries can succeed
+        if (cachedT5TokenizerPromise === promise) {
+            cachedT5TokenizerPromise = null;
+        }
+    });
+
+    return promise;
 }
 
 /**
@@ -639,8 +715,9 @@ export function preprocessT5(text: string): string {
     // 1. Remove brackets [] and {}
     text = text.replace(/[[\]{}]/g, "");
 
-    // 2. Remove weighting syntax (e.g., "2::", "1.5::", "-1::", "::")
-    text = text.replace(/-?\d*\.?\d*::/g, "");
+    // 2. Remove weighting syntax (e.g., "2::content::", "1.5::content::", "-1::content::")
+    // Matches NUMBER::content:: pairs, replacing with just the content
+    text = text.replace(/(-?\d+\.?\d*)?::((?:(?!::)[\s\S])+)(?:::)/g, '$2');
 
     return text;
 }
@@ -672,8 +749,8 @@ export async function validateTokenCount(text: string): Promise<number> {
 
 // Helper function for clearing cached tokenizers (useful for testing)
 export function clearTokenizerCache(): void {
-    cachedClipTokenizer = null;
-    cachedT5Tokenizer = null;
+    cachedClipTokenizerPromise = null;
+    cachedT5TokenizerPromise = null;
     nativeTokenizerModule = null;
     nativeTokenizerUnavailable = false;
 }

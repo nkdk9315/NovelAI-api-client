@@ -20,7 +20,7 @@
   },
   "include": [
     "src/**/*",
-    "example.ts",
+    "examples/**/*",
     "tests/**/*"
   ],
   "exclude": [

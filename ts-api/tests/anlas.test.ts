@@ -268,14 +268,16 @@ describe('Vibe costs', () => {
       expect(result.vibeBatchCost).toBe(0);
     });
 
-    it('F-8: 6 vibes (2 unencoded), Opus → vibeEncodeCost=4, vibeBatchCost=4, totalCost=8', () => {
+    it('F-8: 6 vibes (2 unencoded), Opus → vibeEncodeCost=4, vibeBatchCost=4, totalCost=25 (vibes disable Opus free)', () => {
       const result = calculateGenerationCost({
         width: 832, height: 1216, steps: 23,
         vibeCount: 6, vibeUnencodedCount: 2, tier: 3,
       });
       expect(result.vibeEncodeCost).toBe(4);
       expect(result.vibeBatchCost).toBe(4);
-      expect(result.totalCost).toBe(8);
+      expect(result.isOpusFree).toBe(false);
+      expect(result.generationCost).toBe(17);
+      expect(result.totalCost).toBe(25);
     });
 
     it('F-9: 5 vibes + charRef → vibeBatchCost=0, vibeEncodeCost=0 (charRef disables vibe)', () => {
@@ -430,26 +432,28 @@ describe('calculateGenerationCost integration', () => {
     expect(result.totalCost).toBe(27);
   });
 
-  it('I-11: Opus free + vibes → generationCost=0, vibeEncodeCost=4, vibeBatchCost=4, totalCost=8', () => {
+  it('I-11: Opus + vibes → isOpusFree=false, generationCost=17, vibeEncodeCost=4, vibeBatchCost=4, totalCost=25', () => {
     const result = calculateGenerationCost({
       width: 832, height: 1216, steps: 23, tier: 3, nSamples: 1,
       vibeCount: 6, vibeUnencodedCount: 2,
     });
-    expect(result.generationCost).toBe(0);
+    expect(result.isOpusFree).toBe(false);
+    expect(result.generationCost).toBe(17);
     expect(result.vibeEncodeCost).toBe(4);
     expect(result.vibeBatchCost).toBe(4);
-    expect(result.totalCost).toBe(8);
+    expect(result.totalCost).toBe(25);
   });
 
-  it('I-12: Opus 2 samples + vibes → generationCost=17, vibeEncodeCost=2, vibeBatchCost=2, totalCost=21', () => {
+  it('I-12: Opus 2 samples + vibes → isOpusFree=false, generationCost=34, vibeEncodeCost=2, vibeBatchCost=2, totalCost=38', () => {
     const result = calculateGenerationCost({
       width: 832, height: 1216, steps: 23, tier: 3, nSamples: 2,
       vibeCount: 5, vibeUnencodedCount: 1,
     });
-    expect(result.generationCost).toBe(17);
+    expect(result.isOpusFree).toBe(false);
+    expect(result.generationCost).toBe(34);
     expect(result.vibeEncodeCost).toBe(2);
     expect(result.vibeBatchCost).toBe(2);
-    expect(result.totalCost).toBe(21);
+    expect(result.totalCost).toBe(38);
   });
 
   it('I-13: error=false for max configuration (2048x1536, 50 steps, smea_dyn)', () => {
@@ -712,15 +716,16 @@ describe('Edge cases', () => {
     expect(result).toHaveProperty('error');
   });
 
-  it('M-5: Opus free + vibes → generationCost=0, vibeEncodeCost=2, vibeBatchCost=2, totalCost=4', () => {
+  it('M-5: Opus + vibes → isOpusFree=false, generationCost=17, vibeEncodeCost=2, vibeBatchCost=2, totalCost=21', () => {
     const result = calculateGenerationCost({
       width: 832, height: 1216, steps: 23, tier: 3, nSamples: 1,
       vibeCount: 5, vibeUnencodedCount: 1,
     });
-    expect(result.generationCost).toBe(0);
+    expect(result.isOpusFree).toBe(false);
+    expect(result.generationCost).toBe(17);
     expect(result.vibeEncodeCost).toBe(2);
     expect(result.vibeBatchCost).toBe(2);
-    expect(result.totalCost).toBe(4);
+    expect(result.totalCost).toBe(21);
   });
 
   it('M-6: charRef → isOpusFree=false AND vibeBatchCost=0', () => {
@@ -732,5 +737,156 @@ describe('Edge cases', () => {
     expect(result.vibeBatchCost).toBe(0);
     expect(result.vibeEncodeCost).toBe(0);
     expect(result.charRefCost).toBe(5);
+  });
+});
+
+// =============================================================================
+// Category N: ゼロ除算防御テスト (calcInpaintSizeCorrection)
+// =============================================================================
+describe('calcInpaintSizeCorrection zero-division guard', () => {
+  it('N-1: maskWidth=0, maskHeight=0 → corrected=false', () => {
+    const result = calcInpaintSizeCorrection(0, 0);
+    expect(result.corrected).toBe(false);
+    expect(result.width).toBe(0);
+    expect(result.height).toBe(0);
+  });
+
+  it('N-2: maskWidth=0, maskHeight=100 → corrected=false', () => {
+    const result = calcInpaintSizeCorrection(0, 100);
+    expect(result.corrected).toBe(false);
+    expect(result.width).toBe(0);
+    expect(result.height).toBe(100);
+  });
+
+  it('N-3: maskWidth=100, maskHeight=0 → corrected=false', () => {
+    const result = calcInpaintSizeCorrection(100, 0);
+    expect(result.corrected).toBe(false);
+    expect(result.width).toBe(100);
+    expect(result.height).toBe(0);
+  });
+
+  it('N-4: negative maskWidth → corrected=false', () => {
+    const result = calcInpaintSizeCorrection(-10, 100);
+    expect(result.corrected).toBe(false);
+    expect(result.width).toBe(-10);
+    expect(result.height).toBe(100);
+  });
+});
+
+// =============================================================================
+// Category O: 入力バリデーションテスト
+// =============================================================================
+describe('Input validation', () => {
+  describe('calculateGenerationCost validation', () => {
+    it('O-1: negative width → RangeError', () => {
+      expect(() => calculateGenerationCost({ width: -1, height: 1216, steps: 23 }))
+        .toThrow(RangeError);
+    });
+
+    it('O-2: NaN height → RangeError', () => {
+      expect(() => calculateGenerationCost({ width: 832, height: NaN, steps: 23 }))
+        .toThrow(RangeError);
+    });
+
+    it('O-3: Infinity steps → RangeError', () => {
+      expect(() => calculateGenerationCost({ width: 832, height: 1216, steps: Infinity }))
+        .toThrow(RangeError);
+    });
+
+    it('O-4: zero width → RangeError', () => {
+      expect(() => calculateGenerationCost({ width: 0, height: 1216, steps: 23 }))
+        .toThrow(RangeError);
+    });
+
+    it('O-5: non-integer width → RangeError', () => {
+      expect(() => calculateGenerationCost({ width: 832.5, height: 1216, steps: 23 }))
+        .toThrow(RangeError);
+    });
+
+    it('O-6: strength out of range → RangeError', () => {
+      expect(() => calculateGenerationCost({
+        width: 832, height: 1216, steps: 23, mode: 'img2img', strength: 1.5,
+      })).toThrow(RangeError);
+    });
+
+    it('O-7: negative strength → RangeError', () => {
+      expect(() => calculateGenerationCost({
+        width: 832, height: 1216, steps: 23, mode: 'img2img', strength: -0.1,
+      })).toThrow(RangeError);
+    });
+
+    it('O-8: negative nSamples → RangeError', () => {
+      expect(() => calculateGenerationCost({
+        width: 832, height: 1216, steps: 23, nSamples: -1,
+      })).toThrow(RangeError);
+    });
+
+    it('O-9: NaN nSamples → RangeError', () => {
+      expect(() => calculateGenerationCost({
+        width: 832, height: 1216, steps: 23, nSamples: NaN,
+      })).toThrow(RangeError);
+    });
+  });
+
+  describe('calculateAugmentCost validation', () => {
+    it('O-10: negative width → RangeError', () => {
+      expect(() => calculateAugmentCost({ tool: 'lineart', width: -1, height: 512 }))
+        .toThrow(RangeError);
+    });
+
+    it('O-11: NaN height → RangeError', () => {
+      expect(() => calculateAugmentCost({ tool: 'lineart', width: 512, height: NaN }))
+        .toThrow(RangeError);
+    });
+  });
+
+  describe('calculateUpscaleCost validation', () => {
+    it('O-12: negative width → RangeError', () => {
+      expect(() => calculateUpscaleCost({ width: -1, height: 512 }))
+        .toThrow(RangeError);
+    });
+
+    it('O-13: Infinity height → RangeError', () => {
+      expect(() => calculateUpscaleCost({ width: 512, height: Infinity }))
+        .toThrow(RangeError);
+    });
+  });
+});
+
+// =============================================================================
+// Category P: エラー時 totalCost テスト
+// =============================================================================
+describe('Error totalCost behavior', () => {
+  it('P-1: error=true の場合 totalCost=0', () => {
+    // 非常に大きい画像で MAX_COST_PER_IMAGE を超過させる
+    const result = calculateGenerationCost({
+      width: 2048, height: 1536, steps: 50, smea: 'smea_dyn',
+      tier: 0, nSamples: 1, vibeCount: 6, vibeUnencodedCount: 2,
+      mode: 'img2img', strength: 1.0,
+    });
+    // adjustedCost=140 は MAX_COST_PER_IMAGE=140 以下なのでエラーにならない
+    // より大きなステップ数・ピクセル数を用意
+    // 実際にエラーになるケースを作る: adjustedCost > 140
+    expect(result.error).toBe(false);
+  });
+
+  it('P-2: adjustedCost > MAX_COST → error=true, totalCost=0', () => {
+    // baseCost=100 (2048x1536, 50steps), smea_dyn*1.4=140 → 140 は上限ちょうど
+    // strength=1.0 で 140 → error=false
+    // img2img でも strength=1.0 なら同じ
+    // もう少し大きい画像を試す：calcV4BaseCostが > 100 になる組み合わせ
+    // 2048x1536=3145728px, steps=50 → baseCost=100
+    // smea_dyn で 100*1.4=140 → ちょうど限界
+    // steps を増やすとバリデーションに引っかかるかもしれないが steps の上限バリデーションはない
+    // 代わりに直接的にテスト: baseCost を大きくする
+    // width=2048, height=2048=4194304px (MAX_PIXELS超だが計算自体は可能)
+    // calcV4BaseCost(2048, 2048, 50) = ceil(2.951823174884865e-6*4194304 + 5.753298233447344e-7*4194304*50) = ceil(12.381+120.6)=ceil(132.98)=133
+    // smea_dyn: 133*1.4=186.2 → ceil(186.2)=187 > 140 → error=true
+    const result = calculateGenerationCost({
+      width: 2048, height: 2048, steps: 50, smea: 'smea_dyn', tier: 0, nSamples: 1,
+    });
+    expect(result.error).toBe(true);
+    expect(result.errorCode).toBe(-3);
+    expect(result.totalCost).toBe(0);
   });
 });

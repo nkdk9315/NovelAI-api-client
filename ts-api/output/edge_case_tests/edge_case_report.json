@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-01-07T05:31:57.421Z",
+  "timestamp": "2026-02-14T03:53:42.727Z",
   "summary": {
     "total": 40,
-    "passed": 38,
-    "failed": 1,
+    "passed": 35,
+    "failed": 3,
     "errors": 0,
-    "skipped": 1
+    "skipped": 2
   },
   "results": [
     {
@@ -24,8 +24,8 @@
       "status": "PASS",
       "description": "NovelAI APIが空プロンプトを受け入れるか",
       "expected": "成功 or 明確なエラー",
-      "actual": "成功 - 画像生成完了 (output/edge_case_tests/gen_202601070531460_1964717725.png)",
-      "details": "Anlas消費: 0"
+      "actual": "成功 - 画像生成完了 (output/edge_case_tests/gen_202602140353353_2007840013.png)",
+      "details": "Anlas消費: 2"
     },
     {
       "id": "E1-3",
@@ -109,7 +109,7 @@
       "description": "seed=0 でAPIが正常動作するか",
       "expected": "成功",
       "actual": "成功 - seed: 0",
-      "details": "保存先: output/edge_case_tests/gen_202601070531479_0.png"
+      "details": "保存先: output/edge_case_tests/gen_202602140353371_0.png"
     },
     {
       "id": "E3-1",
@@ -124,11 +124,10 @@
       "id": "E3-2",
       "name": "MAX_PIXELS 超過 (1024x1088 = 1,114,112)",
       "category": "E3: 境界値のピクセル数",
-      "status": "PASS",
+      "status": "FAIL",
       "description": "1024x1088 = 1,114,112 pixels",
       "expected": "拒否される",
-      "actual": "拒否された",
-      "details": "Total pixels (1114112) exceeds limit (1048576). Current: 1024x1088"
+      "actual": "許可された"
     },
     {
       "id": "E3-3",
@@ -170,11 +169,10 @@
       "id": "E3-7",
       "name": "超過パターン3 (1280x832 = 1,064,960)",
       "category": "E3: 境界値のピクセル数",
-      "status": "PASS",
+      "status": "FAIL",
       "description": "1280x832 = 1,064,960 pixels",
       "expected": "拒否される",
-      "actual": "拒否された",
-      "details": "Total pixels (1064960) exceeds limit (1048576). Current: 1280x832"
+      "actual": "許可された"
     },
     {
       "id": "E3-API",
@@ -184,7 +182,7 @@
       "description": "境界値でAPIが正常動作するか",
       "expected": "成功",
       "actual": "成功",
-      "details": "保存先: output/edge_case_tests/gen_202601070531501_1814011436.png / Anlas消費: 0"
+      "details": "保存先: output/edge_case_tests/gen_202602140353397_3436144207.png / Anlas消費: 7"
     },
     {
       "id": "E4-1",
@@ -293,7 +291,7 @@
       "status": "FAIL",
       "description": "特殊文字を含むプロンプトの処理",
       "expected": "スキーマ通過",
-      "actual": "拒否: Prompt token count (2002) exceeds maximum allowed (512)",
+      "actual": "拒否: Total positive prompt token count (2002) exceeds maximum allowed (512). Base prompt + all character prompts must be <= 512 tokens.",
       "details": "文字数: 2000"
     },
     {
@@ -304,7 +302,7 @@
       "description": "絵文字がAPIで正常処理されるか",
       "expected": "成功",
       "actual": "成功",
-      "details": "保存先: output/edge_case_tests/gen_202601070531514_2547453725.png"
+      "details": "保存先: output/edge_case_tests/gen_202602140353408_2872600096.png"
     },
     {
       "id": "E5-1",
@@ -320,11 +318,10 @@
       "id": "E5-2",
       "name": "参照画像のサイズ確認",
       "category": "E5: 巨大な画像ファイル",
-      "status": "PASS",
+      "status": "SKIP",
       "description": "参照画像がサイズ制限内か",
       "expected": "<= 10 MB",
-      "actual": "1.55 MB",
-      "details": "./reference/input.png"
+      "actual": "参照画像が見つかりません: ./reference/input.png"
     },
     {
       "id": "E5-3",
@@ -344,7 +341,7 @@
       "description": "3つのgenerateを同時実行した場合の挙動",
       "expected": "全て成功 or 一部失敗 (レート制限)",
       "actual": "成功: 3, 失敗: 0",
-      "details": "所要時間: 5533ms / Anlas消費: 0"
+      "details": "所要時間: 1470ms / Anlas消費: 6"
     },
     {
       "id": "E6-2",

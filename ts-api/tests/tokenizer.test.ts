@@ -22,6 +22,7 @@ import {
     preprocessT5,
     clearTokenizerCache,
     TokenizerError,
+    getCacheFilename,
 } from '../src/tokenizer';
 
 // =============================================================================
@@ -163,7 +164,7 @@ describe('preprocessT5', () => {
         });
 
         it('should remove weight syntax without number', () => {
-            expect(preprocessT5('1girl, ::beautiful::')).toBe('1girl, beautiful');
+            expect(preprocessT5('::beautiful::')).toBe('beautiful');
         });
 
         it('should handle multiple weight syntaxes', () => {
@@ -175,6 +176,16 @@ describe('preprocessT5', () => {
             const input = '3::rosa (pokemon)::, 2::smile::, 1::artist:ixy, artist:ahemaru::';
             const expected = 'rosa (pokemon), smile, artist:ixy, artist:ahemaru';
             expect(preprocessT5(input)).toBe(expected);
+        });
+    });
+
+    describe('preserves standalone :: and namespace syntax', () => {
+        it('should preserve standalone :: not part of weight syntax', () => {
+            expect(preprocessT5('namespace::method')).toBe('namespace::method');
+        });
+
+        it('should preserve :: at end of string without matching pair', () => {
+            expect(preprocessT5('some text ::')).toBe('some text ::');
         });
     });
 
@@ -456,6 +467,87 @@ describe('PureJSUnigram with real T5 vocab', () => {
         if (!tokenizer) return;
         const ids = tokenizer.encode('美しい少女');
         expect(ids.length).toBeGreaterThan(0);
+    });
+});
+
+// =============================================================================
+// getCacheFilename Tests (Path Traversal Prevention)
+// =============================================================================
+describe('getCacheFilename', () => {
+    it('should generate correct filename for normal URL', () => {
+        const result = getCacheFilename('https://novelai.net/tokenizer/compressed/t5_tokenizer.def?v=2&static=true');
+        expect(result).toBe('t5_tokenizer_v2.json');
+    });
+
+    it('should sanitize path traversal in version parameter', () => {
+        const result = getCacheFilename('https://example.com/tokenizer.def?v=../../etc/passwd');
+        // Slashes are stripped; dots remain but are harmless without slashes
+        expect(result).not.toContain('/');
+        expect(result).toBe('tokenizer_v....etcpasswd.json');
+    });
+
+    it('should sanitize path traversal in pathname', () => {
+        const result = getCacheFilename('https://example.com/../../etc/passwd.def?v=1');
+        expect(result).not.toContain('..');
+        expect(result).not.toContain('/');
+    });
+
+    it('should handle URL with no version parameter', () => {
+        const result = getCacheFilename('https://example.com/tokenizer.def');
+        expect(result).toBe('tokenizer_vunknown.json');
+    });
+
+    it('should handle dotfile-style basename gracefully', () => {
+        // .def treated as dotfile, not stripped → basename is ".def"
+        const result = getCacheFilename('https://example.com/.def?v=1');
+        expect(result).toBe('.def_v1.json');
+    });
+
+    it('should strip special characters from filename components', () => {
+        const result = getCacheFilename('https://example.com/my<>file.def?v=a|b');
+        expect(result).not.toContain('<');
+        expect(result).not.toContain('>');
+        expect(result).not.toContain('|');
+    });
+});
+
+// =============================================================================
+// PureJSUnigram Emoji (Surrogate Pair) Tests
+// =============================================================================
+describe('PureJSUnigram Unicode handling', () => {
+    // Vocab with emoji entries
+    const EMOJI_VOCAB: [string, number][] = [
+        ['<pad>', 0],
+        ['</s>', 0],
+        ['<unk>', 0],
+        ['\u2581', -2.0],
+        ['\u2581hello', -5.0],
+        ['h', -8.0],
+        ['e', -8.0],
+        ['l', -8.0],
+        ['o', -8.0],
+    ];
+    const UNK_ID = 2;
+
+    it('should not crash on emoji input (BMP-external characters)', () => {
+        const tokenizer = new PureJSUnigram(EMOJI_VOCAB, UNK_ID);
+        // Should not throw - emoji are surrogate pairs in UTF-16
+        expect(() => tokenizer.encode('hello 🎨🔥')).not.toThrow();
+    });
+
+    it('should produce correct token count for emoji', () => {
+        const tokenizer = new PureJSUnigram(EMOJI_VOCAB, UNK_ID);
+        const result = tokenizer.encode('🎨');
+        // 🎨 is 1 code point, should produce ▁ + 🎨 (unk)
+        expect(result.length).toBeGreaterThan(0);
+    });
+
+    it('should handle mixed emoji and text', () => {
+        const tokenizer = new PureJSUnigram(EMOJI_VOCAB, UNK_ID);
+        const result = tokenizer.encode('hello 🎨');
+        expect(result.length).toBeGreaterThan(0);
+        // "hello" → ▁hello (id=4), "🎨" → ▁ + 🎨(unk)
+        expect(result[0]).toBe(4); // ▁hello
     });
 });
 

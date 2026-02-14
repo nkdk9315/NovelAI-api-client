@@ -1,7 +1,7 @@
-import * as Schemas from './src/schemas';
+import * as Schemas from '../src/schemas';
 import { ZodError } from 'zod';
-import { validateTokenCount, TokenValidationError, getT5Tokenizer } from './src/tokenizer';
-import type { GenerateParams } from './src/schemas';
+import { validateTokenCount, TokenValidationError, getT5Tokenizer } from '../src/tokenizer';
+import type { GenerateParams } from '../src/schemas';
 
 (async () => {
   console.log("=== バリデーションテスト ===\n");

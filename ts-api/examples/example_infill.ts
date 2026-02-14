@@ -5,7 +5,7 @@
  * 使用方法: pnpm tsx test.ts
  */
 
-import { NovelAIClient } from './src/client';
+import { NovelAIClient } from '../src/client';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
