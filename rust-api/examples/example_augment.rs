@@ -36,8 +36,7 @@ async fn main() -> Result<()> {
             image: ImageInput::FilePath(input_image.into()),
             prompt: Some("vibrant colors, detailed shading".into()),
             defry: Some(3),
-            save_path: None,
-            save_dir: Some(output_dir.into()),
+            save: SaveTarget::Directory { dir: output_dir.into(), filename: None },
         })
         .await
     {
@@ -66,8 +65,7 @@ async fn main() -> Result<()> {
             image: ImageInput::FilePath(input_image.into()),
             prompt: Some("happy".into()),
             defry: Some(0),
-            save_path: None,
-            save_dir: Some(output_dir.into()),
+            save: SaveTarget::Directory { dir: output_dir.into(), filename: None },
         })
         .await
     {
@@ -96,8 +94,7 @@ async fn main() -> Result<()> {
             image: ImageInput::FilePath(input_image.into()),
             prompt: None,
             defry: None,
-            save_path: None,
-            save_dir: Some(output_dir.into()),
+            save: SaveTarget::Directory { dir: output_dir.into(), filename: None },
         })
         .await
     {
@@ -126,8 +123,7 @@ async fn main() -> Result<()> {
             image: ImageInput::FilePath(input_image.into()),
             prompt: None,
             defry: None,
-            save_path: None,
-            save_dir: Some(output_dir.into()),
+            save: SaveTarget::Directory { dir: output_dir.into(), filename: None },
         })
         .await
     {
@@ -156,8 +152,7 @@ async fn main() -> Result<()> {
             image: ImageInput::FilePath(input_image.into()),
             prompt: None,
             defry: None,
-            save_path: None,
-            save_dir: Some(output_dir.into()),
+            save: SaveTarget::Directory { dir: output_dir.into(), filename: None },
         })
         .await
     {
@@ -186,8 +181,7 @@ async fn main() -> Result<()> {
             image: ImageInput::FilePath(input_image.into()),
             prompt: None,
             defry: None,
-            save_path: None,
-            save_dir: Some(output_dir.into()),
+            save: SaveTarget::Directory { dir: output_dir.into(), filename: None },
         })
         .await
     {
@@ -214,8 +208,7 @@ async fn main() -> Result<()> {
         .upscale_image(&UpscaleParams {
             image: ImageInput::FilePath(input_image.into()),
             scale: 4,
-            save_path: None,
-            save_dir: Some(output_dir.into()),
+            save: SaveTarget::Directory { dir: output_dir.into(), filename: None },
         })
         .await
     {

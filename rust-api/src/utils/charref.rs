@@ -1,11 +1,11 @@
 use crate::constants;
 use crate::error::{NovelAIError, Result};
 use crate::schemas::CharacterReferenceConfig;
+use crate::utils::image::{load_image_safe, encode_to_png};
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
-use std::io::Cursor;
+use image::{DynamicImage, Rgba, RgbaImage};
 
 // =============================================================================
 // Result type
@@ -34,9 +34,7 @@ pub struct ProcessedCharacterReferences {
 /// The image is resized to fit within the target dimensions while maintaining
 /// aspect ratio, then centered on a black canvas.
 pub fn prepare_character_reference_image(image_buffer: &[u8]) -> Result<Vec<u8>> {
-    let img = image::load_from_memory(image_buffer).map_err(|e| {
-        NovelAIError::Image(format!("Could not get image dimensions: {}", e))
-    })?;
+    let img = load_image_safe(image_buffer)?;
 
     let orig_width = img.width();
     let orig_height = img.height();
@@ -77,12 +75,7 @@ pub fn prepare_character_reference_image(image_buffer: &[u8]) -> Result<Vec<u8>>
 
     // Encode to PNG
     let dynamic = DynamicImage::ImageRgba8(canvas);
-    let mut buf = Cursor::new(Vec::new());
-    dynamic.write_to(&mut buf, ImageFormat::Png).map_err(|e| {
-        NovelAIError::Image(format!("Failed to encode image as PNG: {}", e))
-    })?;
-
-    Ok(buf.into_inner())
+    encode_to_png(&dynamic)
 }
 
 /// Process an array of character reference configs into payload-ready data.

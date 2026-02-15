@@ -1,6 +1,7 @@
 /// NovelAI Client Constants Tests
 /// 定数のテスト
 use novelai_api::constants;
+use std::str::FromStr;
 
 // =============================================================================
 // URL Constants Tests
@@ -10,12 +11,7 @@ mod url_constants {
 
     #[test]
     fn should_have_valid_api_urls() {
-        // Remove any env overrides for deterministic testing
-        std::env::remove_var("NOVELAI_API_URL");
-        std::env::remove_var("NOVELAI_STREAM_URL");
-        std::env::remove_var("NOVELAI_ENCODE_URL");
-        std::env::remove_var("NOVELAI_SUBSCRIPTION_URL");
-
+        // OnceLock caches on first call; env vars should not be set in tests
         assert_eq!(
             constants::api_url(),
             "https://image.novelai.net/ai/generate-image"
@@ -36,9 +32,6 @@ mod url_constants {
 
     #[test]
     fn should_have_valid_augment_and_upscale_urls() {
-        std::env::remove_var("NOVELAI_AUGMENT_URL");
-        std::env::remove_var("NOVELAI_UPSCALE_URL");
-
         assert_eq!(
             constants::augment_url(),
             "https://image.novelai.net/ai/augment-image"
@@ -59,9 +52,10 @@ mod default_values {
     #[test]
     fn should_have_valid_default_model() {
         assert_eq!(constants::DEFAULT_MODEL, "nai-diffusion-4-5-full");
+        // Verify default model can be parsed as a Model enum variant
         assert!(
-            constants::VALID_MODELS.contains(&constants::DEFAULT_MODEL),
-            "DEFAULT_MODEL should be in VALID_MODELS"
+            constants::Model::from_str(constants::DEFAULT_MODEL).is_ok(),
+            "DEFAULT_MODEL should be parseable as Model enum"
         );
     }
 
@@ -111,37 +105,88 @@ mod default_values {
 }
 
 // =============================================================================
-// Validation Constants Tests
+// Enum Parsing Tests (replaces VALID_* slice tests)
 // =============================================================================
-mod validation_constants {
+mod enum_parsing {
     use super::*;
 
     #[test]
-    fn should_have_valid_samplers_array() {
-        assert!(constants::VALID_SAMPLERS.contains(&"k_euler"));
-        assert!(constants::VALID_SAMPLERS.contains(&"k_euler_ancestral"));
-        assert!(constants::VALID_SAMPLERS.contains(&"k_dpmpp_2s_ancestral"));
-        assert!(constants::VALID_SAMPLERS.contains(&"k_dpmpp_2m_sde"));
-        assert!(constants::VALID_SAMPLERS.contains(&"k_dpmpp_2m"));
-        assert!(constants::VALID_SAMPLERS.contains(&"k_dpmpp_sde"));
-        assert_eq!(constants::VALID_SAMPLERS.len(), 6);
+    fn should_parse_all_samplers_from_str() {
+        let sampler_strs = [
+            "k_euler",
+            "k_euler_ancestral",
+            "k_dpmpp_2s_ancestral",
+            "k_dpmpp_2m_sde",
+            "k_dpmpp_2m",
+            "k_dpmpp_sde",
+        ];
+        for s in &sampler_strs {
+            assert!(
+                constants::Sampler::from_str(s).is_ok(),
+                "Sampler::from_str should succeed for '{}'",
+                s
+            );
+        }
     }
 
     #[test]
-    fn should_have_valid_models_array() {
-        assert!(constants::VALID_MODELS.contains(&"nai-diffusion-4-curated-preview"));
-        assert!(constants::VALID_MODELS.contains(&"nai-diffusion-4-full"));
-        assert!(constants::VALID_MODELS.contains(&"nai-diffusion-4-5-curated"));
-        assert!(constants::VALID_MODELS.contains(&"nai-diffusion-4-5-full"));
-        assert_eq!(constants::VALID_MODELS.len(), 4);
+    fn should_roundtrip_sampler_as_str() {
+        let samplers = [
+            constants::Sampler::KEuler,
+            constants::Sampler::KEulerAncestral,
+            constants::Sampler::KDpmpp2sAncestral,
+            constants::Sampler::KDpmpp2mSde,
+            constants::Sampler::KDpmpp2m,
+            constants::Sampler::KDpmppSde,
+        ];
+        for sampler in &samplers {
+            let s = sampler.as_ref();
+            let parsed = constants::Sampler::from_str(s).unwrap();
+            assert_eq!(*sampler, parsed);
+        }
     }
 
     #[test]
-    fn should_have_valid_noise_schedules_array() {
-        assert!(constants::VALID_NOISE_SCHEDULES.contains(&"karras"));
-        assert!(constants::VALID_NOISE_SCHEDULES.contains(&"exponential"));
-        assert!(constants::VALID_NOISE_SCHEDULES.contains(&"polyexponential"));
-        assert_eq!(constants::VALID_NOISE_SCHEDULES.len(), 3);
+    fn should_parse_all_models_from_str() {
+        let model_strs = [
+            "nai-diffusion-4-curated-preview",
+            "nai-diffusion-4-full",
+            "nai-diffusion-4-5-curated",
+            "nai-diffusion-4-5-full",
+        ];
+        for s in &model_strs {
+            assert!(
+                constants::Model::from_str(s).is_ok(),
+                "Model::from_str should succeed for '{}'",
+                s
+            );
+        }
+    }
+
+    #[test]
+    fn should_parse_all_noise_schedules_from_str() {
+        let schedule_strs = ["karras", "exponential", "polyexponential"];
+        for s in &schedule_strs {
+            assert!(
+                constants::NoiseSchedule::from_str(s).is_ok(),
+                "NoiseSchedule::from_str should succeed for '{}'",
+                s
+            );
+        }
+    }
+
+    #[test]
+    fn should_parse_all_augment_req_types_from_str() {
+        let type_strs = [
+            "colorize", "declutter", "emotion", "sketch", "lineart", "bg-removal",
+        ];
+        for s in &type_strs {
+            assert!(
+                constants::AugmentReqType::from_str(s).is_ok(),
+                "AugmentReqType::from_str should succeed for '{}'",
+                s
+            );
+        }
     }
 }
 
@@ -150,17 +195,6 @@ mod validation_constants {
 // =============================================================================
 mod augment_tool_constants {
     use super::*;
-
-    #[test]
-    fn should_have_all_augment_req_types() {
-        assert!(constants::AUGMENT_REQ_TYPES.contains(&"colorize"));
-        assert!(constants::AUGMENT_REQ_TYPES.contains(&"declutter"));
-        assert!(constants::AUGMENT_REQ_TYPES.contains(&"emotion"));
-        assert!(constants::AUGMENT_REQ_TYPES.contains(&"sketch"));
-        assert!(constants::AUGMENT_REQ_TYPES.contains(&"lineart"));
-        assert!(constants::AUGMENT_REQ_TYPES.contains(&"bg-removal"));
-        assert_eq!(constants::AUGMENT_REQ_TYPES.len(), 6);
-    }
 
     #[test]
     fn should_have_all_emotion_keywords() {
@@ -222,6 +256,7 @@ mod limit_constants {
 
     #[test]
     fn should_have_valid_seed_limit() {
+        assert_eq!(constants::MAX_SEED, u32::MAX);
         assert_eq!(constants::MAX_SEED, 4_294_967_295); // 2^32 - 1
     }
 
@@ -244,8 +279,14 @@ mod model_key_map {
     use super::*;
 
     #[test]
-    fn should_have_mappings_for_all_valid_models() {
-        for model in constants::VALID_MODELS {
+    fn should_have_mappings_for_all_models() {
+        let model_strs = [
+            "nai-diffusion-4-curated-preview",
+            "nai-diffusion-4-full",
+            "nai-diffusion-4-5-curated",
+            "nai-diffusion-4-5-full",
+        ];
+        for model in &model_strs {
             assert!(
                 constants::model_key_from_str(model).is_some(),
                 "model_key_from_str should return Some for valid model '{}'",

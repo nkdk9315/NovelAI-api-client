@@ -4,6 +4,8 @@ use crate::schemas::ImageInput;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use image::ImageReader;
+use std::io::Cursor;
 use std::sync::LazyLock;
 use regex::Regex;
 
@@ -27,20 +29,46 @@ static IMAGE_EXTENSION_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 // Internal Helpers
 // =============================================================================
 
-/// Sanitize a file path, checking for path traversal.
-fn sanitize_file_path(file_path: &str) -> Result<String> {
-    let normalized = file_path.replace('\\', "/");
-    if normalized.contains("..") {
-        return Err(NovelAIError::Validation(format!(
-            "Invalid file path (path traversal detected): {}",
-            file_path
-        )));
+const MAX_IMAGE_PIXELS: u64 = 16_384 * 16_384; // ~268M pixels
+
+const MAX_BASE64_INPUT_LEN: usize = 14 * 1024 * 1024; // ~10MB decoded
+
+/// Load an image from a byte buffer with a dimension safety check to prevent
+/// decompression bombs. Reads only the header first, then performs the full
+/// decode only when the pixel count is within the limit.
+pub(crate) fn load_image_safe(buffer: &[u8]) -> Result<image::DynamicImage> {
+    let reader = ImageReader::new(Cursor::new(buffer))
+        .with_guessed_format()
+        .map_err(|e| NovelAIError::Image(format!("Format detection failed: {}", e)))?;
+    let (w, h) = reader.into_dimensions()
+        .map_err(|e| NovelAIError::Image(format!("Cannot read dimensions: {}", e)))?;
+    if (w as u64) * (h as u64) > MAX_IMAGE_PIXELS {
+        return Err(NovelAIError::Image(
+            format!("Image dimensions {}x{} exceed maximum pixel count", w, h),
+        ));
     }
-    Ok(normalized)
+    image::load_from_memory(buffer)
+        .map_err(|e| NovelAIError::Image(e.to_string()))
+}
+
+/// Encode a `DynamicImage` to PNG bytes.
+pub(crate) fn encode_to_png(img: &image::DynamicImage) -> Result<Vec<u8>> {
+    let mut buf = Cursor::new(Vec::new());
+    img.write_to(&mut buf, image::ImageFormat::Png).map_err(|e| {
+        NovelAIError::Image(format!("Failed to encode image as PNG: {}", e))
+    })?;
+    Ok(buf.into_inner())
 }
 
 /// Decode a base64 image string, stripping optional data URL prefix.
 fn decode_base64_image(base64_str: &str) -> Result<Vec<u8>> {
+    if base64_str.len() > MAX_BASE64_INPUT_LEN {
+        return Err(NovelAIError::ImageFileSize {
+            file_size_mb: base64_str.len() as f64 / 1_000_000.0,
+            max_size_mb: 10,
+            file_source: Some("base64 input".to_string()),
+        });
+    }
     let stripped = DATA_URL_PREFIX_REGEX.replace(base64_str, "").into_owned();
     if stripped.is_empty()
         || !stripped
@@ -79,11 +107,12 @@ pub fn get_image_buffer(input: &ImageInput) -> Result<Vec<u8>> {
     match input {
         ImageInput::Bytes(data) => Ok(data.clone()),
         ImageInput::FilePath(path) => {
-            let safe_path = sanitize_file_path(path)?;
-            std::fs::read(&safe_path).map_err(|_| {
+            let path_str = path.to_string_lossy();
+            crate::utils::validate_safe_path(&path_str)?;
+            std::fs::read(path).map_err(|_| {
                 NovelAIError::Image(format!(
                     "Image file not found or not readable: {}",
-                    path
+                    path.display()
                 ))
             })
         }
@@ -94,23 +123,36 @@ pub fn get_image_buffer(input: &ImageInput) -> Result<Vec<u8>> {
 
 /// Get image dimensions from image data.
 /// Returns (width, height, buffer).
+///
+/// Uses header-only reading via `ImageReader::into_dimensions()` to avoid
+/// fully decoding the image just to obtain its size.
 pub fn get_image_dimensions(input: &ImageInput) -> Result<(u32, u32, Vec<u8>)> {
     let buffer = get_image_buffer(input)?;
+    let source_string;
     let source = match input {
-        ImageInput::FilePath(path) => Some(path.as_str()),
+        ImageInput::FilePath(path) => {
+            source_string = path.to_string_lossy().into_owned();
+            Some(source_string.as_str())
+        }
         _ => None,
     };
     validate_image_data_size(&buffer, source)?;
 
-    let img = image::load_from_memory(&buffer).map_err(|_| {
+    let reader = ImageReader::new(Cursor::new(&buffer))
+        .with_guessed_format()
+        .map_err(|_| {
+            NovelAIError::Image(
+                "Could not determine image dimensions. The file may be corrupted or not a valid image."
+                    .to_string(),
+            )
+        })?;
+
+    let (width, height) = reader.into_dimensions().map_err(|_| {
         NovelAIError::Image(
             "Could not determine image dimensions. The file may be corrupted or not a valid image."
                 .to_string(),
         )
     })?;
-
-    let width = img.width();
-    let height = img.height();
 
     if width == 0 || height == 0 {
         return Err(NovelAIError::Image(

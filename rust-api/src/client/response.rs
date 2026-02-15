@@ -4,13 +4,20 @@ use crate::client::Logger;
 use crate::constants;
 use crate::error::{NovelAIError, Result};
 
+/// Maximum buffer size allowed before attempting MessagePack parsing.
+const MAX_MSGPACK_PARSE_SIZE: usize = 50 * 1024 * 1024; // 50MB
+
 /// Read HTTP response body with size validation.
+///
+/// Performs a Content-Length pre-check before downloading, then a post-check
+/// on the actual downloaded bytes to guard against missing/lying headers.
 pub async fn get_response_buffer(response: reqwest::Response) -> Result<Vec<u8>> {
-    // Check Content-Length header first
+    // Pre-check: reject early based on Content-Length header to avoid
+    // downloading an oversized response body into memory.
     if let Some(content_length) = response.content_length() {
         if content_length > constants::MAX_RESPONSE_SIZE as u64 {
             return Err(NovelAIError::Parse(format!(
-                "Response too large: {} bytes (max {})",
+                "Response Content-Length too large: {} bytes (max {})",
                 content_length,
                 constants::MAX_RESPONSE_SIZE
             )));
@@ -21,6 +28,8 @@ pub async fn get_response_buffer(response: reqwest::Response) -> Result<Vec<u8>>
         NovelAIError::Other(format!("Failed to read response body: {}", e))
     })?;
 
+    // Post-check: the Content-Length header could be absent or spoofed,
+    // so verify actual downloaded size.
     if bytes.len() > constants::MAX_RESPONSE_SIZE {
         return Err(NovelAIError::Parse(format!(
             "Response too large: {} bytes (max {})",
@@ -50,7 +59,7 @@ pub fn parse_zip_response(content: &[u8]) -> Result<Vec<u8>> {
     }
 
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| {
+        let file = archive.by_index(i).map_err(|e| {
             NovelAIError::Parse(format!("Failed to read ZIP entry: {}", e))
         })?;
 
@@ -64,29 +73,21 @@ pub fn parse_zip_response(content: &[u8]) -> Result<Vec<u8>> {
             continue;
         }
 
-        let uncompressed_size = file.size();
-        if uncompressed_size > constants::MAX_DECOMPRESSED_IMAGE_SIZE as u64 {
+        // Use .take() to limit actual decompression size instead of trusting
+        // the ZIP header's declared size, which can be spoofed (ZIP bomb defense).
+        let max_size = constants::MAX_DECOMPRESSED_IMAGE_SIZE as u64;
+        let mut limited_reader = file.take(max_size + 1);
+        let mut image_data = Vec::new();
+        limited_reader.read_to_end(&mut image_data).map_err(|e| {
+            NovelAIError::Parse(format!("Failed to decompress ZIP entry: {}", e))
+        })?;
+        if image_data.len() > constants::MAX_DECOMPRESSED_IMAGE_SIZE {
             return Err(NovelAIError::Parse(format!(
-                "Decompressed image too large ({} bytes, max {})",
-                uncompressed_size,
+                "Decompressed image exceeds size limit ({} bytes max)",
                 constants::MAX_DECOMPRESSED_IMAGE_SIZE
             )));
         }
-
-        let compressed_size = file.compressed_size();
-        if compressed_size > 0
-            && uncompressed_size / compressed_size > constants::MAX_COMPRESSION_RATIO
-        {
-            return Err(NovelAIError::Parse(
-                "Suspicious compression ratio detected".to_string(),
-            ));
-        }
-
-        let mut data = Vec::new();
-        file.read_to_end(&mut data).map_err(|e| {
-            NovelAIError::Parse(format!("Failed to decompress ZIP entry: {}", e))
-        })?;
-        return Ok(data);
+        return Ok(image_data);
     }
 
     Err(NovelAIError::Parse(
@@ -152,7 +153,16 @@ const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 ///
 /// This is the last-resort fallback for non-streaming responses that happen
 /// to be msgpack-encoded. Returns the first match found.
+///
+/// Limits the buffer size before parsing to prevent stack overflow or
+/// excessive memory consumption from deeply nested or oversized payloads.
 fn try_parse_msgpack(content: &[u8]) -> Option<Vec<u8>> {
+    // Reject oversized buffers before attempting to parse to limit memory
+    // and stack usage from malicious deeply-nested msgpack structures.
+    if content.len() > MAX_MSGPACK_PARSE_SIZE {
+        return None;
+    }
+
     let mut cursor = std::io::Cursor::new(content);
 
     while let Ok(val) = rmpv::decode::read_value(&mut cursor) {

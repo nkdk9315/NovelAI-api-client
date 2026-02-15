@@ -36,6 +36,15 @@ mod tests {
         }
     }
 
+    /// Helper to create a default VibeConfig wrapping a VibeItem.
+    fn make_vibe_config(item: VibeItem) -> VibeConfig {
+        VibeConfig {
+            item,
+            strength: DEFAULT_VIBE_STRENGTH,
+            info_extracted: DEFAULT_VIBE_INFO_EXTRACTED,
+        }
+    }
+
     // =========================================================================
     // CharacterConfig Tests
     // =========================================================================
@@ -118,7 +127,7 @@ mod tests {
         #[test]
         fn should_validate_with_file_path_image_input() {
             let config = CharacterReferenceConfig {
-                image: ImageInput::FilePath("path/to/image.png".to_string()),
+                image: ImageInput::FilePath("path/to/image.png".into()),
                 strength: 0.6,
                 fidelity: 1.0,
                 mode: CharRefMode::CharacterAndStyle,
@@ -140,7 +149,7 @@ mod tests {
         #[test]
         fn should_reject_empty_string_image_input() {
             let config = CharacterReferenceConfig {
-                image: ImageInput::FilePath("".to_string()),
+                image: ImageInput::FilePath("".into()),
                 strength: 0.6,
                 fidelity: 1.0,
                 mode: CharRefMode::CharacterAndStyle,
@@ -152,7 +161,7 @@ mod tests {
         fn should_verify_expected_default_values() {
             // CharacterReferenceConfig has no Default impl, so construct with expected defaults
             let config = CharacterReferenceConfig {
-                image: ImageInput::FilePath("test.png".to_string()),
+                image: ImageInput::FilePath("test.png".into()),
                 strength: 0.6,
                 fidelity: 1.0,
                 mode: CharRefMode::CharacterAndStyle,
@@ -166,7 +175,7 @@ mod tests {
         #[test]
         fn should_reject_fidelity_outside_0_1_range() {
             let config_below = CharacterReferenceConfig {
-                image: ImageInput::FilePath("test.png".to_string()),
+                image: ImageInput::FilePath("test.png".into()),
                 strength: 0.6,
                 fidelity: -0.1,
                 mode: CharRefMode::CharacterAndStyle,
@@ -174,7 +183,7 @@ mod tests {
             assert!(config_below.validate().is_err());
 
             let config_above = CharacterReferenceConfig {
-                image: ImageInput::FilePath("test.png".to_string()),
+                image: ImageInput::FilePath("test.png".into()),
                 strength: 0.6,
                 fidelity: 1.1,
                 mode: CharRefMode::CharacterAndStyle,
@@ -185,7 +194,7 @@ mod tests {
         #[test]
         fn should_reject_strength_outside_0_1_range() {
             let config_below = CharacterReferenceConfig {
-                image: ImageInput::FilePath("test.png".to_string()),
+                image: ImageInput::FilePath("test.png".into()),
                 strength: -0.1,
                 fidelity: 1.0,
                 mode: CharRefMode::CharacterAndStyle,
@@ -193,7 +202,7 @@ mod tests {
             assert!(config_below.validate().is_err());
 
             let config_above = CharacterReferenceConfig {
-                image: ImageInput::FilePath("test.png".to_string()),
+                image: ImageInput::FilePath("test.png".into()),
                 strength: 1.1,
                 fidelity: 1.0,
                 mode: CharRefMode::CharacterAndStyle,
@@ -209,7 +218,7 @@ mod tests {
                 CharRefMode::Style,
             ] {
                 let config = CharacterReferenceConfig {
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     strength: 0.6,
                     fidelity: 1.0,
                     mode,
@@ -275,7 +284,7 @@ mod tests {
             #[test]
             fn should_apply_all_defaults_correctly() {
                 let params = make_generate_params("1girl");
-                assert_eq!(params.action, GenerateAction::Generate);
+                assert!(params.action.is_generate());
                 assert_eq!(params.model, Model::default());
                 assert_eq!(params.width, DEFAULT_WIDTH);
                 assert_eq!(params.height, DEFAULT_HEIGHT);
@@ -511,20 +520,35 @@ mod tests {
             // Invalid action is handled by Rust type system (enum)
 
             #[test]
-            fn should_accept_all_valid_actions() {
-                for action in [
-                    GenerateAction::Generate,
-                    GenerateAction::Img2Img,
-                    GenerateAction::Infill,
-                ] {
-                    let mut params = make_generate_params("1girl");
-                    params.action = action;
-                    // Img2Img and Infill need source_image to pass full validation,
-                    // but here we just verify the action enum is accepted by type system.
-                    if action == GenerateAction::Generate {
-                        assert!(params.validate().is_ok());
-                    }
-                }
+            fn should_accept_generate_action() {
+                let mut params = make_generate_params("1girl");
+                params.action = GenerateAction::Generate;
+                assert!(params.validate().is_ok());
+            }
+
+            #[test]
+            fn should_accept_img2img_action_with_data() {
+                let mut params = make_generate_params("1girl");
+                params.action = GenerateAction::Img2Img {
+                    source_image: ImageInput::FilePath("path/to/image.png".into()),
+                    strength: 0.5,
+                    noise: 0.0,
+                };
+                assert!(params.validate().is_ok());
+            }
+
+            #[test]
+            fn should_accept_infill_action_with_data() {
+                let mut params = make_generate_params("1girl");
+                params.action = GenerateAction::Infill {
+                    source_image: ImageInput::FilePath("path/to/image.png".into()),
+                    mask: ImageInput::FilePath("path/to/mask.png".into()),
+                    mask_strength: 0.5,
+                    color_correct: false,
+                    hybrid_strength: None,
+                    hybrid_noise: None,
+                };
+                assert!(params.validate().is_ok());
             }
         }
 
@@ -568,31 +592,150 @@ mod tests {
             use super::super::*;
 
             #[test]
-            fn should_require_source_image_for_img2img_action() {
+            fn should_accept_img2img_with_valid_params() {
                 let mut params = make_generate_params("1girl");
-                params.action = GenerateAction::Img2Img;
-                let err = params.validate().unwrap_err();
-                assert!(err.to_string().contains("source_image is required"));
+                params.action = GenerateAction::Img2Img {
+                    source_image: ImageInput::FilePath("path/to/image.png".into()),
+                    strength: 0.5,
+                    noise: 0.0,
+                };
+                assert!(params.validate().is_ok());
             }
 
             #[test]
-            fn should_accept_img2img_with_source_image() {
+            fn should_reject_img2img_with_empty_source_image() {
                 let mut params = make_generate_params("1girl");
-                params.action = GenerateAction::Img2Img;
-                params.source_image =
-                    Some(ImageInput::FilePath("path/to/image.png".to_string()));
-                assert!(params.validate().is_ok());
+                params.action = GenerateAction::Img2Img {
+                    source_image: ImageInput::FilePath("".into()),
+                    strength: 0.5,
+                    noise: 0.0,
+                };
+                let err = params.validate().unwrap_err();
+                assert!(err.to_string().contains("must not be empty"));
             }
 
             #[test]
             fn should_validate_img2img_strength_range() {
                 let mut params1 = make_generate_params("1girl");
-                params1.img2img_strength = -0.1;
+                params1.action = GenerateAction::Img2Img {
+                    source_image: ImageInput::FilePath("image.png".into()),
+                    strength: -0.1,
+                    noise: 0.0,
+                };
                 assert!(params1.validate().is_err());
 
                 let mut params2 = make_generate_params("1girl");
-                params2.img2img_strength = 1.1;
+                params2.action = GenerateAction::Img2Img {
+                    source_image: ImageInput::FilePath("image.png".into()),
+                    strength: 1.1,
+                    noise: 0.0,
+                };
                 assert!(params2.validate().is_err());
+            }
+
+            #[test]
+            fn should_validate_img2img_noise_range() {
+                let mut params = make_generate_params("1girl");
+                params.action = GenerateAction::Img2Img {
+                    source_image: ImageInput::FilePath("image.png".into()),
+                    strength: 0.5,
+                    noise: 1.1,
+                };
+                assert!(params.validate().is_err());
+            }
+
+            // source_image/mask required checks are now enforced by type system
+            // (data-carrying enum makes illegal states unrepresentable)
+        }
+
+        // -----------------------------------------------------------------
+        // infill Validation
+        // -----------------------------------------------------------------
+        mod infill {
+            use super::super::*;
+
+            #[test]
+            fn should_accept_infill_with_valid_params() {
+                let mut params = make_generate_params("1girl");
+                params.action = GenerateAction::Infill {
+                    source_image: ImageInput::FilePath("image.png".into()),
+                    mask: ImageInput::FilePath("mask.png".into()),
+                    mask_strength: 0.5,
+                    color_correct: false,
+                    hybrid_strength: None,
+                    hybrid_noise: None,
+                };
+                assert!(params.validate().is_ok());
+            }
+
+            #[test]
+            fn should_reject_infill_with_empty_source_image() {
+                let mut params = make_generate_params("1girl");
+                params.action = GenerateAction::Infill {
+                    source_image: ImageInput::FilePath("".into()),
+                    mask: ImageInput::FilePath("mask.png".into()),
+                    mask_strength: 0.5,
+                    color_correct: false,
+                    hybrid_strength: None,
+                    hybrid_noise: None,
+                };
+                assert!(params.validate().is_err());
+            }
+
+            #[test]
+            fn should_reject_infill_with_empty_mask() {
+                let mut params = make_generate_params("1girl");
+                params.action = GenerateAction::Infill {
+                    source_image: ImageInput::FilePath("image.png".into()),
+                    mask: ImageInput::FilePath("".into()),
+                    mask_strength: 0.5,
+                    color_correct: false,
+                    hybrid_strength: None,
+                    hybrid_noise: None,
+                };
+                assert!(params.validate().is_err());
+            }
+
+            #[test]
+            fn should_reject_infill_mask_strength_out_of_range() {
+                let mut params = make_generate_params("1girl");
+                params.action = GenerateAction::Infill {
+                    source_image: ImageInput::FilePath("image.png".into()),
+                    mask: ImageInput::FilePath("mask.png".into()),
+                    mask_strength: 0.0, // below 0.01
+                    color_correct: false,
+                    hybrid_strength: None,
+                    hybrid_noise: None,
+                };
+                assert!(params.validate().is_err());
+            }
+
+            #[test]
+            fn should_reject_infill_hybrid_strength_out_of_range() {
+                let mut params = make_generate_params("1girl");
+                params.action = GenerateAction::Infill {
+                    source_image: ImageInput::FilePath("image.png".into()),
+                    mask: ImageInput::FilePath("mask.png".into()),
+                    mask_strength: 0.5,
+                    color_correct: false,
+                    hybrid_strength: Some(1.0), // above 0.99
+                    hybrid_noise: None,
+                };
+                assert!(params.validate().is_err());
+            }
+
+            #[test]
+            fn should_reject_infill_hybrid_noise_out_of_range() {
+                let mut params = make_generate_params("1girl");
+                params.action = GenerateAction::Infill {
+                    source_image: ImageInput::FilePath("image.png".into()),
+                    mask: ImageInput::FilePath("mask.png".into()),
+                    mask_strength: 0.5,
+                    color_correct: false,
+                    hybrid_strength: None,
+                    hybrid_noise: Some(1.0), // above 0.99
+                };
+                assert!(params.validate().is_err());
             }
         }
 
@@ -605,11 +748,11 @@ mod tests {
             #[test]
             fn should_reject_vibes_and_character_reference_used_together() {
                 let mut params = make_generate_params("1girl");
-                params.vibes = Some(vec![VibeItem::FilePath(
-                    "vibe1.naiv4vibe".to_string(),
+                params.vibes = Some(vec![make_vibe_config(
+                    VibeItem::FilePath("vibe1.naiv4vibe".into()),
                 )]);
                 params.character_reference = Some(CharacterReferenceConfig {
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     strength: 0.6,
                     fidelity: 1.0,
                     mode: CharRefMode::CharacterAndStyle,
@@ -621,107 +764,95 @@ mod tests {
             #[test]
             fn should_accept_vibes_without_character_reference() {
                 let mut params = make_generate_params("1girl");
-                params.vibes = Some(vec![VibeItem::FilePath(
-                    "vibe1.naiv4vibe".to_string(),
+                params.vibes = Some(vec![make_vibe_config(
+                    VibeItem::FilePath("vibe1.naiv4vibe".into()),
                 )]);
                 assert!(params.validate().is_ok());
             }
         }
 
         // -----------------------------------------------------------------
-        // vibe_strengths / vibe_info_extracted dependencies
+        // VibeConfig validation (strength and info_extracted ranges)
         // -----------------------------------------------------------------
-        mod vibe_deps {
+        mod vibe_config_validation {
             use super::super::*;
 
             #[test]
-            fn should_reject_vibe_strengths_without_vibes() {
-                let mut params = make_generate_params("1girl");
-                params.vibe_strengths = Some(vec![0.5]);
-                assert!(params.validate().is_err());
-            }
-
-            #[test]
-            fn should_reject_vibe_info_extracted_without_vibes() {
-                let mut params = make_generate_params("1girl");
-                params.vibe_info_extracted = Some(vec![0.7]);
-                assert!(params.validate().is_err());
-            }
-
-            #[test]
-            fn should_reject_mismatched_vibes_and_vibe_strengths_length() {
+            fn should_accept_valid_vibe_config_ranges() {
                 let mut params = make_generate_params("1girl");
                 params.vibes = Some(vec![
-                    VibeItem::FilePath("vibe1.naiv4vibe".to_string()),
-                    VibeItem::FilePath("vibe2.naiv4vibe".to_string()),
+                    VibeConfig {
+                        item: VibeItem::FilePath("vibe1.naiv4vibe".into()),
+                        strength: 0.5,
+                        info_extracted: 0.7,
+                    },
+                    VibeConfig {
+                        item: VibeItem::FilePath("vibe2.naiv4vibe".into()),
+                        strength: 1.0,
+                        info_extracted: 0.0,
+                    },
                 ]);
-                params.vibe_strengths = Some(vec![0.5]); // length mismatch
+                assert!(params.validate().is_ok());
+            }
+
+            #[test]
+            fn should_reject_vibe_strength_out_of_range() {
+                let mut params = make_generate_params("1girl");
+                params.vibes = Some(vec![VibeConfig {
+                    item: VibeItem::FilePath("vibe1.naiv4vibe".into()),
+                    strength: 1.5,
+                    info_extracted: 0.7,
+                }]);
                 let err = params.validate().unwrap_err();
-                assert!(err.to_string().contains("Mismatch"));
+                assert!(err.to_string().contains("strength"));
             }
 
             #[test]
-            fn should_reject_mismatched_vibes_and_vibe_info_extracted_length() {
+            fn should_reject_vibe_info_extracted_out_of_range() {
                 let mut params = make_generate_params("1girl");
-                params.vibes = Some(vec![VibeItem::FilePath(
-                    "vibe1.naiv4vibe".to_string(),
-                )]);
-                params.vibe_info_extracted = Some(vec![0.5, 0.6]); // length mismatch
-                assert!(params.validate().is_err());
+                params.vibes = Some(vec![VibeConfig {
+                    item: VibeItem::FilePath("vibe1.naiv4vibe".into()),
+                    strength: 0.5,
+                    info_extracted: -0.1,
+                }]);
+                let err = params.validate().unwrap_err();
+                assert!(err.to_string().contains("info_extracted"));
             }
 
-            #[test]
-            fn should_accept_matching_vibes_and_vibe_strengths_length() {
-                let mut params = make_generate_params("1girl");
-                params.vibes = Some(vec![
-                    VibeItem::FilePath("vibe1.naiv4vibe".to_string()),
-                    VibeItem::FilePath("vibe2.naiv4vibe".to_string()),
-                ]);
-                params.vibe_strengths = Some(vec![0.5, 0.6]);
-                assert!(params.validate().is_ok());
-            }
-
-            #[test]
-            fn should_not_error_on_empty_vibe_strengths_array_without_vibes() {
-                let mut params = make_generate_params("1girl");
-                params.vibe_strengths = Some(vec![]);
-                assert!(params.validate().is_ok());
-            }
-
-            #[test]
-            fn should_not_error_on_empty_vibe_info_extracted_array_without_vibes() {
-                let mut params = make_generate_params("1girl");
-                params.vibe_info_extracted = Some(vec![]);
-                assert!(params.validate().is_ok());
-            }
+            // Length mismatch tests are removed: no longer possible with VibeConfig
+            // (strength and info_extracted are bundled per-vibe)
         }
 
         // -----------------------------------------------------------------
-        // save_path / save_dir mutual exclusion
+        // save (SaveTarget) validation
         // -----------------------------------------------------------------
         mod save_options {
             use super::super::*;
 
-            #[test]
-            fn should_reject_save_path_and_save_dir_used_together() {
-                let mut params = make_generate_params("1girl");
-                params.save_path = Some("/path/to/file.png".to_string());
-                params.save_dir = Some("/path/to/dir/".to_string());
-                let err = params.validate().unwrap_err();
-                assert!(err.to_string().contains("cannot be specified together"));
-            }
+            // Mutual exclusion test removed: SaveTarget enum makes it impossible
+            // to have both save_path and save_dir at the same time.
 
             #[test]
-            fn should_accept_save_path_alone() {
+            fn should_accept_exact_path() {
                 let mut params = make_generate_params("1girl");
-                params.save_path = Some("/path/to/file.png".to_string());
+                params.save = SaveTarget::ExactPath("/path/to/file.png".to_string());
                 assert!(params.validate().is_ok());
             }
 
             #[test]
-            fn should_accept_save_dir_alone() {
+            fn should_accept_directory() {
                 let mut params = make_generate_params("1girl");
-                params.save_dir = Some("/path/to/dir/".to_string());
+                params.save = SaveTarget::Directory {
+                    dir: "/path/to/dir/".to_string(),
+                    filename: None,
+                };
+                assert!(params.validate().is_ok());
+            }
+
+            #[test]
+            fn should_accept_none_save_target() {
+                let params = make_generate_params("1girl");
+                // Default is SaveTarget::None
                 assert!(params.validate().is_ok());
             }
         }
@@ -735,7 +866,7 @@ mod tests {
             #[test]
             fn should_reject_save_path_with_path_traversal() {
                 let mut params = make_generate_params("1girl");
-                params.save_path = Some("../etc/passwd".to_string());
+                params.save = SaveTarget::ExactPath("../etc/passwd".to_string());
                 let err = params.validate().unwrap_err();
                 assert!(err.to_string().contains("path traversal"));
             }
@@ -743,7 +874,10 @@ mod tests {
             #[test]
             fn should_reject_save_dir_with_path_traversal() {
                 let mut params = make_generate_params("1girl");
-                params.save_dir = Some("/output/../../etc/".to_string());
+                params.save = SaveTarget::Directory {
+                    dir: "/output/../../etc/".to_string(),
+                    filename: None,
+                };
                 let err = params.validate().unwrap_err();
                 assert!(err.to_string().contains("path traversal"));
             }
@@ -751,8 +885,9 @@ mod tests {
             #[test]
             fn should_reject_backslash_path_traversal() {
                 let mut params = make_generate_params("1girl");
-                params.save_path =
-                    Some("..\\windows\\system32\\file.png".to_string());
+                params.save = SaveTarget::ExactPath(
+                    "..\\windows\\system32\\file.png".to_string(),
+                );
                 let err = params.validate().unwrap_err();
                 assert!(err.to_string().contains("path traversal"));
             }
@@ -760,8 +895,9 @@ mod tests {
             #[test]
             fn should_accept_valid_paths_without_traversal() {
                 let mut params = make_generate_params("1girl");
-                params.save_path =
-                    Some("/home/user/images/output.png".to_string());
+                params.save = SaveTarget::ExactPath(
+                    "/home/user/images/output.png".to_string(),
+                );
                 assert!(params.validate().is_ok());
             }
         }
@@ -776,8 +912,8 @@ mod tests {
             fn should_accept_string_vibes_file_paths() {
                 let mut params = make_generate_params("1girl");
                 params.vibes = Some(vec![
-                    VibeItem::FilePath("vibe1.naiv4vibe".to_string()),
-                    VibeItem::FilePath("path/to/vibe2.naiv4vibe".to_string()),
+                    make_vibe_config(VibeItem::FilePath("vibe1.naiv4vibe".into())),
+                    make_vibe_config(VibeItem::FilePath("path/to/vibe2.naiv4vibe".into())),
                 ]);
                 assert!(params.validate().is_ok());
             }
@@ -786,7 +922,7 @@ mod tests {
             fn should_accept_vibe_encode_result_objects_as_vibes() {
                 let vibe_result = make_valid_vibe_result();
                 let mut params = make_generate_params("1girl");
-                params.vibes = Some(vec![VibeItem::Encoded(vibe_result)]);
+                params.vibes = Some(vec![make_vibe_config(VibeItem::Encoded(vibe_result))]);
                 assert!(params.validate().is_ok());
             }
 
@@ -796,7 +932,7 @@ mod tests {
             #[test]
             fn should_reject_empty_string_as_vibe_item() {
                 let mut params = make_generate_params("1girl");
-                params.vibes = Some(vec![VibeItem::FilePath("".to_string())]);
+                params.vibes = Some(vec![make_vibe_config(VibeItem::FilePath("".into()))]);
                 assert!(params.validate().is_err());
             }
         }
@@ -999,7 +1135,7 @@ mod tests {
         #[test]
         fn should_validate_minimal_params_image_only() {
             let params = EncodeVibeParams {
-                image: ImageInput::FilePath("test.png".to_string()),
+                image: ImageInput::FilePath("test.png".into()),
                 ..Default::default()
             };
             assert!(params.validate().is_ok());
@@ -1008,7 +1144,7 @@ mod tests {
         #[test]
         fn should_apply_defaults_correctly() {
             let params = EncodeVibeParams {
-                image: ImageInput::FilePath("test.png".to_string()),
+                image: ImageInput::FilePath("test.png".into()),
                 ..Default::default()
             };
             assert_eq!(params.model, Model::default());
@@ -1028,7 +1164,7 @@ mod tests {
         #[test]
         fn should_reject_empty_string_image() {
             let params = EncodeVibeParams {
-                image: ImageInput::FilePath("".to_string()),
+                image: ImageInput::FilePath("".into()),
                 ..Default::default()
             };
             assert!(params.validate().is_err());
@@ -1041,7 +1177,7 @@ mod tests {
             fn should_accept_valid_range() {
                 for val in [0.0, 1.0, 0.5] {
                     let params = EncodeVibeParams {
-                        image: ImageInput::FilePath("test.png".to_string()),
+                        image: ImageInput::FilePath("test.png".into()),
                         information_extracted: val,
                         ..Default::default()
                     };
@@ -1053,7 +1189,7 @@ mod tests {
             fn should_reject_out_of_range() {
                 for val in [-0.1, 1.1] {
                     let params = EncodeVibeParams {
-                        image: ImageInput::FilePath("test.png".to_string()),
+                        image: ImageInput::FilePath("test.png".into()),
                         information_extracted: val,
                         ..Default::default()
                     };
@@ -1069,7 +1205,7 @@ mod tests {
             fn should_accept_valid_range() {
                 for val in [0.0, 1.0] {
                     let params = EncodeVibeParams {
-                        image: ImageInput::FilePath("test.png".to_string()),
+                        image: ImageInput::FilePath("test.png".into()),
                         strength: val,
                         ..Default::default()
                     };
@@ -1081,7 +1217,7 @@ mod tests {
             fn should_reject_out_of_range() {
                 for val in [-0.1, 1.1] {
                     let params = EncodeVibeParams {
-                        image: ImageInput::FilePath("test.png".to_string()),
+                        image: ImageInput::FilePath("test.png".into()),
                         strength: val,
                         ..Default::default()
                     };
@@ -1090,77 +1226,53 @@ mod tests {
             }
         }
 
-        mod save_path_save_dir {
+        mod save_target_validation {
             use super::*;
 
-            #[test]
-            fn should_reject_save_path_and_save_dir_used_together() {
-                let params = EncodeVibeParams {
-                    image: ImageInput::FilePath("test.png".to_string()),
-                    save_path: Some("/path/to/file.naiv4vibe".to_string()),
-                    save_dir: Some("/path/to/dir/".to_string()),
-                    ..Default::default()
-                };
-                let err = params.validate().unwrap_err();
-                assert!(err.to_string().contains("cannot be specified together"));
-            }
+            // Mutual exclusion test removed: SaveTarget enum makes it impossible.
 
             #[test]
             fn should_reject_path_traversal_in_save_path() {
                 let params = EncodeVibeParams {
-                    image: ImageInput::FilePath("test.png".to_string()),
-                    save_path: Some("../etc/passwd".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
+                    save: SaveTarget::ExactPath("../etc/passwd".to_string()),
                     ..Default::default()
                 };
                 let err = params.validate().unwrap_err();
                 assert!(err.to_string().contains("path traversal"));
             }
-        }
-
-        mod save_filename_dependency {
-            use super::*;
 
             #[test]
-            fn should_reject_save_filename_without_save_dir() {
+            fn should_accept_exact_path() {
                 let params = EncodeVibeParams {
-                    image: ImageInput::FilePath("test.png".to_string()),
-                    save_filename: Some("my_vibe".to_string()),
-                    ..Default::default()
-                };
-                let err = params.validate().unwrap_err();
-                assert!(err.to_string().contains("save_filename requires save_dir"));
-            }
-
-            #[test]
-            fn should_reject_save_filename_with_save_path() {
-                let params = EncodeVibeParams {
-                    image: ImageInput::FilePath("test.png".to_string()),
-                    save_path: Some("/path/to/file.naiv4vibe".to_string()),
-                    save_filename: Some("my_vibe".to_string()),
-                    ..Default::default()
-                };
-                let err = params.validate().unwrap_err();
-                assert!(err.to_string().contains(
-                    "save_filename and save_path cannot be specified together"
-                ));
-            }
-
-            #[test]
-            fn should_accept_save_filename_with_save_dir() {
-                let params = EncodeVibeParams {
-                    image: ImageInput::FilePath("test.png".to_string()),
-                    save_dir: Some("./vibes/".to_string()),
-                    save_filename: Some("my_custom_vibe".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
+                    save: SaveTarget::ExactPath("/path/to/file.naiv4vibe".to_string()),
                     ..Default::default()
                 };
                 assert!(params.validate().is_ok());
             }
 
             #[test]
-            fn should_accept_save_dir_without_save_filename() {
+            fn should_accept_directory_with_filename() {
                 let params = EncodeVibeParams {
-                    image: ImageInput::FilePath("test.png".to_string()),
-                    save_dir: Some("./vibes/".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
+                    save: SaveTarget::Directory {
+                        dir: "./vibes/".to_string(),
+                        filename: Some("my_custom_vibe".to_string()),
+                    },
+                    ..Default::default()
+                };
+                assert!(params.validate().is_ok());
+            }
+
+            #[test]
+            fn should_accept_directory_without_filename() {
+                let params = EncodeVibeParams {
+                    image: ImageInput::FilePath("test.png".into()),
+                    save: SaveTarget::Directory {
+                        dir: "./vibes/".to_string(),
+                        filename: None,
+                    },
                     ..Default::default()
                 };
                 assert!(params.validate().is_ok());
@@ -1179,7 +1291,7 @@ mod tests {
                     Model::NaiDiffusion45Full,
                 ] {
                     let params = EncodeVibeParams {
-                        image: ImageInput::FilePath("test.png".to_string()),
+                        image: ImageInput::FilePath("test.png".into()),
                         model,
                         ..Default::default()
                     };
@@ -1241,11 +1353,10 @@ mod tests {
             fn should_validate_minimal_params_for_declutter() {
                 let params = AugmentParams {
                     req_type: AugmentReqType::Declutter,
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     prompt: None,
                     defry: None,
-                    save_path: None,
-                    save_dir: None,
+                    save: SaveTarget::None,
                 };
                 assert!(params.validate().is_ok());
             }
@@ -1257,8 +1368,7 @@ mod tests {
                     image: ImageInput::Bytes(vec![1, 2, 3]),
                     prompt: None,
                     defry: None,
-                    save_path: None,
-                    save_dir: None,
+                    save: SaveTarget::None,
                 };
                 assert!(params.validate().is_ok());
             }
@@ -1267,11 +1377,10 @@ mod tests {
             fn should_reject_empty_string_image() {
                 let params = AugmentParams {
                     req_type: AugmentReqType::Sketch,
-                    image: ImageInput::FilePath("".to_string()),
+                    image: ImageInput::FilePath("".into()),
                     prompt: None,
                     defry: None,
-                    save_path: None,
-                    save_dir: None,
+                    save: SaveTarget::None,
                 };
                 assert!(params.validate().is_err());
             }
@@ -1291,11 +1400,10 @@ mod tests {
                 for req_type in simple_types {
                     let params = AugmentParams {
                         req_type,
-                        image: ImageInput::FilePath("test.png".to_string()),
+                        image: ImageInput::FilePath("test.png".into()),
                         prompt: None,
                         defry: None,
-                        save_path: None,
-                        save_dir: None,
+                        save: SaveTarget::None,
                     };
                     assert!(params.validate().is_ok());
                 }
@@ -1305,11 +1413,10 @@ mod tests {
             fn should_accept_colorize_with_defry() {
                 let params = AugmentParams {
                     req_type: AugmentReqType::Colorize,
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     prompt: None,
                     defry: Some(3),
-                    save_path: None,
-                    save_dir: None,
+                    save: SaveTarget::None,
                 };
                 assert!(params.validate().is_ok());
             }
@@ -1318,11 +1425,10 @@ mod tests {
             fn should_accept_emotion_with_defry_and_prompt() {
                 let params = AugmentParams {
                     req_type: AugmentReqType::Emotion,
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     prompt: Some("happy".to_string()),
                     defry: Some(2),
-                    save_path: None,
-                    save_dir: None,
+                    save: SaveTarget::None,
                 };
                 assert!(params.validate().is_ok());
             }
@@ -1337,11 +1443,10 @@ mod tests {
             fn should_require_defry_for_colorize() {
                 let params = AugmentParams {
                     req_type: AugmentReqType::Colorize,
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     prompt: None,
                     defry: None,
-                    save_path: None,
-                    save_dir: None,
+                    save: SaveTarget::None,
                 };
                 let err = params.validate().unwrap_err();
                 assert!(err.to_string().contains("defry (0-5) is required for colorize"));
@@ -1352,22 +1457,20 @@ mod tests {
                 // with prompt
                 let params1 = AugmentParams {
                     req_type: AugmentReqType::Colorize,
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     prompt: Some("vibrant colors".to_string()),
                     defry: Some(3),
-                    save_path: None,
-                    save_dir: None,
+                    save: SaveTarget::None,
                 };
                 assert!(params1.validate().is_ok());
 
                 // without prompt
                 let params2 = AugmentParams {
                     req_type: AugmentReqType::Colorize,
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     prompt: None,
                     defry: Some(0),
-                    save_path: None,
-                    save_dir: None,
+                    save: SaveTarget::None,
                 };
                 assert!(params2.validate().is_ok());
             }
@@ -1380,11 +1483,10 @@ mod tests {
             fn should_require_defry_for_emotion() {
                 let params = AugmentParams {
                     req_type: AugmentReqType::Emotion,
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     prompt: Some("happy".to_string()),
                     defry: None,
-                    save_path: None,
-                    save_dir: None,
+                    save: SaveTarget::None,
                 };
                 let err = params.validate().unwrap_err();
                 assert!(err.to_string().contains("defry (0-5) is required for emotion"));
@@ -1394,11 +1496,10 @@ mod tests {
             fn should_require_prompt_for_emotion() {
                 let params = AugmentParams {
                     req_type: AugmentReqType::Emotion,
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     prompt: None,
                     defry: Some(2),
-                    save_path: None,
-                    save_dir: None,
+                    save: SaveTarget::None,
                 };
                 let err = params.validate().unwrap_err();
                 assert!(err.to_string().contains("prompt is required for emotion"));
@@ -1409,11 +1510,10 @@ mod tests {
                 for keyword in EMOTION_KEYWORDS {
                     let params = AugmentParams {
                         req_type: AugmentReqType::Emotion,
-                        image: ImageInput::FilePath("test.png".to_string()),
+                        image: ImageInput::FilePath("test.png".into()),
                         prompt: Some(keyword.to_string()),
                         defry: Some(2),
-                        save_path: None,
-                        save_dir: None,
+                        save: SaveTarget::None,
                     };
                     assert!(
                         params.validate().is_ok(),
@@ -1427,11 +1527,10 @@ mod tests {
             fn should_reject_invalid_emotion_keyword() {
                 let params = AugmentParams {
                     req_type: AugmentReqType::Emotion,
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     prompt: Some("invalid_emotion".to_string()),
                     defry: Some(2),
-                    save_path: None,
-                    save_dir: None,
+                    save: SaveTarget::None,
                 };
                 let err = params.validate().unwrap_err();
                 assert!(err.to_string().contains("Invalid emotion keyword"));
@@ -1441,11 +1540,10 @@ mod tests {
             fn should_reject_emotion_keyword_with_trailing_semicolons() {
                 let params = AugmentParams {
                     req_type: AugmentReqType::Emotion,
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     prompt: Some("happy;;".to_string()),
                     defry: Some(2),
-                    save_path: None,
-                    save_dir: None,
+                    save: SaveTarget::None,
                 };
                 let err = params.validate().unwrap_err();
                 assert!(err.to_string().contains("Invalid emotion keyword"));
@@ -1466,11 +1564,10 @@ mod tests {
                 for req_type in simple_types {
                     let params = AugmentParams {
                         req_type,
-                        image: ImageInput::FilePath("test.png".to_string()),
+                        image: ImageInput::FilePath("test.png".into()),
                         prompt: Some("should not be here".to_string()),
                         defry: None,
-                        save_path: None,
-                        save_dir: None,
+                        save: SaveTarget::None,
                     };
                     let err = params.validate().unwrap_err();
                     assert!(
@@ -1496,11 +1593,10 @@ mod tests {
                 for req_type in simple_types {
                     let params = AugmentParams {
                         req_type,
-                        image: ImageInput::FilePath("test.png".to_string()),
+                        image: ImageInput::FilePath("test.png".into()),
                         prompt: None,
                         defry: Some(3),
-                        save_path: None,
-                        save_dir: None,
+                        save: SaveTarget::None,
                     };
                     let err = params.validate().unwrap_err();
                     assert!(
@@ -1524,11 +1620,10 @@ mod tests {
                 for i in 0..=5 {
                     let params = AugmentParams {
                         req_type: AugmentReqType::Colorize,
-                        image: ImageInput::FilePath("test.png".to_string()),
+                        image: ImageInput::FilePath("test.png".into()),
                         prompt: None,
                         defry: Some(i),
-                        save_path: None,
-                        save_dir: None,
+                        save: SaveTarget::None,
                     };
                     assert!(params.validate().is_ok());
                 }
@@ -1540,11 +1635,10 @@ mod tests {
             fn should_reject_defry_above_5() {
                 let params = AugmentParams {
                     req_type: AugmentReqType::Colorize,
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     prompt: None,
                     defry: Some(6),
-                    save_path: None,
-                    save_dir: None,
+                    save: SaveTarget::None,
                 };
                 assert!(params.validate().is_err());
             }
@@ -1552,45 +1646,34 @@ mod tests {
             // SKIP: non-integer defry (2.5) - Rust type system handles this (u32)
         }
 
-        mod save_path_save_dir {
+        mod save_target_validation {
             use super::*;
 
-            #[test]
-            fn should_reject_save_path_and_save_dir_used_together() {
-                let params = AugmentParams {
-                    req_type: AugmentReqType::Sketch,
-                    image: ImageInput::FilePath("test.png".to_string()),
-                    prompt: None,
-                    defry: None,
-                    save_path: Some("/path/to/file.png".to_string()),
-                    save_dir: Some("/path/to/dir/".to_string()),
-                };
-                let err = params.validate().unwrap_err();
-                assert!(err.to_string().contains("cannot be specified together"));
-            }
+            // Mutual exclusion test removed: SaveTarget enum makes it impossible.
 
             #[test]
-            fn should_accept_save_path_alone() {
+            fn should_accept_exact_path() {
                 let params = AugmentParams {
                     req_type: AugmentReqType::Sketch,
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     prompt: None,
                     defry: None,
-                    save_path: Some("/path/to/file.png".to_string()),
-                    save_dir: None,
+                    save: SaveTarget::ExactPath("/path/to/file.png".to_string()),
                 };
                 assert!(params.validate().is_ok());
             }
 
             #[test]
-            fn should_accept_save_dir_alone() {
+            fn should_accept_directory() {
                 let params = AugmentParams {
                     req_type: AugmentReqType::Sketch,
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     prompt: None,
                     defry: None,
-                    save_path: None,
-                    save_dir: Some("/path/to/dir/".to_string()),
+                    save: SaveTarget::Directory {
+                        dir: "/path/to/dir/".to_string(),
+                        filename: None,
+                    },
                 };
                 assert!(params.validate().is_ok());
             }
@@ -1599,11 +1682,10 @@ mod tests {
             fn should_reject_path_traversal_in_save_path() {
                 let params = AugmentParams {
                     req_type: AugmentReqType::Sketch,
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     prompt: None,
                     defry: None,
-                    save_path: Some("../etc/passwd".to_string()),
-                    save_dir: None,
+                    save: SaveTarget::ExactPath("../etc/passwd".to_string()),
                 };
                 let err = params.validate().unwrap_err();
                 assert!(err.to_string().contains("path traversal"));
@@ -1623,7 +1705,7 @@ mod tests {
             #[test]
             fn should_validate_minimal_params() {
                 let params = UpscaleParams {
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     ..Default::default()
                 };
                 assert!(params.validate().is_ok());
@@ -1632,7 +1714,7 @@ mod tests {
             #[test]
             fn should_apply_default_scale_value_4() {
                 let params = UpscaleParams {
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     ..Default::default()
                 };
                 assert_eq!(params.scale, DEFAULT_UPSCALE_SCALE);
@@ -1650,7 +1732,7 @@ mod tests {
             #[test]
             fn should_reject_empty_string_image() {
                 let params = UpscaleParams {
-                    image: ImageInput::FilePath("".to_string()),
+                    image: ImageInput::FilePath("".into()),
                     ..Default::default()
                 };
                 assert!(params.validate().is_err());
@@ -1663,7 +1745,7 @@ mod tests {
             #[test]
             fn should_accept_scale_2() {
                 let params = UpscaleParams {
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     scale: 2,
                     ..Default::default()
                 };
@@ -1673,7 +1755,7 @@ mod tests {
             #[test]
             fn should_accept_scale_4() {
                 let params = UpscaleParams {
-                    image: ImageInput::FilePath("test.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
                     scale: 4,
                     ..Default::default()
                 };
@@ -1684,7 +1766,7 @@ mod tests {
             fn should_reject_invalid_scale_values() {
                 for scale in [1, 3, 5, 8, 0] {
                     let params = UpscaleParams {
-                        image: ImageInput::FilePath("test.png".to_string()),
+                        image: ImageInput::FilePath("test.png".into()),
                         scale,
                         ..Default::default()
                     };
@@ -1699,36 +1781,29 @@ mod tests {
             // SKIP: non-integer scale (2.5) - Rust type system handles this (u32)
         }
 
-        mod save_path_save_dir {
+        mod save_target_validation {
             use super::*;
 
-            #[test]
-            fn should_reject_save_path_and_save_dir_used_together() {
-                let params = UpscaleParams {
-                    image: ImageInput::FilePath("test.png".to_string()),
-                    save_path: Some("/path/to/file.png".to_string()),
-                    save_dir: Some("/path/to/dir/".to_string()),
-                    ..Default::default()
-                };
-                let err = params.validate().unwrap_err();
-                assert!(err.to_string().contains("cannot be specified together"));
-            }
+            // Mutual exclusion test removed: SaveTarget enum makes it impossible.
 
             #[test]
-            fn should_accept_save_path_alone() {
+            fn should_accept_exact_path() {
                 let params = UpscaleParams {
-                    image: ImageInput::FilePath("test.png".to_string()),
-                    save_path: Some("/path/to/file.png".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
+                    save: SaveTarget::ExactPath("/path/to/file.png".to_string()),
                     ..Default::default()
                 };
                 assert!(params.validate().is_ok());
             }
 
             #[test]
-            fn should_accept_save_dir_alone() {
+            fn should_accept_directory() {
                 let params = UpscaleParams {
-                    image: ImageInput::FilePath("test.png".to_string()),
-                    save_dir: Some("/path/to/dir/".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
+                    save: SaveTarget::Directory {
+                        dir: "/path/to/dir/".to_string(),
+                        filename: None,
+                    },
                     ..Default::default()
                 };
                 assert!(params.validate().is_ok());
@@ -1737,8 +1812,8 @@ mod tests {
             #[test]
             fn should_reject_path_traversal_in_save_path() {
                 let params = UpscaleParams {
-                    image: ImageInput::FilePath("test.png".to_string()),
-                    save_path: Some("../etc/passwd".to_string()),
+                    image: ImageInput::FilePath("test.png".into()),
+                    save: SaveTarget::ExactPath("../etc/passwd".to_string()),
                     ..Default::default()
                 };
                 let err = params.validate().unwrap_err();

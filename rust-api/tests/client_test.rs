@@ -309,7 +309,11 @@ mod payload_building {
     fn build_base_payload_img2img_action() {
         let params = GenerateParams {
             prompt: "test".to_string(),
-            action: GenerateAction::Img2Img,
+            action: GenerateAction::Img2Img {
+                source_image: ImageInput::Bytes(vec![0]),
+                strength: 0.7,
+                noise: 0.0,
+            },
             ..Default::default()
         };
         let payload = payload::build_base_payload(&params, 0, "");
@@ -551,6 +555,8 @@ mod integration {
 
     /// Set all NovelAI URL env vars to point at a mockito server.
     fn set_mock_urls(base: &str) {
+        // Reset cached URLs first so env var changes take effect
+        constants::reset_url_cache();
         std::env::set_var(
             "NOVELAI_SUBSCRIPTION_URL",
             format!("{}/user/subscription", base),
@@ -575,6 +581,8 @@ mod integration {
             "NOVELAI_UPSCALE_URL",
             format!("{}/ai/upscale", base),
         );
+        // Reset again after setting to ensure fresh resolution
+        constants::reset_url_cache();
     }
 
     fn clear_mock_urls() {
@@ -588,6 +596,7 @@ mod integration {
         ] {
             std::env::remove_var(var);
         }
+        constants::reset_url_cache();
     }
 
     fn mock_balance_json() -> &'static str {
@@ -826,7 +835,10 @@ mod integration {
         let params = GenerateParams {
             prompt: "1girl".to_string(),
             seed: Some(42),
-            save_dir: Some(save_dir.to_string_lossy().to_string()),
+            save: SaveTarget::Directory {
+                dir: save_dir.to_string_lossy().to_string(),
+                filename: None,
+            },
             ..Default::default()
         };
         let result = client.generate(&params).await.unwrap();
@@ -873,7 +885,7 @@ mod integration {
         let params = GenerateParams {
             prompt: "1girl".to_string(),
             seed: Some(42),
-            save_path: Some(save_path.to_string_lossy().to_string()),
+            save: SaveTarget::ExactPath(save_path.to_string_lossy().to_string()),
             ..Default::default()
         };
         let result = client.generate(&params).await.unwrap();
@@ -922,8 +934,7 @@ mod integration {
             image: ImageInput::Bytes(input_png),
             prompt: None,
             defry: None,
-            save_path: None,
-            save_dir: None,
+            save: SaveTarget::None,
         };
         let result = client.augment_image(&params).await.unwrap();
 
@@ -965,8 +976,7 @@ mod integration {
             image: ImageInput::Bytes(input_png),
             prompt: Some("warm colors".to_string()),
             defry: Some(4),
-            save_path: None,
-            save_dir: None,
+            save: SaveTarget::None,
         };
         let result = client.augment_image(&params).await.unwrap();
 
@@ -1010,8 +1020,10 @@ mod integration {
             image: ImageInput::Bytes(input_png),
             prompt: None,
             defry: None,
-            save_path: None,
-            save_dir: Some(save_dir.to_string_lossy().to_string()),
+            save: SaveTarget::Directory {
+                dir: save_dir.to_string_lossy().to_string(),
+                filename: None,
+            },
         };
         let result = client.augment_image(&params).await.unwrap();
 
@@ -1056,8 +1068,7 @@ mod integration {
         let params = UpscaleParams {
             image: ImageInput::Bytes(input_png),
             scale: 4,
-            save_path: None,
-            save_dir: None,
+            save: SaveTarget::None,
         };
         let result = client.upscale_image(&params).await.unwrap();
 
@@ -1099,8 +1110,7 @@ mod integration {
         let params = UpscaleParams {
             image: ImageInput::Bytes(input_png),
             scale: 2,
-            save_path: None,
-            save_dir: None,
+            save: SaveTarget::None,
         };
         let result = client.upscale_image(&params).await.unwrap();
 
@@ -1145,8 +1155,10 @@ mod integration {
         let params = UpscaleParams {
             image: ImageInput::Bytes(input_png),
             scale: 4,
-            save_path: None,
-            save_dir: Some(save_dir.to_string_lossy().to_string()),
+            save: SaveTarget::Directory {
+                dir: save_dir.to_string_lossy().to_string(),
+                filename: None,
+            },
         };
         let result = client.upscale_image(&params).await.unwrap();
 
@@ -1192,9 +1204,7 @@ mod integration {
             model: constants::Model::NaiDiffusion45Full,
             information_extracted: 0.7,
             strength: 0.7,
-            save_path: None,
-            save_dir: None,
-            save_filename: None,
+            save: SaveTarget::None,
         };
         let result = client.encode_vibe(&params).await.unwrap();
 
@@ -1241,7 +1251,10 @@ mod integration {
         let client = NovelAIClient::new(Some("test-key"), None).unwrap();
         let params = EncodeVibeParams {
             image: ImageInput::Bytes(input_png),
-            save_dir: Some(save_dir.to_string_lossy().to_string()),
+            save: SaveTarget::Directory {
+                dir: save_dir.to_string_lossy().to_string(),
+                filename: None,
+            },
             ..Default::default()
         };
         let result = client.encode_vibe(&params).await.unwrap();
@@ -1300,8 +1313,10 @@ mod integration {
         let client = NovelAIClient::new(Some("test-key"), None).unwrap();
         let params = EncodeVibeParams {
             image: ImageInput::Bytes(input_png),
-            save_dir: Some(save_dir.to_string_lossy().to_string()),
-            save_filename: Some("my_vibe".to_string()),
+            save: SaveTarget::Directory {
+                dir: save_dir.to_string_lossy().to_string(),
+                filename: Some("my_vibe".to_string()),
+            },
             ..Default::default()
         };
         let result = client.encode_vibe(&params).await.unwrap();
@@ -1343,7 +1358,7 @@ mod integration {
         let client = NovelAIClient::new(Some("test-key"), None).unwrap();
         let params = EncodeVibeParams {
             image: ImageInput::Bytes(input_png),
-            save_path: Some(save_path.to_string_lossy().to_string()),
+            save: SaveTarget::ExactPath(save_path.to_string_lossy().to_string()),
             ..Default::default()
         };
         let result = client.encode_vibe(&params).await.unwrap();

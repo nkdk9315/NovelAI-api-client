@@ -3,11 +3,16 @@ use crate::error::{NovelAIError, Result};
 
 const MAX_RETRIES: u32 = 3;
 const BASE_RETRY_DELAY_MS: u64 = 1000;
+const USER_AGENT: &str = "novelai-rust-api/0.1.0";
+
+/// Status codes that are safe to retry (transient server/gateway errors).
+const RETRYABLE_STATUS_CODES: &[u16] = &[429, 502, 503];
 
 /// Execute an HTTP request with exponential backoff retry.
 ///
 /// Retries on:
 /// - 429 (Too Many Requests / Concurrent generation locked)
+/// - 502 (Bad Gateway) / 503 (Service Unavailable) — transient gateway errors
 /// - Network errors (timeout, connection refused, DNS failure)
 ///
 /// Does NOT retry on other HTTP errors (400, 401, 500, etc.).
@@ -15,22 +20,22 @@ pub async fn fetch_with_retry(
     client: &reqwest::Client,
     url: &str,
     method: reqwest::Method,
-    body: Option<String>,
+    body: Option<&str>,
     api_key: &str,
     operation_name: &str,
     logger: &dyn Logger,
 ) -> Result<reqwest::Response> {
     for attempt in 0..=MAX_RETRIES {
-        let mut request = client.request(method.clone(), url).header(
-            "Authorization",
-            format!("Bearer {}", api_key),
-        );
+        let mut request = client
+            .request(method.clone(), url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("User-Agent", USER_AGENT);
 
         // Set content-type for POST requests with body
-        if let Some(ref body_str) = body {
+        if let Some(body_str) = body {
             request = request
                 .header("Content-Type", "application/json")
-                .body(body_str.clone());
+                .body(body_str.to_owned());
         } else {
             request = request.header("Accept", "application/json");
         }
@@ -65,13 +70,13 @@ pub async fn fetch_with_retry(
 
         let status = response.status().as_u16();
 
-        // Handle 429 (rate limit / concurrent lock)
-        if status == 429 {
+        // Handle retryable status codes (429, 502, 503)
+        if RETRYABLE_STATUS_CODES.contains(&status) {
             if attempt < MAX_RETRIES {
                 let delay = retry_delay(attempt);
                 logger.warn(&format!(
-                    "[NovelAI] {}: Rate limited (429). Retrying in {}ms... (attempt {}/{})",
-                    operation_name, delay, attempt + 1, MAX_RETRIES
+                    "[NovelAI] {}: Retryable error ({}). Retrying in {}ms... (attempt {}/{})",
+                    operation_name, status, delay, attempt + 1, MAX_RETRIES
                 ));
                 tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                 continue;
@@ -87,7 +92,7 @@ pub async fn fetch_with_retry(
             return Err(NovelAIError::Api {
                 status_code: status,
                 message: format!(
-                    "{} failed after {} retries: {} Too Many Requests",
+                    "{} failed after {} retries: HTTP {}",
                     operation_name, MAX_RETRIES, status
                 ),
             });
@@ -120,10 +125,10 @@ fn retry_delay(attempt: u32) -> u64 {
     (base as f64 * jitter).round() as u64
 }
 
+/// Truncate text safely at character boundaries to avoid UTF-8 panics.
 fn truncate_text(text: &str, max_len: usize) -> String {
-    if text.len() > max_len {
-        format!("{}...[truncated]", &text[..max_len])
-    } else {
-        text.to_string()
+    match text.char_indices().nth(max_len) {
+        Some((idx, _)) => format!("{}...[truncated]", &text[..idx]),
+        None => text.to_string(),
     }
 }

@@ -47,10 +47,11 @@ async fn test_img2img(client: &NovelAIClient, input_image: &str, output_dir: &st
     println!("\n=== Test: Img2Img ===");
 
     let params = GenerateParams::builder("1girl, beautiful, masterpiece")
-        .action(GenerateAction::Img2Img)
-        .source_image(ImageInput::FilePath(input_image.into()))
-        .img2img_strength(0.6)
-        .img2img_noise(0.1)
+        .action(GenerateAction::Img2Img {
+            source_image: ImageInput::FilePath(input_image.into()),
+            strength: 0.6,
+            noise: 0.1,
+        })
         .width(832)
         .height(1216)
         .save_dir(output_dir)
@@ -85,10 +86,14 @@ async fn test_infill_only(
     println!("  Created in-memory mask (832x1216, rect at 116,208 600x800)");
 
     let params = GenerateParams::builder("1girl, smiling, happy")
-        .action(GenerateAction::Infill)
-        .source_image(ImageInput::FilePath(input_image.into()))
-        .mask(ImageInput::Bytes(mask_bytes))
-        .mask_strength(0.7)
+        .action(GenerateAction::Infill {
+            source_image: ImageInput::FilePath(input_image.into()),
+            mask: ImageInput::Bytes(mask_bytes),
+            mask_strength: 0.7,
+            color_correct: false,
+            hybrid_strength: None,
+            hybrid_noise: None,
+        })
         .width(832)
         .height(1216)
         .save_dir(output_dir)
@@ -122,12 +127,14 @@ async fn test_infill_with_img2img(
     println!("  Created in-memory mask (832x1216, rect at 116,208 600x800)");
 
     let params = GenerateParams::builder("1girl, beautiful dress, elegant")
-        .action(GenerateAction::Infill)
-        .source_image(ImageInput::FilePath(input_image.into()))
-        .mask(ImageInput::Bytes(mask_bytes))
-        .mask_strength(0.68)
-        .hybrid_img2img_strength(0.45)
-        .hybrid_img2img_noise(0.0)
+        .action(GenerateAction::Infill {
+            source_image: ImageInput::FilePath(input_image.into()),
+            mask: ImageInput::Bytes(mask_bytes),
+            mask_strength: 0.68,
+            color_correct: false,
+            hybrid_strength: Some(0.45),
+            hybrid_noise: Some(0.0),
+        })
         .width(832)
         .height(1216)
         .save_dir(output_dir)

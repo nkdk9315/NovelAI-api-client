@@ -1,35 +1,32 @@
 use crate::constants::*;
 use crate::error::{NovelAIError, Result};
 use crate::tokenizer::cache::get_t5_tokenizer;
+use crate::utils::validate_safe_path;
 use super::types::*;
 
 // =============================================================================
 // Utility Functions
 // =============================================================================
 
-/// Detect path traversal (`..`) after normalizing backslashes to forward slashes.
-pub(crate) fn validate_safe_path(path: &str) -> Result<()> {
-    let normalized = path.replace('\\', "/");
-    if normalized.contains("..") {
+/// Validate that a floating-point value is in the unit range [0.0, 1.0].
+fn validate_unit_range(value: f64, field: &str) -> Result<()> {
+    if !(0.0..=1.0).contains(&value) {
         return Err(NovelAIError::Validation(
-            "Path must not contain '..' (path traversal)".to_string(),
+            format!("{} must be between 0.0 and 1.0, got {}", field, value),
         ));
     }
     Ok(())
 }
 
-/// Validate that save_path and save_dir are not both specified.
-pub(crate) fn validate_save_options_exclusive(
-    save_path: &Option<String>,
-    save_dir: &Option<String>,
-) -> Result<()> {
-    if save_path.is_some() && save_dir.is_some() {
-        return Err(NovelAIError::Validation(
-            "save_path and save_dir cannot be specified together. Use one or the other."
-                .to_string(),
-        ));
+/// Validate a `SaveTarget` by checking that any embedded paths are safe
+/// (no path traversal).  Mutual-exclusion of save_path/save_dir is
+/// impossible by construction since `SaveTarget` is an enum.
+pub(crate) fn validate_save_target(save: &SaveTarget) -> Result<()> {
+    match save {
+        SaveTarget::None => Ok(()),
+        SaveTarget::ExactPath(path) => validate_safe_path(path),
+        SaveTarget::Directory { dir, filename: _ } => validate_safe_path(dir),
     }
-    Ok(())
 }
 
 /// Validate that an ImageInput is not empty.
@@ -53,16 +50,8 @@ impl CharacterConfig {
                 "prompt must not be empty".to_string(),
             ));
         }
-        if !(0.0..=1.0).contains(&self.center_x) {
-            return Err(NovelAIError::Range(
-                "center_x must be between 0.0 and 1.0".to_string(),
-            ));
-        }
-        if !(0.0..=1.0).contains(&self.center_y) {
-            return Err(NovelAIError::Range(
-                "center_y must be between 0.0 and 1.0".to_string(),
-            ));
-        }
+        validate_unit_range(self.center_x, "center_x")?;
+        validate_unit_range(self.center_y, "center_y")?;
         Ok(())
     }
 }
@@ -74,16 +63,8 @@ impl CharacterConfig {
 impl CharacterReferenceConfig {
     pub fn validate(&self) -> Result<()> {
         validate_image_input_not_empty(&self.image)?;
-        if !(0.0..=1.0).contains(&self.strength) {
-            return Err(NovelAIError::Range(
-                "strength must be between 0.0 and 1.0".to_string(),
-            ));
-        }
-        if !(0.0..=1.0).contains(&self.fidelity) {
-            return Err(NovelAIError::Range(
-                "fidelity must be between 0.0 and 1.0".to_string(),
-            ));
-        }
+        validate_unit_range(self.strength, "strength")?;
+        validate_unit_range(self.fidelity, "fidelity")?;
         // mode is validated by the type system (CharRefMode enum)
         Ok(())
     }
@@ -116,16 +97,8 @@ impl VibeEncodeResult {
                 "encoding must be valid base64".to_string(),
             ));
         }
-        if !(0.0..=1.0).contains(&self.information_extracted) {
-            return Err(NovelAIError::Range(
-                "information_extracted must be between 0.0 and 1.0".to_string(),
-            ));
-        }
-        if !(0.0..=1.0).contains(&self.strength) {
-            return Err(NovelAIError::Range(
-                "strength must be between 0.0 and 1.0".to_string(),
-            ));
-        }
+        validate_unit_range(self.information_extracted, "information_extracted")?;
+        validate_unit_range(self.strength, "strength")?;
         if self.source_image_hash.len() != 64 {
             return Err(NovelAIError::Validation(
                 "source_image_hash must be exactly 64 characters".to_string(),
@@ -152,7 +125,7 @@ impl GenerateParams {
         self.validate_cfg_rescale()?;
         self.validate_seed()?;
         self.validate_img2img_params()?;
-        self.validate_action_dependencies()?;
+        self.validate_vibes_charref_exclusion()?;
         self.validate_vibe_params()?;
         self.validate_pixel_constraints()?;
         self.validate_save_options()?;
@@ -221,7 +194,7 @@ impl GenerateParams {
 
     fn validate_dimensions(&self) -> Result<()> {
         if !(MIN_DIMENSION..=MAX_GENERATION_DIMENSION).contains(&self.width) {
-            return Err(NovelAIError::Range(format!(
+            return Err(NovelAIError::Validation(format!(
                 "width must be between {} and {}",
                 MIN_DIMENSION, MAX_GENERATION_DIMENSION
             )));
@@ -232,7 +205,7 @@ impl GenerateParams {
             ));
         }
         if !(MIN_DIMENSION..=MAX_GENERATION_DIMENSION).contains(&self.height) {
-            return Err(NovelAIError::Range(format!(
+            return Err(NovelAIError::Validation(format!(
                 "height must be between {} and {}",
                 MIN_DIMENSION, MAX_GENERATION_DIMENSION
             )));
@@ -247,7 +220,7 @@ impl GenerateParams {
 
     fn validate_steps(&self) -> Result<()> {
         if !(MIN_STEPS..=MAX_STEPS).contains(&self.steps) {
-            return Err(NovelAIError::Range(format!(
+            return Err(NovelAIError::Validation(format!(
                 "steps must be between {} and {}",
                 MIN_STEPS, MAX_STEPS
             )));
@@ -257,7 +230,7 @@ impl GenerateParams {
 
     fn validate_scale(&self) -> Result<()> {
         if !(MIN_SCALE..=MAX_SCALE).contains(&self.scale) {
-            return Err(NovelAIError::Range(format!(
+            return Err(NovelAIError::Validation(format!(
                 "scale must be between {} and {}",
                 MIN_SCALE, MAX_SCALE
             )));
@@ -266,18 +239,13 @@ impl GenerateParams {
     }
 
     fn validate_cfg_rescale(&self) -> Result<()> {
-        if !(0.0..=1.0).contains(&self.cfg_rescale) {
-            return Err(NovelAIError::Range(
-                "cfg_rescale must be between 0.0 and 1.0".to_string(),
-            ));
-        }
-        Ok(())
+        validate_unit_range(self.cfg_rescale, "cfg_rescale")
     }
 
     fn validate_seed(&self) -> Result<()> {
         if let Some(seed) = self.seed {
             if seed > MAX_SEED as u64 {
-                return Err(NovelAIError::Range(format!(
+                return Err(NovelAIError::Validation(format!(
                     "seed must be between 0 and {}",
                     MAX_SEED
                 )));
@@ -286,43 +254,52 @@ impl GenerateParams {
         Ok(())
     }
 
+    /// Validate parameters embedded in action variants (Img2Img, Infill).
     fn validate_img2img_params(&self) -> Result<()> {
-        if !(0.0..=1.0).contains(&self.img2img_strength) {
-            return Err(NovelAIError::Range(
-                "img2img_strength must be between 0.0 and 1.0".to_string(),
-            ));
-        }
-        if !(0.0..=1.0).contains(&self.img2img_noise) {
-            return Err(NovelAIError::Range(
-                "img2img_noise must be between 0.0 and 1.0".to_string(),
-            ));
-        }
-        if let Some(mask_strength) = self.mask_strength {
-            if !(0.01..=1.0).contains(&mask_strength) {
-                return Err(NovelAIError::Range(
-                    "mask_strength must be between 0.01 and 1.0".to_string(),
-                ));
+        match &self.action {
+            GenerateAction::Generate => Ok(()),
+            GenerateAction::Img2Img { source_image, strength, noise } => {
+                validate_image_input_not_empty(source_image)?;
+                validate_unit_range(*strength, "img2img strength")?;
+                validate_unit_range(*noise, "img2img noise")?;
+                Ok(())
+            }
+            GenerateAction::Infill {
+                source_image,
+                mask,
+                mask_strength,
+                color_correct: _,
+                hybrid_strength,
+                hybrid_noise,
+            } => {
+                validate_image_input_not_empty(source_image)?;
+                validate_image_input_not_empty(mask)?;
+                if !(0.01..=1.0).contains(mask_strength) {
+                    return Err(NovelAIError::Validation(
+                        "mask_strength must be between 0.01 and 1.0".to_string(),
+                    ));
+                }
+                if let Some(hs) = hybrid_strength {
+                    if !(0.01..=0.99).contains(hs) {
+                        return Err(NovelAIError::Validation(
+                            "hybrid_img2img_strength must be between 0.01 and 0.99".to_string(),
+                        ));
+                    }
+                }
+                if let Some(hn) = hybrid_noise {
+                    if !(0.0..=0.99).contains(hn) {
+                        return Err(NovelAIError::Validation(
+                            "hybrid_img2img_noise must be between 0.0 and 0.99".to_string(),
+                        ));
+                    }
+                }
+                Ok(())
             }
         }
-        if let Some(hybrid_strength) = self.hybrid_img2img_strength {
-            if !(0.01..=0.99).contains(&hybrid_strength) {
-                return Err(NovelAIError::Range(
-                    "hybrid_img2img_strength must be between 0.01 and 0.99".to_string(),
-                ));
-            }
-        }
-        if let Some(hybrid_noise) = self.hybrid_img2img_noise {
-            if !(0.0..=0.99).contains(&hybrid_noise) {
-                return Err(NovelAIError::Range(
-                    "hybrid_img2img_noise must be between 0.0 and 0.99".to_string(),
-                ));
-            }
-        }
-        Ok(())
     }
 
-    fn validate_action_dependencies(&self) -> Result<()> {
-        // vibes and character_reference cannot be used together
+    /// Validate that vibes and character_reference are not used together.
+    fn validate_vibes_charref_exclusion(&self) -> Result<()> {
         let has_vibes = self
             .vibes
             .as_ref()
@@ -332,93 +309,23 @@ impl GenerateParams {
                 "vibes and character_reference cannot be used together.".to_string(),
             ));
         }
-
-        // action=Img2Img requires source_image
-        if self.action == GenerateAction::Img2Img && self.source_image.is_none() {
-            return Err(NovelAIError::Validation(
-                "source_image is required for img2img action".to_string(),
-            ));
-        }
-
-        // action=Infill requires source_image, mask, and mask_strength
-        if self.action == GenerateAction::Infill {
-            if self.source_image.is_none() {
-                return Err(NovelAIError::Validation(
-                    "source_image is required for infill action".to_string(),
-                ));
-            }
-            if self.mask.is_none() {
-                return Err(NovelAIError::Validation(
-                    "mask is required for infill action".to_string(),
-                ));
-            }
-            if self.mask_strength.is_none() {
-                return Err(NovelAIError::Validation(
-                    "mask_strength is required for infill action".to_string(),
-                ));
-            }
-        }
-
-        // mask can only be used with action='infill'
-        if self.mask.is_some() && self.action != GenerateAction::Infill {
-            return Err(NovelAIError::Validation(
-                "mask can only be used with action='infill'".to_string(),
-            ));
-        }
-
         Ok(())
     }
 
+    /// Validate individual VibeConfig items (strength and info_extracted ranges).
     fn validate_vibe_params(&self) -> Result<()> {
-        let has_vibes = self
-            .vibes
-            .as_ref()
-            .is_some_and(|v| !v.is_empty());
-
-        // vibe_strengths without vibes
-        let has_vibe_strengths = self
-            .vibe_strengths
-            .as_ref()
-            .is_some_and(|v| !v.is_empty());
-        if has_vibe_strengths && !has_vibes {
-            return Err(NovelAIError::Validation(
-                "vibe_strengths cannot be specified without vibes".to_string(),
-            ));
-        }
-
-        // vibe_info_extracted without vibes
-        let has_vibe_info = self
-            .vibe_info_extracted
-            .as_ref()
-            .is_some_and(|v| !v.is_empty());
-        if has_vibe_info && !has_vibes {
-            return Err(NovelAIError::Validation(
-                "vibe_info_extracted cannot be specified without vibes".to_string(),
-            ));
-        }
-
-        // Length mismatch checks
         if let Some(vibes) = &self.vibes {
-            if let Some(strengths) = &self.vibe_strengths {
-                if vibes.len() != strengths.len() {
-                    return Err(NovelAIError::Validation(format!(
-                        "Mismatch between vibes count ({}) and vibe_strengths count ({})",
-                        vibes.len(),
-                        strengths.len()
-                    )));
-                }
-            }
-            if let Some(info) = &self.vibe_info_extracted {
-                if vibes.len() != info.len() {
-                    return Err(NovelAIError::Validation(format!(
-                        "Mismatch between vibes count ({}) and vibe_info_extracted count ({})",
-                        vibes.len(),
-                        info.len()
-                    )));
-                }
+            for (i, vibe_config) in vibes.iter().enumerate() {
+                validate_unit_range(
+                    vibe_config.strength,
+                    &format!("vibes[{}].strength", i),
+                )?;
+                validate_unit_range(
+                    vibe_config.info_extracted,
+                    &format!("vibes[{}].info_extracted", i),
+                )?;
             }
         }
-
         Ok(())
     }
 
@@ -434,14 +341,7 @@ impl GenerateParams {
     }
 
     fn validate_save_options(&self) -> Result<()> {
-        validate_save_options_exclusive(&self.save_path, &self.save_dir)?;
-        if let Some(ref path) = self.save_path {
-            validate_safe_path(path)?;
-        }
-        if let Some(ref dir) = self.save_dir {
-            validate_safe_path(dir)?;
-        }
-        Ok(())
+        validate_save_target(&self.save)
     }
 
     fn validate_characters(&self) -> Result<()> {
@@ -476,14 +376,15 @@ impl GenerateParams {
                     MAX_VIBES
                 )));
             }
-            for vibe in vibes {
-                match vibe {
+            for vibe_config in vibes {
+                match &vibe_config.item {
                     VibeItem::FilePath(path) => {
-                        if path.is_empty() {
+                        if path.as_os_str().is_empty() {
                             return Err(NovelAIError::Validation(
                                 "vibe file path must not be empty".to_string(),
                             ));
                         }
+                        validate_safe_path(&path.to_string_lossy())?;
                     }
                     VibeItem::Encoded(result) => {
                         result.validate()?;
@@ -509,43 +410,11 @@ impl GenerateParams {
 impl EncodeVibeParams {
     pub fn validate(&self) -> Result<()> {
         validate_image_input_not_empty(&self.image)?;
+        validate_unit_range(self.information_extracted, "information_extracted")?;
+        validate_unit_range(self.strength, "strength")?;
 
-        if !(0.0..=1.0).contains(&self.information_extracted) {
-            return Err(NovelAIError::Range(
-                "information_extracted must be between 0.0 and 1.0".to_string(),
-            ));
-        }
-        if !(0.0..=1.0).contains(&self.strength) {
-            return Err(NovelAIError::Range(
-                "strength must be between 0.0 and 1.0".to_string(),
-            ));
-        }
-
-        // save_path and save_dir are mutually exclusive
-        validate_save_options_exclusive(&self.save_path, &self.save_dir)?;
-
-        // Path traversal checks
-        if let Some(ref path) = self.save_path {
-            validate_safe_path(path)?;
-        }
-        if let Some(ref dir) = self.save_dir {
-            validate_safe_path(dir)?;
-        }
-
-        // save_filename and save_path cannot be used together
-        if self.save_filename.is_some() && self.save_path.is_some() {
-            return Err(NovelAIError::Validation(
-                "save_filename and save_path cannot be specified together. Use save_dir with save_filename instead."
-                    .to_string(),
-            ));
-        }
-
-        // save_filename requires save_dir
-        if self.save_filename.is_some() && self.save_dir.is_none() {
-            return Err(NovelAIError::Validation(
-                "save_filename requires save_dir to be specified.".to_string(),
-            ));
-        }
+        // Validate save target (path traversal checks)
+        validate_save_target(&self.save)?;
 
         Ok(())
     }
@@ -625,21 +494,15 @@ impl AugmentParams {
         // defry range check
         if let Some(defry) = self.defry {
             if !(MIN_DEFRY..=MAX_DEFRY).contains(&defry) {
-                return Err(NovelAIError::Range(format!(
+                return Err(NovelAIError::Validation(format!(
                     "defry must be between {} and {}",
                     MIN_DEFRY, MAX_DEFRY
                 )));
             }
         }
 
-        // save_path and save_dir exclusivity + path traversal
-        validate_save_options_exclusive(&self.save_path, &self.save_dir)?;
-        if let Some(ref path) = self.save_path {
-            validate_safe_path(path)?;
-        }
-        if let Some(ref dir) = self.save_dir {
-            validate_safe_path(dir)?;
-        }
+        // Validate save target (path traversal checks)
+        validate_save_target(&self.save)?;
 
         Ok(())
     }
@@ -659,14 +522,8 @@ impl UpscaleParams {
             ));
         }
 
-        // save_path and save_dir exclusivity + path traversal
-        validate_save_options_exclusive(&self.save_path, &self.save_dir)?;
-        if let Some(ref path) = self.save_path {
-            validate_safe_path(path)?;
-        }
-        if let Some(ref dir) = self.save_dir {
-            validate_safe_path(dir)?;
-        }
+        // Validate save target (path traversal checks)
+        validate_save_target(&self.save)?;
 
         Ok(())
     }
@@ -684,7 +541,7 @@ impl GenerateResult {
             ));
         }
         if self.seed > MAX_SEED as u64 {
-            return Err(NovelAIError::Range(format!(
+            return Err(NovelAIError::Validation(format!(
                 "seed must be between 0 and {}",
                 MAX_SEED
             )));
