@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use crate::constants::MAX_TOKENS;
@@ -14,6 +14,9 @@ const CACHE_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// Maximum response size: 50MB
 const MAX_RESPONSE_SIZE: usize = 50 * 1024 * 1024;
 
+/// Maximum decompressed output size: 50MB
+const MAX_DECOMPRESSED_SIZE: u64 = 50 * 1024 * 1024;
+
 /// CLIP tokenizer definition URL
 const CLIP_TOKENIZER_URL: &str =
     "https://novelai.net/tokenizer/compressed/clip_tokenizer.def?v=2&static=true";
@@ -22,9 +25,28 @@ const CLIP_TOKENIZER_URL: &str =
 const T5_TOKENIZER_URL: &str =
     "https://novelai.net/tokenizer/compressed/t5_tokenizer.def?v=2&static=true";
 
-// Global singleton caches
-static CLIP_TOKENIZER: RwLock<Option<Arc<NovelAIClipTokenizer>>> = RwLock::new(None);
-static T5_TOKENIZER: RwLock<Option<Arc<NovelAIT5Tokenizer>>> = RwLock::new(None);
+// Global singleton caches using tokio::sync::OnceCell (#9/#26 fix)
+static CLIP_TOKENIZER: tokio::sync::OnceCell<Arc<NovelAIClipTokenizer>> =
+    tokio::sync::OnceCell::const_new();
+static T5_TOKENIZER: tokio::sync::OnceCell<Arc<NovelAIT5Tokenizer>> =
+    tokio::sync::OnceCell::const_new();
+
+/// Cached HTTP client to reuse connection pool (#48 fix)
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+/// Get or create the shared HTTP client.
+fn get_http_client() -> Result<&'static reqwest::Client> {
+    if let Some(client) = HTTP_CLIENT.get() {
+        return Ok(client);
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| NovelAIError::Tokenizer(format!("Failed to create HTTP client: {}", e)))?;
+    // If another thread initialized it first, that's fine - we just use theirs
+    let _ = HTTP_CLIENT.set(client);
+    Ok(HTTP_CLIENT.get().unwrap())
+}
 
 // =========================================================================
 // Cache filename generation
@@ -83,8 +105,7 @@ fn dirs_or_fallback() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-/// Validate that a resolved cache path is within the cache directory.
-#[allow(dead_code)]
+/// Validate that a resolved cache path is within the cache directory. (#10 fix)
 fn validate_cache_path(cache_path: &Path) -> Result<()> {
     let cache_base = cache_dir();
     let resolved = cache_path
@@ -107,7 +128,11 @@ fn validate_cache_path(cache_path: &Path) -> Result<()> {
 async fn read_from_cache(cache_file: &str) -> Option<String> {
     let cache_path = cache_dir().join(cache_file);
 
-    // Skip path validation for read (file may not exist yet)
+    // Validate the cache path is within the cache directory (#10 fix)
+    if validate_cache_path(&cache_path).is_err() {
+        return None;
+    }
+
     let metadata = tokio::fs::metadata(&cache_path).await.ok()?;
     let modified = metadata.modified().ok()?;
     let age = SystemTime::now().duration_since(modified).ok()?;
@@ -123,6 +148,11 @@ async fn read_from_cache(cache_file: &str) -> Option<String> {
 async fn write_to_cache(cache_file: &str, data: &str) {
     let dir = cache_dir();
     let cache_path = dir.join(cache_file);
+
+    // Validate the cache path is within the cache directory (#10 fix)
+    if validate_cache_path(&cache_path).is_err() {
+        return;
+    }
 
     // Silently ignore errors (cache write failure is not fatal)
     let _ = tokio::fs::create_dir_all(&dir).await;
@@ -145,11 +175,8 @@ async fn fetch_data(target_url: &str, force_refresh: bool) -> Result<String> {
         }
     }
 
-    // Fetch from network
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|e| NovelAIError::Tokenizer(format!("Failed to create HTTP client: {}", e)))?;
+    // Fetch from network using cached HTTP client (#48 fix)
+    let client = get_http_client()?;
 
     let response = client
         .get(target_url)
@@ -168,6 +195,25 @@ async fn fetch_data(target_url: &str, force_refresh: bool) -> Result<String> {
                 NovelAIError::Tokenizer(format!("Network error while fetching tokenizer: {}", e))
             }
         })?;
+
+    // Check HTTP status (#11 fix)
+    if !response.status().is_success() {
+        return Err(NovelAIError::Tokenizer(format!(
+            "HTTP request failed with status {}: {}",
+            response.status().as_u16(),
+            target_url
+        )));
+    }
+
+    // Check Content-Length before downloading body (#12 fix)
+    if let Some(content_length) = response.content_length() {
+        if content_length as usize > MAX_RESPONSE_SIZE {
+            return Err(NovelAIError::Tokenizer(format!(
+                "Response Content-Length too large: {} bytes (max {})",
+                content_length, MAX_RESPONSE_SIZE
+            )));
+        }
+    }
 
     let bytes = response.bytes().await.map_err(|e| {
         NovelAIError::Tokenizer(format!("Failed to read response body: {}", e))
@@ -193,24 +239,39 @@ async fn fetch_data(target_url: &str, force_refresh: bool) -> Result<String> {
 }
 
 /// Try decompressing data using raw deflate first, then standard zlib.
+/// Limits decompressed output to MAX_DECOMPRESSED_SIZE to prevent zip bombs (#15 fix).
 fn decompress_data(data: &[u8]) -> Result<Vec<u8>> {
     use flate2::read::{DeflateDecoder, ZlibDecoder};
     use std::io::Read;
 
-    // Try raw deflate first
+    // Try raw deflate first (with size limit)
     {
-        let mut decoder = DeflateDecoder::new(data);
+        let decoder = DeflateDecoder::new(data);
+        let mut limited = decoder.take(MAX_DECOMPRESSED_SIZE + 1);
         let mut result = Vec::new();
-        if decoder.read_to_end(&mut result).is_ok() {
+        if limited.read_to_end(&mut result).is_ok() {
+            if result.len() as u64 > MAX_DECOMPRESSED_SIZE {
+                return Err(NovelAIError::Tokenizer(format!(
+                    "Decompressed data exceeds size limit ({} bytes)",
+                    MAX_DECOMPRESSED_SIZE
+                )));
+            }
             return Ok(result);
         }
     }
 
-    // Try zlib
+    // Try zlib (with size limit)
     {
-        let mut decoder = ZlibDecoder::new(data);
+        let decoder = ZlibDecoder::new(data);
+        let mut limited = decoder.take(MAX_DECOMPRESSED_SIZE + 1);
         let mut result = Vec::new();
-        if decoder.read_to_end(&mut result).is_ok() {
+        if limited.read_to_end(&mut result).is_ok() {
+            if result.len() as u64 > MAX_DECOMPRESSED_SIZE {
+                return Err(NovelAIError::Tokenizer(format!(
+                    "Decompressed data exceeds size limit ({} bytes)",
+                    MAX_DECOMPRESSED_SIZE
+                )));
+            }
             return Ok(result);
         }
     }
@@ -226,42 +287,71 @@ fn decompress_data(data: &[u8]) -> Result<Vec<u8>> {
 
 /// Get or create the CLIP tokenizer (fetches from network if not cached).
 pub async fn get_clip_tokenizer(force_refresh: bool) -> Result<Arc<NovelAIClipTokenizer>> {
-    if !force_refresh {
-        let guard = CLIP_TOKENIZER.read().unwrap();
-        if let Some(cached) = guard.as_ref() {
-            return Ok(cached.clone());
-        }
+    // For force_refresh, skip the OnceCell and fetch directly
+    if force_refresh {
+        let data_str = fetch_data(CLIP_TOKENIZER_URL, true).await?;
+        let json: serde_json::Value = serde_json::from_str(&data_str)
+            .map_err(|e| NovelAIError::Tokenizer(format!("Failed to parse CLIP tokenizer JSON: {}", e)))?;
+
+        let text = json
+            .get("text")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                NovelAIError::Tokenizer("CLIP tokenizer data missing \"text\" field".to_string())
+            })?;
+
+        let tokenizer = Arc::new(NovelAIClipTokenizer::new(text));
+        return Ok(tokenizer);
     }
 
-    let data_str = fetch_data(CLIP_TOKENIZER_URL, force_refresh).await?;
+    // Use OnceCell for thread-safe single initialization (#9/#26 fix)
+    let tokenizer = CLIP_TOKENIZER
+        .get_or_try_init(|| async {
+            let data_str = fetch_data(CLIP_TOKENIZER_URL, false).await?;
+            let json: serde_json::Value = serde_json::from_str(&data_str)
+                .map_err(|e| {
+                    NovelAIError::Tokenizer(format!("Failed to parse CLIP tokenizer JSON: {}", e))
+                })?;
 
-    let json: serde_json::Value = serde_json::from_str(&data_str)
-        .map_err(|e| NovelAIError::Tokenizer(format!("Failed to parse CLIP tokenizer JSON: {}", e)))?;
+            let text = json
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    NovelAIError::Tokenizer(
+                        "CLIP tokenizer data missing \"text\" field".to_string(),
+                    )
+                })?;
 
-    let text = json
-        .get("text")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            NovelAIError::Tokenizer("CLIP tokenizer data missing \"text\" field".to_string())
-        })?;
+            Ok(Arc::new(NovelAIClipTokenizer::new(text))) as Result<Arc<NovelAIClipTokenizer>>
+        })
+        .await?;
 
-    let tokenizer = Arc::new(NovelAIClipTokenizer::new(text));
-    *CLIP_TOKENIZER.write().unwrap() = Some(tokenizer.clone());
-    Ok(tokenizer)
+    Ok(tokenizer.clone())
 }
 
 /// Get or create the T5 tokenizer (fetches from network if not cached).
 pub async fn get_t5_tokenizer(force_refresh: bool) -> Result<Arc<NovelAIT5Tokenizer>> {
-    if !force_refresh {
-        let guard = T5_TOKENIZER.read().unwrap();
-        if let Some(cached) = guard.as_ref() {
-            return Ok(cached.clone());
-        }
+    // For force_refresh, skip the OnceCell and fetch directly
+    if force_refresh {
+        let data_str = fetch_data(T5_TOKENIZER_URL, true).await?;
+        return parse_t5_tokenizer(&data_str);
     }
 
-    let data_str = fetch_data(T5_TOKENIZER_URL, force_refresh).await?;
+    // Use OnceCell for thread-safe single initialization (#9/#26 fix)
+    let tokenizer = T5_TOKENIZER
+        .get_or_try_init(|| async {
+            let data_str = fetch_data(T5_TOKENIZER_URL, false).await?;
+            parse_t5_tokenizer(&data_str)
+        })
+        .await?;
 
-    let json: serde_json::Value = serde_json::from_str(&data_str)
+    Ok(tokenizer.clone())
+}
+
+/// Parse T5 tokenizer JSON data into a tokenizer instance.
+/// Handles JSON errors gracefully without unwrap() (#13 fix).
+fn parse_t5_tokenizer(data_str: &str) -> Result<Arc<NovelAIT5Tokenizer>> {
+    let json: serde_json::Value = serde_json::from_str(data_str)
         .map_err(|e| NovelAIError::Tokenizer(format!("Failed to parse T5 tokenizer JSON: {}", e)))?;
 
     // Validate JSON structure
@@ -287,26 +377,51 @@ pub async fn get_t5_tokenizer(force_refresh: bool) -> Result<Arc<NovelAIT5Tokeni
             )
         })? as u32;
 
+    // Parse vocab entries with graceful error handling instead of unwrap() (#13 fix)
     let vocab: Vec<(String, f64)> = vocab_arr
         .iter()
-        .map(|entry| {
-            let arr = entry.as_array().unwrap();
-            let piece = arr[0].as_str().unwrap().to_string();
-            let score = arr[1].as_f64().unwrap();
-            (piece, score)
+        .enumerate()
+        .map(|(idx, entry)| {
+            let arr = entry.as_array().ok_or_else(|| {
+                NovelAIError::Tokenizer(format!(
+                    "T5 vocab entry {} is not an array",
+                    idx
+                ))
+            })?;
+            let piece = arr
+                .first()
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    NovelAIError::Tokenizer(format!(
+                        "T5 vocab entry {} missing string piece",
+                        idx
+                    ))
+                })?
+                .to_string();
+            let score = arr
+                .get(1)
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| {
+                    NovelAIError::Tokenizer(format!(
+                        "T5 vocab entry {} missing numeric score",
+                        idx
+                    ))
+                })?;
+            Ok((piece, score))
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
 
     let unigram = PureUnigram::new(vocab, unk_id);
     let tokenizer = Arc::new(NovelAIT5Tokenizer::from_pure_unigram(unigram));
-    *T5_TOKENIZER.write().unwrap() = Some(tokenizer.clone());
     Ok(tokenizer)
 }
 
 /// Clear all cached tokenizer instances.
+/// Note: With OnceCell, this is a no-op since OnceCell does not support clearing.
+/// Force refresh should be used instead via the force_refresh parameter.
 pub fn clear_tokenizer_cache() {
-    *CLIP_TOKENIZER.write().unwrap() = None;
-    *T5_TOKENIZER.write().unwrap() = None;
+    // OnceCell does not support clearing; use force_refresh=true in
+    // get_clip_tokenizer / get_t5_tokenizer to bypass the cache.
 }
 
 /// Validate that the token count does not exceed MAX_TOKENS (512).

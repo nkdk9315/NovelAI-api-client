@@ -1,6 +1,6 @@
 use novelai_api::constants;
 use novelai_api::error::NovelAIError;
-use novelai_api::schemas::{ImageInput, VibeEncodeResult, VibeItem};
+use novelai_api::schemas::{ImageInput, VibeConfig, VibeEncodeResult, VibeItem};
 use novelai_api::utils;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -134,30 +134,30 @@ fn d1_reads_file_for_normal_path() {
     let mut temp = NamedTempFile::new().unwrap();
     temp.write_all(&png_data).unwrap();
 
-    let input = ImageInput::FilePath(temp.path().to_str().unwrap().to_string());
+    let input = ImageInput::FilePath(temp.path().to_path_buf());
     let result = utils::image::get_image_buffer(&input).unwrap();
     assert_eq!(result, png_data);
 }
 
 #[test]
 fn d2_throws_for_path_traversal() {
-    let input = ImageInput::FilePath("../../etc/passwd".to_string());
+    let input = ImageInput::FilePath("../../etc/passwd".into());
     let result = utils::image::get_image_buffer(&input);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("path traversal detected"));
+    assert!(result.unwrap_err().to_string().contains("path traversal"));
 }
 
 #[test]
 fn d3_throws_for_nested_path_traversal() {
-    let input = ImageInput::FilePath("images/../../../secret".to_string());
+    let input = ImageInput::FilePath("images/../../../secret".into());
     let result = utils::image::get_image_buffer(&input);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("path traversal detected"));
+    assert!(result.unwrap_err().to_string().contains("path traversal"));
 }
 
 #[test]
 fn d4_throws_for_nonexistent_file() {
-    let input = ImageInput::FilePath("/nonexistent/image.png".to_string());
+    let input = ImageInput::FilePath("/nonexistent/image.png".into());
     let result = utils::image::get_image_buffer(&input);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("not found or not readable"));
@@ -338,7 +338,7 @@ fn i1_parses_json_from_valid_file() {
 fn i2_throws_for_path_traversal() {
     let result = utils::vibe::load_vibe_file("../../etc/secret.naiv4vibe");
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("path traversal detected"));
+    assert!(result.unwrap_err().to_string().contains("path traversal"));
 }
 
 #[test]
@@ -412,19 +412,24 @@ fn j4_defaults_to_v4_5_full_model() {
 
 #[test]
 fn k1_processes_vibe_encode_result() {
-    let vibes = vec![VibeItem::Encoded(VibeEncodeResult {
-        encoding: "enc1".to_string(),
-        model: constants::Model::NaiDiffusion45Full,
-        information_extracted: 0.7,
+    let vibes = vec![VibeConfig {
+        item: VibeItem::Encoded(VibeEncodeResult {
+            encoding: "enc1".to_string(),
+            model: constants::Model::NaiDiffusion45Full,
+            information_extracted: 0.7,
+            strength: 0.5,
+            source_image_hash: "a".repeat(64),
+            created_at: "2024-01-01".to_string(),
+            saved_path: None,
+            anlas_remaining: None,
+            anlas_consumed: None,
+        }),
         strength: 0.5,
-        source_image_hash: "a".repeat(64),
-        created_at: "2024-01-01".to_string(),
-        saved_path: None,
-        anlas_remaining: None,
-        anlas_consumed: None,
-    })];
+        info_extracted: 0.7,
+    }];
     let result = utils::vibe::process_vibes(&vibes, "nai-diffusion-4-5-full").unwrap();
     assert_eq!(result.encodings, vec!["enc1"]);
+    assert!((result.strengths[0] - 0.5).abs() < f64::EPSILON);
     assert!((result.info_extracted_list[0] - 0.7).abs() < f64::EPSILON);
 }
 
@@ -443,26 +448,36 @@ fn k2_processes_naiv4vibe_file_path() {
     let mut temp = NamedTempFile::new().unwrap();
     write!(temp, "{}", vibe_data).unwrap();
 
-    let path = temp.path().to_str().unwrap().to_string();
-    let vibes = vec![VibeItem::FilePath(path)];
+    let vibes = vec![VibeConfig {
+        item: VibeItem::FilePath(temp.path().to_path_buf()),
+        strength: 0.8,
+        info_extracted: 0.6,
+    }];
     let result = utils::vibe::process_vibes(&vibes, "nai-diffusion-4-5-full").unwrap();
     assert_eq!(result.encodings, vec!["file-enc"]);
+    assert!((result.strengths[0] - 0.8).abs() < f64::EPSILON);
     assert!((result.info_extracted_list[0] - 0.6).abs() < f64::EPSILON);
 }
 
 #[test]
 fn k3_processes_raw_encoding_with_default_info() {
-    let vibes = vec![VibeItem::RawEncoding("someBase64EncodedString".to_string())];
+    let vibes = vec![VibeConfig {
+        item: VibeItem::RawEncoding("someBase64EncodedString".to_string()),
+        strength: 0.5,
+        info_extracted: 1.0,
+    }];
     let result = utils::vibe::process_vibes(&vibes, "nai-diffusion-4-5-full").unwrap();
     assert_eq!(result.encodings, vec!["someBase64EncodedString"]);
+    assert!((result.strengths[0] - 0.5).abs() < f64::EPSILON);
     assert!((result.info_extracted_list[0] - 1.0).abs() < f64::EPSILON);
 }
 
 #[test]
 fn k4_empty_array_returns_empty_results() {
-    let vibes: Vec<VibeItem> = vec![];
+    let vibes: Vec<VibeConfig> = vec![];
     let result = utils::vibe::process_vibes(&vibes, "nai-diffusion-4-5-full").unwrap();
     assert!(result.encodings.is_empty());
+    assert!(result.strengths.is_empty());
     assert!(result.info_extracted_list.is_empty());
 }
 

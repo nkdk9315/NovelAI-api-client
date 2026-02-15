@@ -18,25 +18,12 @@ impl GenerateParamsBuilder {
         }
     }
 
-    // ── Non-Option scalar setters ───────────────────────────────────────
+    // -- Non-Option scalar setters -------------------------------------------
 
+    /// Set the generation action (Generate, Img2Img, Infill).
+    /// The data-carrying variants include all action-specific fields.
     pub fn action(mut self, action: GenerateAction) -> Self {
         self.params.action = action;
-        self
-    }
-
-    pub fn img2img_strength(mut self, strength: f64) -> Self {
-        self.params.img2img_strength = strength;
-        self
-    }
-
-    pub fn img2img_noise(mut self, noise: f64) -> Self {
-        self.params.img2img_noise = noise;
-        self
-    }
-
-    pub fn inpaint_color_correct(mut self, enabled: bool) -> Self {
-        self.params.inpaint_color_correct = enabled;
         self
     }
 
@@ -80,89 +67,56 @@ impl GenerateParamsBuilder {
         self
     }
 
-    // ── Option<ImageInput> setters ──────────────────────────────────────
-
-    pub fn source_image(mut self, image: ImageInput) -> Self {
-        self.params.source_image = Some(image);
-        self
-    }
-
-    pub fn mask(mut self, mask: ImageInput) -> Self {
-        self.params.mask = Some(mask);
-        self
-    }
-
-    // ── Option<f64> setters ─────────────────────────────────────────────
-
-    pub fn mask_strength(mut self, strength: f64) -> Self {
-        self.params.mask_strength = Some(strength);
-        self
-    }
-
-    pub fn hybrid_img2img_strength(mut self, strength: f64) -> Self {
-        self.params.hybrid_img2img_strength = Some(strength);
-        self
-    }
-
-    pub fn hybrid_img2img_noise(mut self, noise: f64) -> Self {
-        self.params.hybrid_img2img_noise = Some(noise);
-        self
-    }
-
-    // ── Option<u64> setter ──────────────────────────────────────────────
+    // -- Option<u64> setter --------------------------------------------------
 
     pub fn seed(mut self, seed: u64) -> Self {
         self.params.seed = Some(seed);
         self
     }
 
-    // ── Option<Vec<T>> setters ──────────────────────────────────────────
+    // -- Option<Vec<T>> setters ----------------------------------------------
 
     pub fn characters(mut self, characters: Vec<CharacterConfig>) -> Self {
         self.params.characters = Some(characters);
         self
     }
 
-    pub fn vibes(mut self, vibes: Vec<VibeItem>) -> Self {
+    /// Set vibes using `Vec<VibeConfig>`, which bundles each vibe item
+    /// together with its strength and info_extracted values.
+    pub fn vibes(mut self, vibes: Vec<VibeConfig>) -> Self {
         self.params.vibes = Some(vibes);
         self
     }
 
-    pub fn vibe_strengths(mut self, strengths: Vec<f64>) -> Self {
-        self.params.vibe_strengths = Some(strengths);
-        self
-    }
-
-    pub fn vibe_info_extracted(mut self, info_extracted: Vec<f64>) -> Self {
-        self.params.vibe_info_extracted = Some(info_extracted);
-        self
-    }
-
-    // ── Option<struct> setter ───────────────────────────────────────────
+    // -- Option<struct> setter -----------------------------------------------
 
     pub fn character_reference(mut self, char_ref: CharacterReferenceConfig) -> Self {
         self.params.character_reference = Some(char_ref);
         self
     }
 
-    // ── Option<String> setters ──────────────────────────────────────────
+    // -- Option<String> setters ----------------------------------------------
 
     pub fn negative_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.params.negative_prompt = Some(prompt.into());
         self
     }
 
+    // -- SaveTarget setters --------------------------------------------------
+
+    /// Set save target to an exact file path.
     pub fn save_path(mut self, path: impl Into<String>) -> Self {
-        self.params.save_path = Some(path.into());
+        self.params.save = SaveTarget::ExactPath(path.into());
         self
     }
 
+    /// Set save target to a directory (with optional filename via `SaveTarget::Directory`).
     pub fn save_dir(mut self, dir: impl Into<String>) -> Self {
-        self.params.save_dir = Some(dir.into());
+        self.params.save = SaveTarget::Directory { dir: dir.into(), filename: None };
         self
     }
 
-    // ── Build ───────────────────────────────────────────────────────────
+    // -- Build ---------------------------------------------------------------
 
     /// Build and validate the params. Returns error if validation fails.
     pub fn build(self) -> Result<GenerateParams> {

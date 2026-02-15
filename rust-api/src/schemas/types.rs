@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 use crate::constants::*;
@@ -6,23 +8,49 @@ use crate::constants::*;
 // Enums
 // =============================================================================
 
-/// Image generation action type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+/// Image generation action type.
+///
+/// Uses data-carrying variants so that action-specific fields are always
+/// present exactly when they are relevant, making illegal states
+/// unrepresentable at compile time.
+#[derive(Debug, Clone, Default)]
 pub enum GenerateAction {
     #[default]
     Generate,
-    Img2Img,
-    Infill,
+    Img2Img {
+        source_image: ImageInput,
+        strength: f64,
+        noise: f64,
+    },
+    Infill {
+        source_image: ImageInput,
+        mask: ImageInput,
+        mask_strength: f64,
+        color_correct: bool,
+        hybrid_strength: Option<f64>,
+        hybrid_noise: Option<f64>,
+    },
 }
 
 impl GenerateAction {
     pub fn as_str(&self) -> &'static str {
         match self {
             GenerateAction::Generate => "generate",
-            GenerateAction::Img2Img => "img2img",
-            GenerateAction::Infill => "infill",
+            GenerateAction::Img2Img { .. } => "img2img",
+            GenerateAction::Infill { .. } => "infill",
         }
+    }
+
+    pub fn is_generate(&self) -> bool {
+        matches!(self, GenerateAction::Generate)
+    }
+
+    pub fn is_img2img(&self) -> bool {
+        matches!(self, GenerateAction::Img2Img { .. })
+    }
+
+    pub fn is_infill(&self) -> bool {
+        matches!(self, GenerateAction::Infill { .. })
     }
 }
 
@@ -52,7 +80,7 @@ impl CharRefMode {
 /// Does not implement Serialize/Deserialize as it is converted to base64 at payload construction time.
 #[derive(Debug, Clone)]
 pub enum ImageInput {
-    FilePath(String),
+    FilePath(PathBuf),
     Base64(String),
     DataUrl(String),
     Bytes(Vec<u8>),
@@ -61,7 +89,8 @@ pub enum ImageInput {
 impl ImageInput {
     pub fn is_empty(&self) -> bool {
         match self {
-            ImageInput::FilePath(s) | ImageInput::Base64(s) | ImageInput::DataUrl(s) => s.is_empty(),
+            ImageInput::FilePath(p) => p.as_os_str().is_empty(),
+            ImageInput::Base64(s) | ImageInput::DataUrl(s) => s.is_empty(),
             ImageInput::Bytes(b) => b.is_empty(),
         }
     }
@@ -71,8 +100,43 @@ impl ImageInput {
 #[derive(Debug, Clone)]
 pub enum VibeItem {
     Encoded(VibeEncodeResult),
-    FilePath(String),
+    FilePath(PathBuf),
     RawEncoding(String),
+}
+
+/// Save target for generated/encoded output files.
+///
+/// Replaces the `save_path: Option<String>` / `save_dir: Option<String>`
+/// pair, eliminating the mutual-exclusion runtime check.
+#[derive(Debug, Clone, Default)]
+pub enum SaveTarget {
+    /// Do not save (default).
+    #[default]
+    None,
+    /// Save to this exact file path.
+    ExactPath(String),
+    /// Save into a directory, optionally with a custom filename.
+    Directory {
+        dir: String,
+        filename: Option<String>,
+    },
+}
+
+// =============================================================================
+// VibeConfig
+// =============================================================================
+
+/// Consolidated vibe configuration that bundles a vibe item with its
+/// associated strength and information_extracted values.
+///
+/// Replaces the old parallel-vector design (`vibes`, `vibe_strengths`,
+/// `vibe_info_extracted`) which could represent illegal states such as
+/// length mismatches or one vector being `Some` while another is `None`.
+#[derive(Debug, Clone)]
+pub struct VibeConfig {
+    pub item: VibeItem,
+    pub strength: f64,
+    pub info_extracted: f64,
 }
 
 // =============================================================================
@@ -136,22 +200,11 @@ pub struct VibeEncodeResult {
 pub struct GenerateParams {
     pub prompt: String,
     pub action: GenerateAction,
-    pub source_image: Option<ImageInput>,
-    pub img2img_strength: f64,
-    pub img2img_noise: f64,
-    pub mask: Option<ImageInput>,
-    pub mask_strength: Option<f64>,
-    pub inpaint_color_correct: bool,
-    pub hybrid_img2img_strength: Option<f64>,
-    pub hybrid_img2img_noise: Option<f64>,
     pub characters: Option<Vec<CharacterConfig>>,
-    pub vibes: Option<Vec<VibeItem>>,
-    pub vibe_strengths: Option<Vec<f64>>,
-    pub vibe_info_extracted: Option<Vec<f64>>,
+    pub vibes: Option<Vec<VibeConfig>>,
     pub character_reference: Option<CharacterReferenceConfig>,
     pub negative_prompt: Option<String>,
-    pub save_path: Option<String>,
-    pub save_dir: Option<String>,
+    pub save: SaveTarget,
     pub model: Model,
     pub width: u32,
     pub height: u32,
@@ -169,22 +222,11 @@ impl Default for GenerateParams {
         Self {
             prompt: String::new(),
             action: GenerateAction::default(),
-            source_image: None,
-            img2img_strength: DEFAULT_IMG2IMG_STRENGTH,
-            img2img_noise: 0.0,
-            mask: None,
-            mask_strength: None,
-            inpaint_color_correct: DEFAULT_INPAINT_COLOR_CORRECT,
-            hybrid_img2img_strength: None,
-            hybrid_img2img_noise: None,
             characters: None,
             vibes: None,
-            vibe_strengths: None,
-            vibe_info_extracted: None,
             character_reference: None,
             negative_prompt: None,
-            save_path: None,
-            save_dir: None,
+            save: SaveTarget::default(),
             model: Model::default(),
             width: DEFAULT_WIDTH,
             height: DEFAULT_HEIGHT,
@@ -221,9 +263,7 @@ pub struct EncodeVibeParams {
     pub model: Model,
     pub information_extracted: f64,
     pub strength: f64,
-    pub save_path: Option<String>,
-    pub save_dir: Option<String>,
-    pub save_filename: Option<String>,
+    pub save: SaveTarget,
 }
 
 impl Default for EncodeVibeParams {
@@ -233,9 +273,7 @@ impl Default for EncodeVibeParams {
             model: Model::default(),
             information_extracted: DEFAULT_VIBE_INFO_EXTRACTED,
             strength: DEFAULT_VIBE_STRENGTH,
-            save_path: None,
-            save_dir: None,
-            save_filename: None,
+            save: SaveTarget::default(),
         }
     }
 }
@@ -250,8 +288,7 @@ pub struct AugmentParams {
     pub image: ImageInput,
     pub prompt: Option<String>,
     pub defry: Option<u32>,
-    pub save_path: Option<String>,
-    pub save_dir: Option<String>,
+    pub save: SaveTarget,
 }
 
 #[derive(Debug, Clone)]
@@ -271,8 +308,7 @@ pub struct AugmentResult {
 pub struct UpscaleParams {
     pub image: ImageInput,
     pub scale: u32,
-    pub save_path: Option<String>,
-    pub save_dir: Option<String>,
+    pub save: SaveTarget,
 }
 
 impl Default for UpscaleParams {
@@ -280,8 +316,7 @@ impl Default for UpscaleParams {
         Self {
             image: ImageInput::Bytes(Vec::new()),
             scale: DEFAULT_UPSCALE_SCALE,
-            save_path: None,
-            save_dir: None,
+            save: SaveTarget::default(),
         }
     }
 }

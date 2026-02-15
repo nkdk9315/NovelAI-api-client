@@ -1,8 +1,8 @@
 use crate::error::{NovelAIError, Result};
+use crate::utils::image::{load_image_safe, encode_to_png};
 
-use image::{DynamicImage, GrayImage, ImageFormat, Luma};
+use image::{DynamicImage, GrayImage, Luma};
 use sha2::{Digest, Sha256};
-use std::io::Cursor;
 
 // =============================================================================
 // Mask Region / Center types
@@ -42,20 +42,13 @@ pub fn resize_mask_image(
     let mask_width = target_width / 8;
     let mask_height = target_height / 8;
 
-    let img = image::load_from_memory(mask).map_err(|e| {
-        NovelAIError::Image(format!("Failed to load mask image: {}", e))
-    })?;
+    let img = load_image_safe(mask)?;
 
     let resized = img.resize_exact(mask_width, mask_height, image::imageops::FilterType::Lanczos3);
     let gray = resized.to_luma8();
 
     let dynamic = DynamicImage::ImageLuma8(gray);
-    let mut buf = Cursor::new(Vec::new());
-    dynamic.write_to(&mut buf, ImageFormat::Png).map_err(|e| {
-        NovelAIError::Image(format!("Failed to encode mask as PNG: {}", e))
-    })?;
-
-    Ok(buf.into_inner())
+    encode_to_png(&dynamic)
 }
 
 /// Create a rectangular mask image programmatically.
@@ -173,9 +166,5 @@ fn validate_region_value(name: &str, value: f64) -> Result<()> {
 
 fn encode_gray_to_png(img: &GrayImage) -> Result<Vec<u8>> {
     let dynamic = DynamicImage::ImageLuma8(img.clone());
-    let mut buf = Cursor::new(Vec::new());
-    dynamic.write_to(&mut buf, ImageFormat::Png).map_err(|e| {
-        NovelAIError::Image(format!("Failed to encode mask as PNG: {}", e))
-    })?;
-    Ok(buf.into_inner())
+    encode_to_png(&dynamic)
 }

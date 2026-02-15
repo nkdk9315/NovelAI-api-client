@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use secrecy::{ExposeSecret, SecretString};
 use sha2::{Digest, Sha256};
 
 use crate::constants;
@@ -51,19 +52,23 @@ pub struct AnlasBalance {
 // =============================================================================
 
 pub struct NovelAIClient {
-    api_key: String,
+    api_key: SecretString,
     http_client: reqwest::Client,
     logger: Box<dyn Logger>,
+    /// When true, an extra HTTP request is made before and after each API call
+    /// to track anlas balance consumption. Defaults to true for backward
+    /// compatibility, but can be disabled to halve per-operation latency.
+    track_balance: bool,
 }
 
 impl NovelAIClient {
     pub fn new(api_key: Option<&str>, logger: Option<Box<dyn Logger>>) -> Result<Self> {
-        let api_key = api_key
+        let api_key_str = api_key
             .map(|s| s.to_string())
             .or_else(|| std::env::var("NOVELAI_API_KEY").ok())
             .unwrap_or_default();
 
-        if api_key.is_empty() {
+        if api_key_str.is_empty() {
             return Err(NovelAIError::Validation(
                 "API key is required. Set NOVELAI_API_KEY environment variable or pass apiKey parameter.".to_string(),
             ));
@@ -77,10 +82,20 @@ impl NovelAIClient {
             .map_err(|e| NovelAIError::Other(format!("Failed to create HTTP client: {}", e)))?;
 
         Ok(Self {
-            api_key,
+            api_key: SecretString::new(api_key_str),
             http_client,
             logger,
+            track_balance: true,
         })
+    }
+
+    /// Enable or disable automatic balance tracking around API calls.
+    ///
+    /// When enabled (default), each generate/encode/augment/upscale call makes
+    /// two extra HTTP requests (before and after) to track anlas consumption.
+    /// Disable this to reduce latency if you don't need balance tracking.
+    pub fn set_track_balance(&mut self, enabled: bool) {
+        self.track_balance = enabled;
     }
 
     // =========================================================================
@@ -93,7 +108,7 @@ impl NovelAIClient {
             &constants::subscription_url(),
             reqwest::Method::GET,
             None,
-            &self.api_key,
+            self.api_key.expose_secret(),
             "GetAnlasBalance",
             &*self.logger,
         )
@@ -155,8 +170,8 @@ impl NovelAIClient {
         hasher.update(&image_buffer);
         let source_hash = format!("{:x}", hasher.finalize());
 
-        // Get initial balance
-        let anlas_before = self.try_get_balance().await;
+        // Get initial balance (only if tracking is enabled)
+        let anlas_before = self.try_get_balance_if_tracking().await;
 
         let payload = serde_json::json!({
             "image": b64_image,
@@ -164,12 +179,13 @@ impl NovelAIClient {
             "model": params.model.as_str(),
         });
 
+        let body = payload.to_string();
         let response = retry::fetch_with_retry(
             &self.http_client,
             &constants::encode_url(),
             reqwest::Method::POST,
-            Some(payload.to_string()),
-            &self.api_key,
+            Some(&body),
+            self.api_key.expose_secret(),
             "VibeEncode",
             &*self.logger,
         )
@@ -179,7 +195,7 @@ impl NovelAIClient {
         let encoding = BASE64.encode(&response_bytes);
 
         let (anlas_remaining, anlas_consumed) =
-            self.get_anlas_after(anlas_before).await;
+            self.get_anlas_after_if_tracking(anlas_before).await;
 
         let mut result = VibeEncodeResult {
             encoding,
@@ -194,38 +210,42 @@ impl NovelAIClient {
         };
 
         // Save if requested
-        if let Some(ref save_path) = params.save_path {
-            match Self::save_vibe(&result, save_path).await {
-                Ok(()) => result.saved_path = Some(save_path.clone()),
-                Err(e) => self.logger.warn(&format!(
-                    "[NovelAI] Failed to save vibe file: {}",
-                    e
-                )),
-            }
-        } else if let Some(ref save_dir) = params.save_dir {
-            if let Err(e) = Self::ensure_dir(Path::new(save_dir)).await {
-                self.logger.warn(&format!(
-                    "[NovelAI] Failed to create save directory: {}",
-                    e
-                ));
-            } else {
-                let filename = if let Some(ref custom) = params.save_filename {
-                    let base = custom.trim_end_matches(".naiv4vibe");
-                    format!("{}.naiv4vibe", base)
-                } else {
-                    let ts = file_timestamp();
-                    format!("{}_{}.naiv4vibe", &source_hash[..12], ts)
-                };
-                let save_path =
-                    Path::new(save_dir).join(&filename).to_string_lossy().to_string();
-                match Self::save_vibe(&result, &save_path).await {
-                    Ok(()) => result.saved_path = Some(save_path),
+        match &params.save {
+            SaveTarget::ExactPath(save_path) => {
+                match Self::save_vibe(&result, save_path).await {
+                    Ok(()) => result.saved_path = Some(save_path.clone()),
                     Err(e) => self.logger.warn(&format!(
                         "[NovelAI] Failed to save vibe file: {}",
                         e
                     )),
                 }
             }
+            SaveTarget::Directory { dir, filename } => {
+                if let Err(e) = Self::ensure_dir(Path::new(dir)).await {
+                    self.logger.warn(&format!(
+                        "[NovelAI] Failed to create save directory: {}",
+                        e
+                    ));
+                } else {
+                    let fname = if let Some(ref custom) = filename {
+                        let base = custom.trim_end_matches(".naiv4vibe");
+                        format!("{}.naiv4vibe", base)
+                    } else {
+                        let ts = file_timestamp();
+                        format!("{}_{}.naiv4vibe", &source_hash[..12], ts)
+                    };
+                    let save_path =
+                        Path::new(dir).join(&fname).to_string_lossy().to_string();
+                    match Self::save_vibe(&result, &save_path).await {
+                        Ok(()) => result.saved_path = Some(save_path),
+                        Err(e) => self.logger.warn(&format!(
+                            "[NovelAI] Failed to save vibe file: {}",
+                            e
+                        )),
+                    }
+                }
+            }
+            SaveTarget::None => {}
         }
 
         Ok(result)
@@ -239,13 +259,69 @@ impl NovelAIClient {
         &self,
         params: &GenerateParams,
     ) -> Result<GenerateResult> {
+        let seed = params
+            .seed
+            .unwrap_or_else(|| rand::random::<u32>() as u64);
+
+        // Build the JSON payload
+        let (body, use_stream) = self.build_generate_payload(params, seed)?;
+
+        // Get initial balance (only if tracking is enabled)
+        let anlas_before = self.try_get_balance_if_tracking().await;
+
+        // Send the request
+        let api_url = if use_stream {
+            constants::stream_url()
+        } else {
+            constants::api_url()
+        };
+
+        let response = retry::fetch_with_retry(
+            &self.http_client,
+            &api_url,
+            reqwest::Method::POST,
+            Some(&body),
+            self.api_key.expose_secret(),
+            "Generation",
+            &*self.logger,
+        )
+        .await?;
+
+        // Parse and assemble result
+        let image_data = self.process_generate_response(response, use_stream).await?;
+
+        let (anlas_remaining, anlas_consumed) =
+            self.get_anlas_after_if_tracking(anlas_before).await;
+
+        let char_configs = params.characters.as_deref().unwrap_or(&[]);
+        let mut result = GenerateResult {
+            image_data,
+            seed,
+            anlas_remaining,
+            anlas_consumed,
+            saved_path: None,
+        };
+
+        // Save
+        self.try_save_generated_image(&mut result, params, char_configs, seed)
+            .await;
+
+        Ok(result)
+    }
+
+    /// Build the JSON payload for a generate request.
+    ///
+    /// Returns the serialized JSON body and a flag indicating whether
+    /// the streaming endpoint should be used.
+    fn build_generate_payload(
+        &self,
+        params: &GenerateParams,
+        seed: u64,
+    ) -> Result<(String, bool)> {
         let negative_prompt = params
             .negative_prompt
             .as_deref()
             .unwrap_or(constants::DEFAULT_NEGATIVE);
-        let seed = params
-            .seed
-            .unwrap_or_else(|| rand::random::<u32>() as u64);
 
         // Process character reference
         let char_ref_data = if let Some(ref char_ref) = params.character_reference {
@@ -259,23 +335,15 @@ impl NovelAIClient {
         // Process vibes
         let mut vibe_encodings: Vec<String> = Vec::new();
         let mut vibe_info_list: Vec<f64> = Vec::new();
-        let mut vibe_strengths = params.vibe_strengths.clone();
+        let mut vibe_strengths_list: Option<Vec<f64>> = None;
 
         if let Some(ref vibes) = params.vibes {
             if !vibes.is_empty() {
                 let processed =
                     utils::vibe::process_vibes(vibes, params.model.as_str())?;
                 vibe_encodings = processed.encodings;
-                vibe_info_list = params
-                    .vibe_info_extracted
-                    .clone()
-                    .unwrap_or(processed.info_extracted_list);
-                if vibe_strengths.is_none() {
-                    vibe_strengths = Some(vec![
-                        constants::DEFAULT_VIBE_STRENGTH;
-                        vibe_encodings.len()
-                    ]);
-                }
+                vibe_info_list = processed.info_extracted_list;
+                vibe_strengths_list = Some(processed.strengths);
             }
         }
 
@@ -296,7 +364,7 @@ impl NovelAIClient {
         payload::apply_vibe_params(
             &mut payload_val,
             &vibe_encodings,
-            &vibe_strengths,
+            &vibe_strengths_list,
             &vibe_info_list,
         );
         if let Some(ref crd) = char_ref_data {
@@ -311,58 +379,25 @@ impl NovelAIClient {
         );
         payload::apply_character_prompts(&mut payload_val, char_configs);
 
-        // Get initial balance
-        let anlas_before = self.try_get_balance().await;
-
-        // Determine endpoint
         let use_stream = params.character_reference.is_some()
-            || params.action == GenerateAction::Infill;
-        let api_url = if use_stream {
-            constants::stream_url()
-        } else {
-            constants::api_url()
-        };
+            || params.action.is_infill();
 
         let body = serde_json::to_string(&payload_val)?;
+        Ok((body, use_stream))
+    }
 
-        let response = retry::fetch_with_retry(
-            &self.http_client,
-            &api_url,
-            reqwest::Method::POST,
-            Some(body),
-            &self.api_key,
-            "Generation",
-            &*self.logger,
-        )
-        .await?;
-
-        let response_buffer =
-            response::get_response_buffer(response).await?;
-        let image_data = if use_stream {
-            response::parse_stream_response(
-                &response_buffer,
-                &*self.logger,
-            )?
+    /// Process the HTTP response from a generate request, extracting image data.
+    async fn process_generate_response(
+        &self,
+        response: reqwest::Response,
+        use_stream: bool,
+    ) -> Result<Vec<u8>> {
+        let response_buffer = response::get_response_buffer(response).await?;
+        if use_stream {
+            response::parse_stream_response(&response_buffer, &*self.logger)
         } else {
-            response::parse_zip_response(&response_buffer)?
-        };
-
-        let (anlas_remaining, anlas_consumed) =
-            self.get_anlas_after(anlas_before).await;
-
-        let mut result = GenerateResult {
-            image_data,
-            seed,
-            anlas_remaining,
-            anlas_consumed,
-            saved_path: None,
-        };
-
-        // Save
-        self.try_save_generated_image(&mut result, params, char_configs, seed)
-            .await;
-
-        Ok(result)
+            response::parse_zip_response(&response_buffer)
+        }
     }
 
     // =========================================================================
@@ -377,7 +412,7 @@ impl NovelAIClient {
             utils::image::get_image_dimensions(&params.image)?;
         let b64_image = BASE64.encode(&image_buffer);
 
-        let anlas_before = self.try_get_balance().await;
+        let anlas_before = self.try_get_balance_if_tracking().await;
 
         let mut payload = serde_json::json!({
             "req_type": params.req_type.as_str(),
@@ -410,12 +445,13 @@ impl NovelAIClient {
             _ => {}
         }
 
+        let body = payload.to_string();
         let response = retry::fetch_with_retry(
             &self.http_client,
             &constants::augment_url(),
             reqwest::Method::POST,
-            Some(payload.to_string()),
-            &self.api_key,
+            Some(&body),
+            self.api_key.expose_secret(),
             "Augment",
             &*self.logger,
         )
@@ -426,7 +462,7 @@ impl NovelAIClient {
         let image_data = response::parse_zip_response(&response_buffer)?;
 
         let (anlas_remaining, anlas_consumed) =
-            self.get_anlas_after(anlas_before).await;
+            self.get_anlas_after_if_tracking(anlas_before).await;
 
         let mut result = AugmentResult {
             image_data,
@@ -440,8 +476,7 @@ impl NovelAIClient {
         self.try_save_result_image(
             &result.image_data,
             &mut result.saved_path,
-            params.save_path.as_deref(),
-            params.save_dir.as_deref(),
+            &params.save,
             params.req_type.as_str(),
             "augmented image",
         )
@@ -462,7 +497,7 @@ impl NovelAIClient {
             utils::image::get_image_dimensions(&params.image)?;
         let b64_image = BASE64.encode(&image_buffer);
 
-        let anlas_before = self.try_get_balance().await;
+        let anlas_before = self.try_get_balance_if_tracking().await;
 
         let payload = serde_json::json!({
             "image": b64_image,
@@ -471,12 +506,13 @@ impl NovelAIClient {
             "scale": params.scale,
         });
 
+        let body = payload.to_string();
         let response = retry::fetch_with_retry(
             &self.http_client,
             &constants::upscale_url(),
             reqwest::Method::POST,
-            Some(payload.to_string()),
-            &self.api_key,
+            Some(&body),
+            self.api_key.expose_secret(),
             "Upscale",
             &*self.logger,
         )
@@ -496,7 +532,7 @@ impl NovelAIClient {
         };
 
         let (anlas_remaining, anlas_consumed) =
-            self.get_anlas_after(anlas_before).await;
+            self.get_anlas_after_if_tracking(anlas_before).await;
 
         let output_width = width * params.scale;
         let output_height = height * params.scale;
@@ -516,8 +552,7 @@ impl NovelAIClient {
         self.try_save_result_image(
             &result.image_data,
             &mut result.saved_path,
-            params.save_path.as_deref(),
-            params.save_dir.as_deref(),
+            &params.save,
             &prefix,
             "upscaled image",
         )
@@ -530,7 +565,11 @@ impl NovelAIClient {
     // Private Helpers: Balance
     // =========================================================================
 
-    async fn try_get_balance(&self) -> Option<u64> {
+    /// Get balance before an operation, only if balance tracking is enabled.
+    async fn try_get_balance_if_tracking(&self) -> Option<u64> {
+        if !self.track_balance {
+            return None;
+        }
         match self.get_anlas_balance().await {
             Ok(balance) => Some(balance.total),
             Err(e) => {
@@ -541,6 +580,18 @@ impl NovelAIClient {
                 None
             }
         }
+    }
+
+    /// Get balance after an operation and compute consumed anlas,
+    /// only if balance tracking is enabled.
+    async fn get_anlas_after_if_tracking(
+        &self,
+        anlas_before: Option<u64>,
+    ) -> (Option<u64>, Option<u64>) {
+        if !self.track_balance {
+            return (None, None);
+        }
+        self.get_anlas_after(anlas_before).await
     }
 
     // =========================================================================
@@ -623,43 +674,47 @@ impl NovelAIClient {
         char_configs: &[CharacterConfig],
         seed: u64,
     ) {
-        if let Some(ref save_path) = params.save_path {
-            match Self::save_to_file(save_path, &result.image_data).await {
-                Ok(()) => result.saved_path = Some(save_path.clone()),
-                Err(e) => self.logger.warn(&format!(
-                    "[NovelAI] Failed to save image: {}",
-                    e
-                )),
+        match &params.save {
+            SaveTarget::ExactPath(save_path) => {
+                match Self::save_to_file(save_path, &result.image_data).await {
+                    Ok(()) => result.saved_path = Some(save_path.clone()),
+                    Err(e) => self.logger.warn(&format!(
+                        "[NovelAI] Failed to save image: {}",
+                        e
+                    )),
+                }
             }
-        } else if let Some(ref save_dir) = params.save_dir {
-            if let Err(e) = Self::ensure_dir(Path::new(save_dir)).await {
-                self.logger.warn(&format!(
-                    "[NovelAI] Failed to save image: {}",
-                    e
-                ));
-                return;
+            SaveTarget::Directory { dir: save_dir, .. } => {
+                if let Err(e) = Self::ensure_dir(Path::new(save_dir)).await {
+                    self.logger.warn(&format!(
+                        "[NovelAI] Failed to save image: {}",
+                        e
+                    ));
+                    return;
+                }
+                let mut prefix = if params.action.is_img2img() {
+                    "img2img".to_string()
+                } else {
+                    "gen".to_string()
+                };
+                if !char_configs.is_empty() {
+                    prefix.push_str("_multi");
+                }
+                let ts = file_timestamp();
+                let filename = format!("{}_{}_{}.png", prefix, ts, seed);
+                let save_path = Path::new(save_dir)
+                    .join(&filename)
+                    .to_string_lossy()
+                    .to_string();
+                match Self::save_to_file(&save_path, &result.image_data).await {
+                    Ok(()) => result.saved_path = Some(save_path),
+                    Err(e) => self.logger.warn(&format!(
+                        "[NovelAI] Failed to save image: {}",
+                        e
+                    )),
+                }
             }
-            let mut prefix = if params.action == GenerateAction::Img2Img {
-                "img2img".to_string()
-            } else {
-                "gen".to_string()
-            };
-            if !char_configs.is_empty() {
-                prefix.push_str("_multi");
-            }
-            let ts = file_timestamp();
-            let filename = format!("{}_{}_{}.png", prefix, ts, seed);
-            let save_path = Path::new(save_dir)
-                .join(&filename)
-                .to_string_lossy()
-                .to_string();
-            match Self::save_to_file(&save_path, &result.image_data).await {
-                Ok(()) => result.saved_path = Some(save_path),
-                Err(e) => self.logger.warn(&format!(
-                    "[NovelAI] Failed to save image: {}",
-                    e
-                )),
-            }
+            SaveTarget::None => {}
         }
     }
 
@@ -668,41 +723,44 @@ impl NovelAIClient {
         &self,
         image_data: &[u8],
         saved_path: &mut Option<String>,
-        save_path: Option<&str>,
-        save_dir: Option<&str>,
+        save: &SaveTarget,
         prefix: &str,
         description: &str,
     ) {
-        if let Some(sp) = save_path {
-            match Self::save_to_file(sp, image_data).await {
-                Ok(()) => *saved_path = Some(sp.to_string()),
-                Err(e) => self.logger.warn(&format!(
-                    "[NovelAI] Failed to save {}: {}",
-                    description, e
-                )),
+        match save {
+            SaveTarget::ExactPath(sp) => {
+                match Self::save_to_file(sp, image_data).await {
+                    Ok(()) => *saved_path = Some(sp.clone()),
+                    Err(e) => self.logger.warn(&format!(
+                        "[NovelAI] Failed to save {}: {}",
+                        description, e
+                    )),
+                }
             }
-        } else if let Some(sd) = save_dir {
-            if let Err(e) = Self::ensure_dir(Path::new(sd)).await {
-                self.logger.warn(&format!(
-                    "[NovelAI] Failed to save {}: {}",
-                    description, e
-                ));
-                return;
+            SaveTarget::Directory { dir: sd, .. } => {
+                if let Err(e) = Self::ensure_dir(Path::new(sd)).await {
+                    self.logger.warn(&format!(
+                        "[NovelAI] Failed to save {}: {}",
+                        description, e
+                    ));
+                    return;
+                }
+                let ts = file_timestamp();
+                let rand_hex = format!("{:04x}", rand::random::<u16>());
+                let filename = format!("{}_{}_{}.png", prefix, ts, rand_hex);
+                let sp = Path::new(sd)
+                    .join(&filename)
+                    .to_string_lossy()
+                    .to_string();
+                match Self::save_to_file(&sp, image_data).await {
+                    Ok(()) => *saved_path = Some(sp),
+                    Err(e) => self.logger.warn(&format!(
+                        "[NovelAI] Failed to save {}: {}",
+                        description, e
+                    )),
+                }
             }
-            let ts = file_timestamp();
-            let rand_hex = format!("{:04x}", rand::random::<u16>());
-            let filename = format!("{}_{}_{}.png", prefix, ts, rand_hex);
-            let sp = Path::new(sd)
-                .join(&filename)
-                .to_string_lossy()
-                .to_string();
-            match Self::save_to_file(&sp, image_data).await {
-                Ok(()) => *saved_path = Some(sp),
-                Err(e) => self.logger.warn(&format!(
-                    "[NovelAI] Failed to save {}: {}",
-                    description, e
-                )),
-            }
+            SaveTarget::None => {}
         }
     }
 }

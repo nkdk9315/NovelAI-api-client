@@ -1,6 +1,6 @@
 use crate::constants;
 use crate::error::{NovelAIError, Result};
-use crate::schemas::VibeItem;
+use crate::schemas::{VibeConfig, VibeItem};
 
 use serde_json::Value;
 
@@ -11,24 +11,16 @@ use serde_json::Value;
 /// Result of processing vibes for API payload construction.
 pub struct ProcessedVibes {
     pub encodings: Vec<String>,
+    pub strengths: Vec<f64>,
     pub info_extracted_list: Vec<f64>,
 }
 
 // =============================================================================
-// Internal Helpers
+// Constants
 // =============================================================================
 
-/// Sanitize a file path, checking for path traversal.
-fn sanitize_file_path(file_path: &str) -> Result<String> {
-    let normalized = file_path.replace('\\', "/");
-    if normalized.contains("..") {
-        return Err(NovelAIError::Validation(format!(
-            "Invalid file path (path traversal detected): {}",
-            file_path
-        )));
-    }
-    Ok(normalized)
-}
+/// Maximum vibe file size (10 MB).
+const MAX_VIBE_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
 // =============================================================================
 // Public Functions
@@ -36,8 +28,18 @@ fn sanitize_file_path(file_path: &str) -> Result<String> {
 
 /// Load and parse a .naiv4vibe JSON file.
 pub fn load_vibe_file(vibe_path: &str) -> Result<Value> {
-    let safe_path = sanitize_file_path(vibe_path)?;
-    let content = std::fs::read_to_string(&safe_path).map_err(|e| {
+    crate::utils::validate_safe_path(vibe_path)?;
+    let file_size = std::fs::metadata(vibe_path)
+        .map_err(|e| NovelAIError::Image(format!("Failed to read vibe file '{}': {}", vibe_path, e)))?
+        .len();
+    if file_size > MAX_VIBE_FILE_SIZE {
+        return Err(NovelAIError::ImageFileSize {
+            file_size_mb: file_size as f64 / (1024.0 * 1024.0),
+            max_size_mb: 10,
+            file_source: Some(vibe_path.to_string()),
+        });
+    }
+    let content = std::fs::read_to_string(vibe_path).map_err(|e| {
         NovelAIError::Image(format!("Failed to read vibe file '{}': {}", vibe_path, e))
     })?;
     serde_json::from_str(&content).map_err(|e| {
@@ -99,32 +101,37 @@ pub fn extract_encoding(vibe_data: &Value, model: &str) -> Result<(String, f64)>
     Ok((encoding, information_extracted))
 }
 
-/// Process an array of vibe items into encodings and information_extracted lists.
-pub fn process_vibes(vibes: &[VibeItem], model: &str) -> Result<ProcessedVibes> {
+/// Process an array of vibe configurations into encodings, strengths, and
+/// information_extracted lists ready for the API payload.
+///
+/// For each `VibeConfig`, the encoding is extracted from the inner `VibeItem`,
+/// while `strength` and `info_extracted` are taken directly from the config.
+pub fn process_vibes(vibes: &[VibeConfig], model: &str) -> Result<ProcessedVibes> {
     let mut encodings = Vec::new();
+    let mut strengths = Vec::new();
     let mut info_extracted_list = Vec::new();
 
     for vibe in vibes {
-        match vibe {
+        match &vibe.item {
             VibeItem::Encoded(result) => {
                 encodings.push(result.encoding.clone());
-                info_extracted_list.push(result.information_extracted);
             }
             VibeItem::FilePath(path) => {
-                let data = load_vibe_file(path)?;
-                let (encoding, info) = extract_encoding(&data, model)?;
+                let data = load_vibe_file(&path.to_string_lossy())?;
+                let (encoding, _file_info) = extract_encoding(&data, model)?;
                 encodings.push(encoding);
-                info_extracted_list.push(info);
             }
             VibeItem::RawEncoding(encoding) => {
                 encodings.push(encoding.clone());
-                info_extracted_list.push(1.0);
             }
         }
+        strengths.push(vibe.strength);
+        info_extracted_list.push(vibe.info_extracted);
     }
 
     Ok(ProcessedVibes {
         encodings,
+        strengths,
         info_extracted_list,
     })
 }

@@ -54,19 +54,16 @@ pub fn apply_img2img_params(
     params: &GenerateParams,
     seed: u64,
 ) -> Result<()> {
-    if params.action != GenerateAction::Img2Img {
-        return Ok(());
-    }
-    if let Some(ref source) = params.source_image {
-        let b64 = utils::image::get_image_base64(source)?;
+    if let GenerateAction::Img2Img { ref source_image, strength, noise } = params.action {
+        let b64 = utils::image::get_image_base64(source_image)?;
         let extra_seed = if seed == 0 {
             constants::MAX_SEED as u64
         } else {
             seed - 1
         };
         payload["parameters"]["image"] = serde_json::Value::String(b64);
-        payload["parameters"]["strength"] = serde_json::json!(params.img2img_strength);
-        payload["parameters"]["noise"] = serde_json::json!(params.img2img_noise);
+        payload["parameters"]["strength"] = serde_json::json!(strength);
+        payload["parameters"]["noise"] = serde_json::json!(noise);
         payload["parameters"]["extra_noise_seed"] = serde_json::json!(extra_seed);
     }
     Ok(())
@@ -78,71 +75,66 @@ pub fn apply_infill_params(
     params: &GenerateParams,
     seed: u64,
 ) -> Result<()> {
-    if params.action != GenerateAction::Infill {
-        return Ok(());
+    if let GenerateAction::Infill {
+        ref source_image,
+        ref mask,
+        mask_strength,
+        color_correct,
+        hybrid_strength,
+        hybrid_noise,
+    } = params.action
+    {
+        // Append -inpainting suffix (prevent duplicates)
+        let model_str = params.model.as_str();
+        let model_name = if model_str.ends_with("-inpainting") {
+            model_str.to_string()
+        } else {
+            format!("{}-inpainting", model_str)
+        };
+        payload["model"] = serde_json::Value::String(model_name);
+
+        // Source image
+        let source_buffer = utils::image::get_image_buffer(source_image)?;
+        let source_base64 = BASE64.encode(&source_buffer);
+
+        // Mask: resize to 1/8 of target dimensions
+        let mask_buffer = utils::image::get_image_buffer(mask)?;
+        let resized_mask =
+            utils::mask::resize_mask_image(&mask_buffer, params.width, params.height)?;
+        let mask_base64 = BASE64.encode(&resized_mask);
+
+        // Cache secret keys (SHA256)
+        let image_cache_key = utils::mask::calculate_cache_secret_key(&source_buffer);
+        let mask_cache_key = utils::mask::calculate_cache_secret_key(&resized_mask);
+
+        // Strength parameters
+        let effective_hybrid_strength = hybrid_strength.unwrap_or(mask_strength);
+        let effective_hybrid_noise = hybrid_noise.unwrap_or(0.0);
+
+        let extra_seed = if seed == 0 {
+            constants::MAX_SEED as u64
+        } else {
+            seed - 1
+        };
+
+        payload["parameters"]["image"] = serde_json::Value::String(source_base64);
+        payload["parameters"]["mask"] = serde_json::Value::String(mask_base64);
+        payload["parameters"]["strength"] = serde_json::json!(effective_hybrid_strength);
+        payload["parameters"]["noise"] = serde_json::json!(effective_hybrid_noise);
+        payload["parameters"]["add_original_image"] = serde_json::json!(false);
+        payload["parameters"]["extra_noise_seed"] = serde_json::json!(extra_seed);
+        payload["parameters"]["inpaintImg2ImgStrength"] = serde_json::json!(mask_strength);
+        payload["parameters"]["img2img"] = serde_json::json!({
+            "strength": mask_strength,
+            "color_correct": color_correct,
+        });
+        payload["parameters"]["image_cache_secret_key"] =
+            serde_json::Value::String(image_cache_key);
+        payload["parameters"]["mask_cache_secret_key"] =
+            serde_json::Value::String(mask_cache_key);
+        payload["parameters"]["image_format"] = serde_json::Value::String("png".to_string());
+        payload["parameters"]["stream"] = serde_json::Value::String("msgpack".to_string());
     }
-    let source = match params.source_image {
-        Some(ref s) => s,
-        None => return Ok(()),
-    };
-    let mask_input = match params.mask {
-        Some(ref m) => m,
-        None => return Ok(()),
-    };
-
-    // Append -inpainting suffix (prevent duplicates)
-    let model_str = params.model.as_str();
-    let model_name = if model_str.ends_with("-inpainting") {
-        model_str.to_string()
-    } else {
-        format!("{}-inpainting", model_str)
-    };
-    payload["model"] = serde_json::Value::String(model_name);
-
-    // Source image
-    let source_buffer = utils::image::get_image_buffer(source)?;
-    let source_base64 = BASE64.encode(&source_buffer);
-
-    // Mask: resize to 1/8 of target dimensions
-    let mask_buffer = utils::image::get_image_buffer(mask_input)?;
-    let resized_mask = utils::mask::resize_mask_image(&mask_buffer, params.width, params.height)?;
-    let mask_base64 = BASE64.encode(&resized_mask);
-
-    // Cache secret keys (SHA256)
-    let image_cache_key = utils::mask::calculate_cache_secret_key(&source_buffer);
-    let mask_cache_key = utils::mask::calculate_cache_secret_key(&resized_mask);
-
-    // Strength parameters
-    let mask_strength = params.mask_strength.ok_or_else(|| {
-        crate::error::NovelAIError::Validation(
-            "mask_strength is required for infill action".to_string(),
-        )
-    })?;
-    let hybrid_strength = params.hybrid_img2img_strength.unwrap_or(mask_strength);
-    let hybrid_noise = params.hybrid_img2img_noise.unwrap_or(0.0);
-
-    let extra_seed = if seed == 0 {
-        constants::MAX_SEED as u64
-    } else {
-        seed - 1
-    };
-
-    payload["parameters"]["image"] = serde_json::Value::String(source_base64);
-    payload["parameters"]["mask"] = serde_json::Value::String(mask_base64);
-    payload["parameters"]["strength"] = serde_json::json!(hybrid_strength);
-    payload["parameters"]["noise"] = serde_json::json!(hybrid_noise);
-    payload["parameters"]["add_original_image"] = serde_json::json!(false);
-    payload["parameters"]["extra_noise_seed"] = serde_json::json!(extra_seed);
-    payload["parameters"]["inpaintImg2ImgStrength"] = serde_json::json!(mask_strength);
-    payload["parameters"]["img2img"] = serde_json::json!({
-        "strength": mask_strength,
-        "color_correct": params.inpaint_color_correct,
-    });
-    payload["parameters"]["image_cache_secret_key"] =
-        serde_json::Value::String(image_cache_key);
-    payload["parameters"]["mask_cache_secret_key"] = serde_json::Value::String(mask_cache_key);
-    payload["parameters"]["image_format"] = serde_json::Value::String("png".to_string());
-    payload["parameters"]["stream"] = serde_json::Value::String("msgpack".to_string());
 
     Ok(())
 }

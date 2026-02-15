@@ -1,37 +1,103 @@
 use serde::{Deserialize, Serialize};
+use std::sync::RwLock;
+use strum_macros::{AsRefStr, Display, EnumString, IntoStaticStr};
 
 // =============================================================================
 // API URLs
 // =============================================================================
 
+const DEFAULT_API_URL: &str = "https://image.novelai.net/ai/generate-image";
+const DEFAULT_STREAM_URL: &str = "https://image.novelai.net/ai/generate-image-stream";
+const DEFAULT_ENCODE_URL: &str = "https://image.novelai.net/ai/encode-vibe";
+const DEFAULT_SUBSCRIPTION_URL: &str = "https://api.novelai.net/user/subscription";
+const DEFAULT_AUGMENT_URL: &str = "https://image.novelai.net/ai/augment-image";
+const DEFAULT_UPSCALE_URL: &str = "https://api.novelai.net/ai/upscale";
+
+/// Validate that a URL uses HTTPS and points to a novelai.net domain.
+/// Returns the URL string if valid, or `None` if invalid.
+fn validate_novelai_url(url_str: &str) -> Option<String> {
+    let parsed = url::Url::parse(url_str).ok()?;
+    if parsed.scheme() != "https" {
+        return None;
+    }
+    let host = parsed.host_str()?;
+    if !host.ends_with("novelai.net") {
+        return None;
+    }
+    Some(url_str.to_string())
+}
+
+/// Resolve a URL from an environment variable with SSRF protection.
+/// In test/debug mode, env var values are used directly (for mockito).
+/// In release mode, only HTTPS novelai.net URLs are accepted.
+fn resolve_url(env_var: &str, default: &str) -> String {
+    match std::env::var(env_var).ok() {
+        Some(val) => {
+            if cfg!(any(test, debug_assertions)) {
+                // Allow arbitrary URLs in test/debug for mockito
+                val
+            } else {
+                validate_novelai_url(&val).unwrap_or_else(|| default.to_string())
+            }
+        }
+        None => default.to_string(),
+    }
+}
+
+static API_URL: RwLock<Option<String>> = RwLock::new(None);
+static STREAM_URL: RwLock<Option<String>> = RwLock::new(None);
+static ENCODE_URL: RwLock<Option<String>> = RwLock::new(None);
+static SUBSCRIPTION_URL: RwLock<Option<String>> = RwLock::new(None);
+static AUGMENT_URL: RwLock<Option<String>> = RwLock::new(None);
+static UPSCALE_URL: RwLock<Option<String>> = RwLock::new(None);
+
+fn get_or_resolve(lock: &RwLock<Option<String>>, env_var: &str, default: &str) -> String {
+    {
+        let guard = lock.read().unwrap_or_else(|e| e.into_inner());
+        if let Some(ref url) = *guard {
+            return url.clone();
+        }
+    }
+    let url = resolve_url(env_var, default);
+    let mut guard = lock.write().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        *guard = Some(url.clone());
+    }
+    guard.as_ref().unwrap().clone()
+}
+
 pub fn api_url() -> String {
-    std::env::var("NOVELAI_API_URL")
-        .unwrap_or_else(|_| "https://image.novelai.net/ai/generate-image".to_string())
+    get_or_resolve(&API_URL, "NOVELAI_API_URL", DEFAULT_API_URL)
 }
 
 pub fn stream_url() -> String {
-    std::env::var("NOVELAI_STREAM_URL")
-        .unwrap_or_else(|_| "https://image.novelai.net/ai/generate-image-stream".to_string())
+    get_or_resolve(&STREAM_URL, "NOVELAI_STREAM_URL", DEFAULT_STREAM_URL)
 }
 
 pub fn encode_url() -> String {
-    std::env::var("NOVELAI_ENCODE_URL")
-        .unwrap_or_else(|_| "https://image.novelai.net/ai/encode-vibe".to_string())
+    get_or_resolve(&ENCODE_URL, "NOVELAI_ENCODE_URL", DEFAULT_ENCODE_URL)
 }
 
 pub fn subscription_url() -> String {
-    std::env::var("NOVELAI_SUBSCRIPTION_URL")
-        .unwrap_or_else(|_| "https://api.novelai.net/user/subscription".to_string())
+    get_or_resolve(&SUBSCRIPTION_URL, "NOVELAI_SUBSCRIPTION_URL", DEFAULT_SUBSCRIPTION_URL)
 }
 
 pub fn augment_url() -> String {
-    std::env::var("NOVELAI_AUGMENT_URL")
-        .unwrap_or_else(|_| "https://image.novelai.net/ai/augment-image".to_string())
+    get_or_resolve(&AUGMENT_URL, "NOVELAI_AUGMENT_URL", DEFAULT_AUGMENT_URL)
 }
 
 pub fn upscale_url() -> String {
-    std::env::var("NOVELAI_UPSCALE_URL")
-        .unwrap_or_else(|_| "https://api.novelai.net/ai/upscale".to_string())
+    get_or_resolve(&UPSCALE_URL, "NOVELAI_UPSCALE_URL", DEFAULT_UPSCALE_URL)
+}
+
+/// Reset all cached URLs. Used in tests to allow re-reading from env vars.
+pub fn reset_url_cache() {
+    *API_URL.write().unwrap_or_else(|e| e.into_inner()) = None;
+    *STREAM_URL.write().unwrap_or_else(|e| e.into_inner()) = None;
+    *ENCODE_URL.write().unwrap_or_else(|e| e.into_inner()) = None;
+    *SUBSCRIPTION_URL.write().unwrap_or_else(|e| e.into_inner()) = None;
+    *AUGMENT_URL.write().unwrap_or_else(|e| e.into_inner()) = None;
+    *UPSCALE_URL.write().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 // =============================================================================
@@ -58,87 +124,66 @@ pub const DEFAULT_INPAINT_NOISE: f64 = 0.0;
 pub const DEFAULT_INPAINT_COLOR_CORRECT: bool = true;
 
 // =============================================================================
-// Validation Constants
+// Enums
 // =============================================================================
 
-/// Valid samplers
-pub const VALID_SAMPLERS: &[&str] = &[
-    "k_euler",
-    "k_euler_ancestral",
-    "k_dpmpp_2s_ancestral",
-    "k_dpmpp_2m_sde",
-    "k_dpmpp_2m",
-    "k_dpmpp_sde",
-];
-
-/// Valid models
-pub const VALID_MODELS: &[&str] = &[
-    "nai-diffusion-4-curated-preview",
-    "nai-diffusion-4-full",
-    "nai-diffusion-4-5-curated",
-    "nai-diffusion-4-5-full",
-];
-
-/// Valid noise schedules
-pub const VALID_NOISE_SCHEDULES: &[&str] = &[
-    "karras",
-    "exponential",
-    "polyexponential",
-];
-
 /// Sampler enum
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, Hash,
+    Serialize, Deserialize, AsRefStr, EnumString, Display, IntoStaticStr,
+)]
 pub enum Sampler {
     #[serde(rename = "k_euler")]
+    #[strum(serialize = "k_euler")]
     KEuler,
     #[default]
     #[serde(rename = "k_euler_ancestral")]
+    #[strum(serialize = "k_euler_ancestral")]
     KEulerAncestral,
     #[serde(rename = "k_dpmpp_2s_ancestral")]
+    #[strum(serialize = "k_dpmpp_2s_ancestral")]
     KDpmpp2sAncestral,
     #[serde(rename = "k_dpmpp_2m_sde")]
+    #[strum(serialize = "k_dpmpp_2m_sde")]
     KDpmpp2mSde,
     #[serde(rename = "k_dpmpp_2m")]
+    #[strum(serialize = "k_dpmpp_2m")]
     KDpmpp2m,
     #[serde(rename = "k_dpmpp_sde")]
+    #[strum(serialize = "k_dpmpp_sde")]
     KDpmppSde,
 }
 
 impl Sampler {
     pub fn as_str(&self) -> &'static str {
-        match self {
-            Sampler::KEuler => "k_euler",
-            Sampler::KEulerAncestral => "k_euler_ancestral",
-            Sampler::KDpmpp2sAncestral => "k_dpmpp_2s_ancestral",
-            Sampler::KDpmpp2mSde => "k_dpmpp_2m_sde",
-            Sampler::KDpmpp2m => "k_dpmpp_2m",
-            Sampler::KDpmppSde => "k_dpmpp_sde",
-        }
+        self.into()
     }
 }
 
 /// Model enum
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, Hash,
+    Serialize, Deserialize, AsRefStr, EnumString, Display, IntoStaticStr,
+)]
 pub enum Model {
     #[serde(rename = "nai-diffusion-4-curated-preview")]
+    #[strum(serialize = "nai-diffusion-4-curated-preview")]
     NaiDiffusion4CuratedPreview,
     #[serde(rename = "nai-diffusion-4-full")]
+    #[strum(serialize = "nai-diffusion-4-full")]
     NaiDiffusion4Full,
     #[serde(rename = "nai-diffusion-4-5-curated")]
+    #[strum(serialize = "nai-diffusion-4-5-curated")]
     NaiDiffusion45Curated,
     #[default]
     #[serde(rename = "nai-diffusion-4-5-full")]
+    #[strum(serialize = "nai-diffusion-4-5-full")]
     NaiDiffusion45Full,
 }
 
 impl Model {
     pub fn as_str(&self) -> &'static str {
-        match self {
-            Model::NaiDiffusion4CuratedPreview => "nai-diffusion-4-curated-preview",
-            Model::NaiDiffusion4Full => "nai-diffusion-4-full",
-            Model::NaiDiffusion45Curated => "nai-diffusion-4-5-curated",
-            Model::NaiDiffusion45Full => "nai-diffusion-4-5-full",
-        }
+        self.into()
     }
 
     /// Get the model key used in Vibe files
@@ -152,78 +197,69 @@ impl Model {
     }
 }
 
-/// Get model key from model name string
+/// Get model key from model name string.
+///
+/// Parses the model string via `FromStr` (strum) and delegates to `Model::model_key()`.
 pub fn model_key_from_str(model: &str) -> Option<&'static str> {
-    match model {
-        "nai-diffusion-4-curated-preview" => Some("v4curated"),
-        "nai-diffusion-4-full" => Some("v4full"),
-        "nai-diffusion-4-5-curated" => Some("v4-5curated"),
-        "nai-diffusion-4-5-full" => Some("v4-5full"),
-        _ => None,
-    }
+    use std::str::FromStr;
+    Model::from_str(model).ok().map(|m| m.model_key())
 }
 
 /// Noise schedule enum
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, Hash,
+    Serialize, Deserialize, AsRefStr, EnumString, Display, IntoStaticStr,
+)]
 pub enum NoiseSchedule {
     #[default]
     #[serde(rename = "karras")]
+    #[strum(serialize = "karras")]
     Karras,
     #[serde(rename = "exponential")]
+    #[strum(serialize = "exponential")]
     Exponential,
     #[serde(rename = "polyexponential")]
+    #[strum(serialize = "polyexponential")]
     Polyexponential,
 }
 
 impl NoiseSchedule {
     pub fn as_str(&self) -> &'static str {
-        match self {
-            NoiseSchedule::Karras => "karras",
-            NoiseSchedule::Exponential => "exponential",
-            NoiseSchedule::Polyexponential => "polyexponential",
-        }
+        self.into()
     }
 }
 
 /// Augment request type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash,
+    Serialize, Deserialize, AsRefStr, EnumString, Display, IntoStaticStr,
+)]
 pub enum AugmentReqType {
     #[serde(rename = "colorize")]
+    #[strum(serialize = "colorize")]
     Colorize,
     #[serde(rename = "declutter")]
+    #[strum(serialize = "declutter")]
     Declutter,
     #[serde(rename = "emotion")]
+    #[strum(serialize = "emotion")]
     Emotion,
     #[serde(rename = "sketch")]
+    #[strum(serialize = "sketch")]
     Sketch,
     #[serde(rename = "lineart")]
+    #[strum(serialize = "lineart")]
     Lineart,
     #[serde(rename = "bg-removal")]
+    #[strum(serialize = "bg-removal")]
     BgRemoval,
 }
 
 impl AugmentReqType {
     pub fn as_str(&self) -> &'static str {
-        match self {
-            AugmentReqType::Colorize => "colorize",
-            AugmentReqType::Declutter => "declutter",
-            AugmentReqType::Emotion => "emotion",
-            AugmentReqType::Sketch => "sketch",
-            AugmentReqType::Lineart => "lineart",
-            AugmentReqType::BgRemoval => "bg-removal",
-        }
+        self.into()
     }
 }
-
-/// Augment request types list
-pub const AUGMENT_REQ_TYPES: &[&str] = &[
-    "colorize",
-    "declutter",
-    "emotion",
-    "sketch",
-    "lineart",
-    "bg-removal",
-];
 
 /// Emotion keywords for emotion augment tool
 pub const EMOTION_KEYWORDS: &[&str] = &[
@@ -256,7 +292,7 @@ pub const MIN_STEPS: u32 = 1;
 pub const MAX_STEPS: u32 = 50;
 pub const MIN_SCALE: f64 = 0.0;
 pub const MAX_SCALE: f64 = 10.0;
-pub const MAX_SEED: u32 = 4_294_967_295; // 2^32 - 1
+pub const MAX_SEED: u32 = u32::MAX;
 
 // Reference image
 pub const MAX_REF_IMAGE_SIZE_MB: u32 = 10;

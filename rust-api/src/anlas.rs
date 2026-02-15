@@ -136,8 +136,8 @@ pub struct UpscaleCostResult {
 #[derive(Debug, Clone)]
 pub struct InpaintCorrectionResult {
     pub corrected: bool,
-    pub width: i64,
-    pub height: i64,
+    pub width: u64,
+    pub height: u64,
 }
 
 /// Size adjustment result
@@ -154,7 +154,7 @@ pub struct SizeResult {
 
 fn assert_positive_finite_int(value: u32, name: &str) -> Result<(), NovelAIError> {
     if value == 0 {
-        return Err(NovelAIError::Range(format!(
+        return Err(NovelAIError::Validation(format!(
             "{} must be a positive finite integer, got {}",
             name, value
         )));
@@ -164,7 +164,7 @@ fn assert_positive_finite_int(value: u32, name: &str) -> Result<(), NovelAIError
 
 fn assert_finite_range(value: f64, min: f64, max: f64, name: &str) -> Result<(), NovelAIError> {
     if !value.is_finite() || value < min || value > max {
-        return Err(NovelAIError::Range(format!(
+        return Err(NovelAIError::Validation(format!(
             "{} must be a finite number between {} and {}, got {}",
             name, min, max, value
         )));
@@ -272,8 +272,8 @@ pub fn clamp_to_max_pixels(width: u64, height: u64, max_pixels: u64) -> SizeResu
 
 /// Calculate inpaint mask size correction.
 /// If the mask is smaller than the threshold, expand to OPUS_FREE_PIXELS and grid snap.
-pub fn calc_inpaint_size_correction(mask_width: i64, mask_height: i64) -> InpaintCorrectionResult {
-    if mask_width <= 0 || mask_height <= 0 {
+pub fn calc_inpaint_size_correction(mask_width: u64, mask_height: u64) -> InpaintCorrectionResult {
+    if mask_width == 0 || mask_height == 0 {
         return InpaintCorrectionResult {
             corrected: false,
             width: mask_width,
@@ -294,13 +294,13 @@ pub fn calc_inpaint_size_correction(mask_width: i64, mask_height: i64) -> Inpain
 
     let scale = (OPUS_FREE_PIXELS as f64 / pixels).sqrt();
     let grid = GRID_SIZE as f64;
-    let new_w = ((mask_width as f64 * scale).floor() / grid).floor() * grid;
-    let new_h = ((mask_height as f64 * scale).floor() / grid).floor() * grid;
+    let new_w = (((mask_width as f64 * scale).floor() / grid).floor() * grid).max(grid);
+    let new_h = (((mask_height as f64 * scale).floor() / grid).floor() * grid).max(grid);
 
     InpaintCorrectionResult {
         corrected: true,
-        width: new_w as i64,
-        height: new_h as i64,
+        width: new_w as u64,
+        height: new_h as u64,
     }
 }
 
@@ -328,7 +328,7 @@ pub fn calculate_generation_cost(params: &GenerationCostParams) -> Result<Genera
         let has_mask_w = params.mask_width.is_some();
         let has_mask_h = params.mask_height.is_some();
         if has_mask_w != has_mask_h {
-            return Err(NovelAIError::Range(
+            return Err(NovelAIError::Validation(
                 "maskWidth and maskHeight must both be specified or both omitted for inpaint mode".to_string(),
             ));
         }
@@ -340,10 +340,10 @@ pub fn calculate_generation_cost(params: &GenerationCostParams) -> Result<Genera
 
     if params.mode == GenerationMode::Inpaint {
         if let (Some(mw), Some(mh)) = (params.mask_width, params.mask_height) {
-            let correction = calc_inpaint_size_correction(mw as i64, mh as i64);
+            let correction = calc_inpaint_size_correction(mw as u64, mh as u64);
             if correction.corrected {
-                effective_width = correction.width as u64;
-                effective_height = correction.height as u64;
+                effective_width = correction.width;
+                effective_height = correction.height;
             }
         }
     }
@@ -368,13 +368,17 @@ pub fn calculate_generation_cost(params: &GenerationCostParams) -> Result<Genera
     );
 
     // Error check (exceeds max cost)
-    let error = adjusted_cost > MAX_COST_PER_IMAGE;
-    let error_code = if error { Some(-3) } else { None };
+    if adjusted_cost > MAX_COST_PER_IMAGE {
+        return Err(NovelAIError::Validation(format!(
+            "Adjusted cost per image ({}) exceeds maximum allowed ({})",
+            adjusted_cost, MAX_COST_PER_IMAGE
+        )));
+    }
 
-    // Opus free check (using original request size)
+    // Opus free check (using corrected dimensions for consistency with cost calculation)
     let is_opus_free = is_opus_free_generation(
-        params.width,
-        params.height,
+        effective_width as u32,
+        effective_height as u32,
         params.steps,
         params.char_ref_count,
         params.tier,
@@ -406,12 +410,7 @@ pub fn calculate_generation_cost(params: &GenerationCostParams) -> Result<Genera
         0
     };
 
-    // Total cost (unreliable when error, so 0)
-    let total_cost = if error {
-        0
-    } else {
-        generation_cost + char_ref_cost + vibe_encode_cost + vibe_batch_cost
-    };
+    let total_cost = generation_cost + char_ref_cost + vibe_encode_cost + vibe_batch_cost;
 
     Ok(GenerationCostResult {
         base_cost,
@@ -426,8 +425,8 @@ pub fn calculate_generation_cost(params: &GenerationCostParams) -> Result<Genera
         vibe_encode_cost,
         vibe_batch_cost,
         total_cost,
-        error,
-        error_code,
+        error: false,
+        error_code: None,
     })
 }
 

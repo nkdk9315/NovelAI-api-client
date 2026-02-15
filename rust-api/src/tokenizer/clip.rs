@@ -8,9 +8,6 @@ use regex::Regex;
 /// BPE cache size limit
 const BPE_CACHE_MAX_SIZE: usize = 10_000;
 
-/// Separator for BPE rank keys (Middle Dot + Sunglasses Emoji + Middle Dot)
-const BPE_SEPARATOR: &str = "\u{b7}\u{1F60E}\u{b7}";
-
 /// Build byte-to-unicode mapping (GPT-2 style).
 /// Maps each byte (0-255) to a unique Unicode character.
 fn bytes_to_unicode() -> [char; 256] {
@@ -24,11 +21,11 @@ fn bytes_to_unicode() -> [char; 256] {
     for b in 33..=126u8 {
         bs.push(b);
     }
-    // '¡' to '¬' (161-172)
+    // '!' to '!' (161-172)
     for b in 161..=172u8 {
         bs.push(b);
     }
-    // '®' to 'ÿ' (174-255)
+    // '!' to '!' (174-255)
     for b in 174..=255u8 {
         bs.push(b);
     }
@@ -87,7 +84,8 @@ fn initial_vocab(byte_encoder: &[char; 256]) -> Vec<String> {
 pub struct NovelAIClipTokenizer {
     byte_encoder: [char; 256],
     encoder: HashMap<String, u32>,
-    bpe_ranks: HashMap<String, usize>,
+    /// BPE ranks using tuple keys (String, String) to avoid separator collision (#44 fix)
+    bpe_ranks: HashMap<(String, String), usize>,
     cache: Mutex<LruCache<String, String>>,
     pat: Regex,
 }
@@ -126,10 +124,13 @@ impl NovelAIClipTokenizer {
             encoder.insert(token.clone(), i as u32);
         }
 
+        // Use tuple keys instead of string-based separator (#44 fix)
         let mut bpe_ranks = HashMap::new();
         for (i, pair) in merges.iter().enumerate() {
-            let key = pair.join(BPE_SEPARATOR);
-            bpe_ranks.insert(key, i);
+            if pair.len() >= 2 {
+                let key = (pair[0].to_string(), pair[1].to_string());
+                bpe_ranks.insert(key, i);
+            }
         }
 
         let mut cache = LruCache::new(NonZeroUsize::new(BPE_CACHE_MAX_SIZE).unwrap());
@@ -155,7 +156,8 @@ impl NovelAIClipTokenizer {
 
     fn bpe(&self, token: &str) -> String {
         {
-            let mut cache = self.cache.lock().unwrap();
+            // Recover from mutex poisoning (#27 fix)
+            let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(cached) = cache.get(token) {
                 return cached.clone();
             }
@@ -167,12 +169,15 @@ impl NovelAIClipTokenizer {
         }
 
         // Build initial word: all chars except last as-is, last char gets </w> appended
-        let mut word: Vec<String> = Vec::new();
+        let mut word: Vec<String> = Vec::with_capacity(chars.len());
         for (i, &c) in chars.iter().enumerate() {
             if i < chars.len() - 1 {
                 word.push(c.to_string());
             } else {
-                word.push(format!("{}</w>", c));
+                let mut s = String::with_capacity(c.len_utf8() + 4);
+                s.push(c);
+                s.push_str("</w>");
+                word.push(s);
             }
         }
 
@@ -182,33 +187,43 @@ impl NovelAIClipTokenizer {
         }
 
         loop {
-            // Find the pair with the lowest rank
-            let mut best_pair: Option<(String, String)> = None;
+            // Find the pair with the lowest rank using index pairs to avoid cloning (#44, #45 fix).
+            // We track the best pair as indices into `word` rather than cloning strings.
+            let mut best_pair_indices: Option<(usize, usize)> = None;
             let mut min_rank = usize::MAX;
 
-            for pair in &pairs {
-                let key = format!("{}{}{}", pair.0, BPE_SEPARATOR, pair.1);
+            for &(left, right) in &pairs {
+                // Construct lookup key — clone is needed because HashMap<(String,String),_>
+                // doesn't support borrowed tuple lookup. This is one clone per unique pair.
+                let key = (word[left].clone(), word[right].clone());
                 if let Some(&rank) = self.bpe_ranks.get(&key) {
                     if rank < min_rank {
                         min_rank = rank;
-                        best_pair = Some(pair.clone());
+                        best_pair_indices = Some((left, right));
                     }
                 }
             }
 
-            let (first, second) = match best_pair {
-                Some(ref pair) => {
-                    let key = format!("{}{}{}", pair.0, BPE_SEPARATOR, pair.1);
-                    if !self.bpe_ranks.contains_key(&key) {
-                        break;
-                    }
-                    pair.clone()
-                }
+            let (first_idx, second_idx) = match best_pair_indices {
+                Some(indices) => indices,
                 None => break,
             };
 
+            // Clone the best pair's strings once for use in the merge step.
+            // These owned copies are needed for comparison and for building the merged token.
+            let first = word[first_idx].clone();
+            let second = word[second_idx].clone();
+
+            // Pre-allocate the merged string with exact capacity (#45 optimization)
+            let merged = {
+                let mut s = String::with_capacity(first.len() + second.len());
+                s.push_str(&first);
+                s.push_str(&second);
+                s
+            };
+
             // Merge the best pair in the word
-            let mut new_word: Vec<String> = Vec::new();
+            let mut new_word: Vec<String> = Vec::with_capacity(word.len());
             let mut i = 0;
             while i < word.len() {
                 let j = word[i..].iter().position(|w| *w == first).map(|p| p + i);
@@ -223,7 +238,7 @@ impl NovelAIClipTokenizer {
                         i = j;
 
                         if word[i] == first && i < word.len() - 1 && word[i + 1] == second {
-                            new_word.push(format!("{}{}", first, second));
+                            new_word.push(merged.clone());
                             i += 2;
                         } else {
                             new_word.push(word[i].clone());
@@ -241,12 +256,16 @@ impl NovelAIClipTokenizer {
         }
 
         let result = word.join(" ");
-        let mut cache = self.cache.lock().unwrap();
+        // Recover from mutex poisoning (#27 fix)
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.put(token.to_string(), result.clone());
         result
     }
 
-    fn get_pairs(word: &[String]) -> Vec<(String, String)> {
+    /// Returns unique adjacent pairs as index pairs `(left, right)` where
+    /// `left` and `right` are indices into `word`. This avoids cloning strings
+    /// for each pair (#45 optimization).
+    fn get_pairs(word: &[String]) -> Vec<(usize, usize)> {
         let mut seen = HashSet::new();
         let mut pairs = Vec::new();
 
@@ -255,9 +274,10 @@ impl NovelAIClipTokenizer {
         }
 
         for i in 0..word.len() - 1 {
-            let key = format!("{}\0{}", word[i], word[i + 1]);
+            // Use string references for deduplication to avoid cloning
+            let key = (word[i].as_str(), word[i + 1].as_str());
             if seen.insert(key) {
-                pairs.push((word[i].clone(), word[i + 1].clone()));
+                pairs.push((i, i + 1));
             }
         }
 

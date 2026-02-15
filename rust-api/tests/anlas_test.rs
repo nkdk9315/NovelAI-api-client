@@ -1271,10 +1271,10 @@ mod zero_division_guard_tests {
     }
 
     #[test]
-    fn n4_negative_mask_width_not_corrected() {
-        let result = calc_inpaint_size_correction(-10, 100);
+    fn n4_zero_mask_width_not_corrected() {
+        let result = calc_inpaint_size_correction(0, 100);
         assert!(!result.corrected);
-        assert_eq!(result.width, -10);
+        assert_eq!(result.width, 0);
         assert_eq!(result.height, 100);
     }
 }
@@ -1477,10 +1477,10 @@ mod error_total_cost_tests {
     }
 
     #[test]
-    fn p2_adjusted_cost_exceeds_max_error_true_total_cost_0() {
+    fn p2_adjusted_cost_exceeds_max_returns_err() {
         // calcV4BaseCost(2048, 2048, 50) = ceil(2.951823174884865e-6*4194304 + 5.753298233447344e-7*4194304*50)
         //   = ceil(12.381 + 120.6) = ceil(132.98) = 133
-        // smea_dyn: 133*1.4 = 186.2 -> ceil(186.2) = 187 > 140 -> error=true
+        // smea_dyn: 133*1.4 = 186.2 -> ceil(186.2) = 187 > 140 -> error
         let result = calculate_generation_cost(&GenerationCostParams {
             width: 2048,
             height: 2048,
@@ -1489,10 +1489,7 @@ mod error_total_cost_tests {
             tier: 0,
             n_samples: 1,
             ..GenerationCostParams::default()
-        })
-        .unwrap();
-        assert!(result.error);
-        assert_eq!(result.error_code, Some(-3));
-        assert_eq!(result.total_cost, 0);
+        });
+        assert!(result.is_err());
     }
 }

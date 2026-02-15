@@ -6,9 +6,6 @@ pub enum NovelAIError {
     #[error("Validation error: {0}")]
     Validation(String),
 
-    #[error("Range error: {0}")]
-    Range(String),
-
     #[error("Image processing error: {0}")]
     Image(String),
 

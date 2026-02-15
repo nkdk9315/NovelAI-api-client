@@ -3,7 +3,7 @@
 //!
 //! Run with: cargo run --example example
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use novelai_api::client::NovelAIClient;
@@ -65,14 +65,15 @@ async fn example_with_vibes() -> Result<()> {
         },
     ];
 
-    let vibes: Vec<VibeItem> = valid_vibes
+    let strengths = [0.4, 0.3, 0.5, 0.2];
+    let vibes: Vec<VibeConfig> = valid_vibes
         .iter()
-        .map(|f| VibeItem::FilePath(f.to_string()))
-        .collect();
-    let vibe_strengths: Vec<f64> = [0.4, 0.3, 0.5, 0.2]
-        .iter()
-        .take(valid_vibes.len())
-        .copied()
+        .zip(strengths.iter())
+        .map(|(f, &s)| VibeConfig {
+            item: VibeItem::FilePath(PathBuf::from(*f)),
+            strength: s,
+            info_extracted: 1.0,
+        })
         .collect();
 
     let params = GenerateParams::builder(
@@ -80,7 +81,6 @@ async fn example_with_vibes() -> Result<()> {
     )
     .characters(characters)
     .vibes(vibes)
-    .vibe_strengths(vibe_strengths)
     .width(1024)
     .height(1024)
     .save_dir("output/multi_character/")
@@ -138,10 +138,12 @@ async fn example_img2img() -> Result<()> {
     let params = GenerateParams::builder(
         "backstreet, night, neon lights, detailed background, 2::face focus::, -3::multiple views::",
     )
-    .action(GenerateAction::Img2Img)
+    .action(GenerateAction::Img2Img {
+        source_image: ImageInput::FilePath(input_image.into()),
+        strength: 0.8,
+        noise: 0.0,
+    })
     .characters(characters)
-    .source_image(ImageInput::FilePath(input_image.into()))
-    .img2img_strength(0.8)
     .save_dir("output/")
     .build()?;
 
@@ -182,18 +184,22 @@ async fn example_img2img_with_vibes() -> Result<()> {
     }
 
     let mut builder = GenerateParams::builder("")
-        .action(GenerateAction::Img2Img)
-        .source_image(ImageInput::FilePath(input_image.into()))
-        .img2img_strength(0.5)
-        .img2img_noise(0.0)
+        .action(GenerateAction::Img2Img {
+            source_image: ImageInput::FilePath(input_image.into()),
+            strength: 0.5,
+            noise: 0.0,
+        })
         .width(1024)
         .height(1024)
         .save_dir("output/");
 
     if Path::new(vibe_file).exists() {
         builder = builder
-            .vibes(vec![VibeItem::FilePath(vibe_file.into())])
-            .vibe_strengths(vec![0.7]);
+            .vibes(vec![VibeConfig {
+                item: VibeItem::FilePath(vibe_file.into()),
+                strength: 0.7,
+                info_extracted: 1.0,
+            }]);
     }
 
     let params = builder.build()?;
@@ -253,16 +259,17 @@ async fn example_multi_character() -> Result<()> {
         .save_dir("output/multi_character/");
 
     if !valid_vibes.is_empty() {
-        let vibes: Vec<VibeItem> = valid_vibes
+        let strength_values = [0.4, 0.3, 0.5, 0.2];
+        let vibes: Vec<VibeConfig> = valid_vibes
             .iter()
-            .map(|f| VibeItem::FilePath(f.to_string()))
+            .zip(strength_values.iter())
+            .map(|(f, &s)| VibeConfig {
+                item: VibeItem::FilePath(PathBuf::from(*f)),
+                strength: s,
+                info_extracted: 1.0,
+            })
             .collect();
-        let strengths: Vec<f64> = [0.4, 0.3, 0.5, 0.2]
-            .iter()
-            .take(valid_vibes.len())
-            .copied()
-            .collect();
-        builder = builder.vibes(vibes).vibe_strengths(strengths);
+        builder = builder.vibes(vibes);
     }
 
     let params = builder.build()?;
@@ -302,8 +309,10 @@ async fn example_encode_vibe() -> Result<()> {
 
     let params = EncodeVibeParams {
         image: ImageInput::FilePath(image_path.into()),
-        save_dir: Some("./vibes".into()),
-        save_filename: Some("input1".into()),
+        save: SaveTarget::Directory {
+            dir: "./vibes".into(),
+            filename: Some("input1".into()),
+        },
         ..Default::default()
     };
 
@@ -448,7 +457,7 @@ async fn example_character_reference_styles() -> Result<()> {
 fn print_error(e: &anyhow::Error) {
     if let Some(nai_err) = e.downcast_ref::<NovelAIError>() {
         match nai_err {
-            NovelAIError::Validation(msg) | NovelAIError::Range(msg) => {
+            NovelAIError::Validation(msg) => {
                 eprintln!("  バリデーションエラー: {}", msg);
             }
             _ => eprintln!("Error: {}", e),
