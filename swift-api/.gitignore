@@ -1,0 +1,21 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+
+# Output files
+output/
+vibes/
+reference/
+
+# Plan files
+plan.md
+
+# OS files
+.DS_Store
