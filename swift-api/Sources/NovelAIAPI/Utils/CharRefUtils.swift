@@ -4,19 +4,45 @@ import CoreGraphics
 import ImageIO
 #endif
 
+// MARK: - Director Reference Description
+
+/// A single director reference description entry for the API payload.
+///
+/// Corresponds to each element of `director_reference_descriptions` in the API request.
+public struct DirectorReferenceDescription: Sendable {
+    public var baseCaption: String
+    public var legacyUc: Bool
+
+    public init(baseCaption: String, legacyUc: Bool = false) {
+        self.baseCaption = baseCaption
+        self.legacyUc = legacyUc
+    }
+
+    /// Convert to the dictionary format expected by the API payload.
+    func toDictionary() -> [String: Any] {
+        [
+            "caption": [
+                "base_caption": baseCaption,
+                "char_captions": [] as [Any],
+            ] as [String: Any],
+            "legacy_uc": legacyUc,
+        ]
+    }
+}
+
 // MARK: - Processed Character References
 
 /// Result of processing character references for API payload construction.
 public struct ProcessedCharacterReferences: Sendable {
     public var images: [String]
-    public var descriptions: [[String: Any]]
+    public var descriptions: [DirectorReferenceDescription]
     public var infoExtracted: [Double]
     public var strengthValues: [Double]
     public var secondaryStrengthValues: [Double]
 
     public init(
         images: [String] = [],
-        descriptions: [[String: Any]] = [],
+        descriptions: [DirectorReferenceDescription] = [],
         infoExtracted: [Double] = [],
         strengthValues: [Double] = [],
         secondaryStrengthValues: [Double] = []
@@ -131,7 +157,7 @@ public func prepareCharacterReferenceImage(_ imageBuffer: Data) throws -> Data {
 /// Process an array of character reference configs into payload-ready data.
 public func processCharacterReferences(_ refs: [CharacterReferenceConfig]) throws -> ProcessedCharacterReferences {
     var images: [String] = []
-    var descriptions: [[String: Any]] = []
+    var descriptions: [DirectorReferenceDescription] = []
     var infoExtracted: [Double] = []
     var strengthValues: [Double] = []
     var secondaryStrengthValues: [Double] = []
@@ -143,14 +169,7 @@ public func processCharacterReferences(_ refs: [CharacterReferenceConfig]) throw
 
         images.append(b64Image)
 
-        let refType = ref.mode.rawValue
-        descriptions.append([
-            "caption": [
-                "base_caption": refType,
-                "char_captions": [] as [Any],
-            ] as [String: Any],
-            "legacy_uc": false,
-        ])
+        descriptions.append(DirectorReferenceDescription(baseCaption: ref.mode.rawValue))
 
         infoExtracted.append(1.0)
         strengthValues.append(ref.strength)

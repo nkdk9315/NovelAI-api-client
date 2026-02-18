@@ -410,7 +410,7 @@ async function main() {
 
   // await exampleImg2img();
 
-  // await exampleImg2imgWithVibes();
+  await exampleImg2imgWithVibes();
 
   // await exampleMultiCharacter();
 

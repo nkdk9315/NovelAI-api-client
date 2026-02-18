@@ -145,7 +145,7 @@ function looksLikeFilePath(str: string): boolean {
 
   // Relative paths with directory separators and file extension
   if ((str.includes('/') || str.includes('\\')) &&
-      /\.(png|jpg|jpeg|webp|gif|bmp|naiv4vibe)$/i.test(str)) {
+    /\.(png|jpg|jpeg|webp|gif|bmp|naiv4vibe)$/i.test(str)) {
     return true;
   }
 
@@ -163,6 +163,46 @@ function looksLikeFilePath(str: string): boolean {
  */
 export function getImageBase64(image: string | Buffer | Uint8Array): string {
   return getImageBuffer(image).toString('base64');
+}
+
+/**
+ * img2img用に画像を指定サイズにリサイズしてBase64に変換
+ * サーバーは大きすぎる入力画像を処理できないため、出力寸法に合わせてリサイズする
+ */
+export async function resizeImageForImg2Img(
+  image: string | Buffer | Uint8Array,
+  targetWidth: number,
+  targetHeight: number
+): Promise<string> {
+  const buffer = getImageBuffer(image);
+  const resized = await sharp(buffer)
+    .resize({
+      width: targetWidth,
+      height: targetHeight,
+      fit: 'fill',
+    })
+    .png()
+    .toBuffer();
+  return resized.toString('base64');
+}
+
+/**
+ * 画像Bufferを指定サイズにリサイズ（アスペクト比を無視して正確なサイズに変換）
+ * Augmentの寸法クランプ用
+ */
+export async function resizeImageBuffer(
+  buffer: Buffer,
+  targetWidth: number,
+  targetHeight: number
+): Promise<Buffer> {
+  return sharp(buffer)
+    .resize({
+      width: targetWidth,
+      height: targetHeight,
+      fit: 'fill',
+    })
+    .png()
+    .toBuffer();
 }
 
 

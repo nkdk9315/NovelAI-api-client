@@ -47,29 +47,7 @@ let maskData = try createRectangularMask(
     )
 )
 
-// Test 2: Infill (Mask Only) - マスクのみを使用したインフィル
-print("\n=== Test: Infill (Mask Only) ===")
-do {
-    let result = try await client.generate(GenerateParams(
-        prompt: "1girl, smiling, happy",
-        action: .infill,
-        sourceImage: .filePath(inputImage),
-        mask: .bytes(maskData),
-        maskStrength: 0.7,
-        saveDir: outputDir,
-        width: 832,
-        height: 1216
-    ))
-    print("✅ Infill (Mask Only) success!")
-    print("   Saved to: \(result.savedPath ?? "N/A")")
-    print("   Anlas consumed: \(result.anlasConsumed ?? 0)")
-    results.append((name: "Infill (Mask Only)", success: true))
-} catch {
-    print("❌ Infill (Mask Only) failed: \(error)")
-    results.append((name: "Infill (Mask Only)", success: false))
-}
-
-// Test 3: Infill + Img2Img (Hybrid Mode) - ハイブリッドモード
+// Test 2: Infill + Img2Img (Hybrid Mode) - ハイブリッドモード
 print("\n=== Test: Infill + Img2Img (Hybrid Mode) ===")
 do {
     let result = try await client.generate(GenerateParams(

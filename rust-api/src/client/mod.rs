@@ -380,7 +380,8 @@ impl NovelAIClient {
         payload::apply_character_prompts(&mut payload_val, char_configs);
 
         let use_stream = params.character_reference.is_some()
-            || params.action.is_infill();
+            || params.action.is_infill()
+            || params.action.is_img2img();
 
         let body = serde_json::to_string(&payload_val)?;
         Ok((body, use_stream))
@@ -410,6 +411,16 @@ impl NovelAIClient {
     ) -> Result<AugmentResult> {
         let (width, height, image_buffer) =
             utils::image::get_image_dimensions(&params.image)?;
+
+        // Reject images exceeding MAX_PIXELS (matches official site behavior)
+        let total_pixels = (width as u64) * (height as u64);
+        if total_pixels > constants::MAX_PIXELS {
+            return Err(NovelAIError::Validation(format!(
+                "Image resolution too high for augment ({}x{} = {} pixels, max: {}). \
+                 Resize the image to {} pixels or fewer before augmenting.",
+                width, height, total_pixels, constants::MAX_PIXELS, constants::MAX_PIXELS
+            )));
+        }
         let b64_image = BASE64.encode(&image_buffer);
 
         let anlas_before = self.try_get_balance_if_tracking().await;
@@ -495,6 +506,17 @@ impl NovelAIClient {
     ) -> Result<UpscaleResult> {
         let (width, height, image_buffer) =
             utils::image::get_image_dimensions(&params.image)?;
+
+        // Validate upscale pixel limit (matches official site behavior)
+        let pixels = (width as u64) * (height as u64);
+        if pixels > constants::UPSCALE_MAX_PIXELS {
+            return Err(NovelAIError::Validation(format!(
+                "Image resolution too high for upscale ({}x{} = {} pixels, max: {}). \
+                Resize the image to {} pixels or fewer before upscaling.",
+                width, height, pixels, constants::UPSCALE_MAX_PIXELS, constants::UPSCALE_MAX_PIXELS
+            )));
+        }
+
         let b64_image = BASE64.encode(&image_buffer);
 
         let anlas_before = self.try_get_balance_if_tracking().await;

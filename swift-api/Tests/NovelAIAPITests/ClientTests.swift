@@ -136,9 +136,7 @@ private func crc32Calculate(_ data: Data) -> UInt32 {
 
 /// Create a ZIP archive containing a PNG file, returned as Data.
 func makeZipWithPNG(_ pngData: Data, filename: String = "image.png") throws -> Data {
-    guard let archive = Archive(accessMode: .create) else {
-        throw NSError(domain: "TestHelper", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to create in-memory ZIP archive"])
-    }
+    let archive = try Archive(accessMode: .create)
     try archive.addEntry(
         with: filename,
         type: .file,
@@ -251,10 +249,7 @@ final class ZipResponseParsingTests: XCTestCase {
     }
 
     func testParseZipWithNoImageThrowsError() throws {
-        guard let archive = Archive(accessMode: .create) else {
-            XCTFail("Failed to create archive")
-            return
-        }
+        let archive = try Archive(accessMode: .create)
         let textData = Data("hello".utf8)
         try archive.addEntry(
             with: "readme.txt",
@@ -288,10 +283,7 @@ final class ZipResponseParsingTests: XCTestCase {
     }
 
     func testParseZipTooManyEntriesThrowsError() throws {
-        guard let archive = Archive(accessMode: .create) else {
-            XCTFail("Failed to create archive")
-            return
-        }
+        let archive = try Archive(accessMode: .create)
         // Add more entries than MAX_ZIP_ENTRIES
         for i in 0..<(MAX_ZIP_ENTRIES + 1) {
             let data = Data(repeating: UInt8(i % 256), count: 10)
@@ -456,10 +448,10 @@ final class PayloadConstructionTests: XCTestCase {
         XCTAssertEqual(parameters?["sampler"] as? String, DEFAULT_SAMPLER.rawValue)
         XCTAssertEqual(parameters?["steps"] as? Int, DEFAULT_STEPS)
         XCTAssertEqual(parameters?["n_samples"] as? Int, 1)
-        XCTAssertEqual(parameters?["seed"] as? UInt32, 42)
+        XCTAssertEqual(parameters?["seed"] as? Int, 42)
         XCTAssertEqual(parameters?["negative_prompt"] as? String, "bad quality")
         XCTAssertEqual(parameters?["ucPreset"] as? Int, 0)
-        XCTAssertEqual(parameters?["qualityToggle"] as? Bool, true)
+        XCTAssertEqual(parameters?["qualityToggle"] as? Bool, false)
         XCTAssertEqual(parameters?["autoSmea"] as? Bool, false)
         XCTAssertEqual(parameters?["dynamic_thresholding"] as? Bool, false)
         XCTAssertEqual(parameters?["controlnet_strength"] as? Int, 1)
@@ -499,7 +491,7 @@ final class PayloadConstructionTests: XCTestCase {
         XCTAssertEqual(parameters?["scale"] as? Double, 7.0)
         XCTAssertEqual(parameters?["sampler"] as? String, "k_euler")
         XCTAssertEqual(parameters?["noise_schedule"] as? String, "exponential")
-        XCTAssertEqual(parameters?["seed"] as? UInt32, 100)
+        XCTAssertEqual(parameters?["seed"] as? Int, 100)
         XCTAssertEqual(parameters?["negative_prompt"] as? String, "ugly")
     }
 
@@ -519,7 +511,7 @@ final class PayloadConstructionTests: XCTestCase {
         let params = GenerateParams(
             prompt: "test",
             action: .img2img,
-            sourceImage: .bytes(Data([0x89, 0x50, 0x4E, 0x47])),
+            sourceImage: .bytes(makeMinimalPNG()),
             img2imgStrength: 0.7,
             img2imgNoise: 0.1
         )
@@ -532,21 +524,21 @@ final class PayloadConstructionTests: XCTestCase {
         XCTAssertNotNil(parameters?["image"] as? String)
         XCTAssertEqual(parameters?["strength"] as? Double, 0.7)
         XCTAssertEqual(parameters?["noise"] as? Double, 0.1)
-        XCTAssertEqual(parameters?["extra_noise_seed"] as? UInt32, 41)
+        XCTAssertEqual(parameters?["extra_noise_seed"] as? Int, 41)
     }
 
     func testApplyImg2ImgParamsExtraNoiseSeedWrapsAtZero() throws {
         let params = GenerateParams(
             prompt: "test",
             action: .img2img,
-            sourceImage: .bytes(Data([0x89, 0x50, 0x4E, 0x47]))
+            sourceImage: .bytes(makeMinimalPNG())
         )
         var payload = buildBasePayload(params, seed: 0, negativePrompt: "")
 
         try applyImg2ImgParams(&payload, params: params, seed: 0)
 
         let parameters = payload["parameters"] as? [String: Any]
-        XCTAssertEqual(parameters?["extra_noise_seed"] as? UInt32, MAX_SEED)
+        XCTAssertEqual(parameters?["extra_noise_seed"] as? Int, Int(MAX_SEED))
     }
 
     func testApplyImg2ImgParamsNoOpForGenerateAction() throws {
@@ -597,7 +589,7 @@ final class PayloadConstructionTests: XCTestCase {
 
         let charRefs = ProcessedCharacterReferences(
             images: ["img_b64"],
-            descriptions: [["caption": ["base_caption": "character&style"]]],
+            descriptions: [DirectorReferenceDescription(baseCaption: "character&style")],
             infoExtracted: [1.0],
             strengthValues: [0.6],
             secondaryStrengthValues: [0.0]
@@ -617,7 +609,7 @@ final class PayloadConstructionTests: XCTestCase {
     // MARK: - buildV4PromptStructure Tests
 
     func testBuildV4PromptStructureCorrectFormat() {
-        let result = buildV4PromptStructure(prompt: "1girl", charCaptions: [])
+        let result = buildV4PromptStructure(prompt: "1girl", charCaptions: [], hasCharacters: false)
 
         let caption = result["caption"] as? [String: Any]
         XCTAssertNotNil(caption)
@@ -627,7 +619,7 @@ final class PayloadConstructionTests: XCTestCase {
         XCTAssertNotNil(charCaptions)
         XCTAssertTrue(charCaptions!.isEmpty)
 
-        XCTAssertEqual(result["use_coords"] as? Bool, true)
+        XCTAssertEqual(result["use_coords"] as? Bool, false)
         XCTAssertEqual(result["use_order"] as? Bool, true)
     }
 
@@ -635,7 +627,7 @@ final class PayloadConstructionTests: XCTestCase {
         let charCaps: [[String: Any]] = [
             ["char_caption": "a girl", "centers": [["x": 0.3, "y": 0.5]]],
         ]
-        let result = buildV4PromptStructure(prompt: "test", charCaptions: charCaps)
+        let result = buildV4PromptStructure(prompt: "test", charCaptions: charCaps, hasCharacters: true)
 
         let caption = result["caption"] as? [String: Any]
         let charCaptions = caption?["char_captions"] as? [[String: Any]]
@@ -699,7 +691,9 @@ final class PayloadConstructionTests: XCTestCase {
         applyCharacterPrompts(&payload, params: params)
 
         let parameters = payload["parameters"] as? [String: Any]
-        XCTAssertNil(parameters?["characterPrompts"])
+        let charPrompts = parameters?["characterPrompts"] as? [[String: Any]]
+        XCTAssertNotNil(charPrompts)
+        XCTAssertEqual(charPrompts?.count, 0)
         // use_coords should remain false from buildBasePayload
         XCTAssertEqual(parameters?["use_coords"] as? Bool, false)
     }
@@ -1359,10 +1353,7 @@ final class HTTPIntegrationTests: XCTestCase {
 final class ResponseParsingEdgeCaseTests: XCTestCase {
 
     func testZipResponseWithMultipleFilesReturnsFirstImage() throws {
-        guard let archive = Archive(accessMode: .create) else {
-            XCTFail("Failed to create archive")
-            return
-        }
+        let archive = try Archive(accessMode: .create)
 
         // Add a non-image file first
         let textData = Data("hello".utf8)

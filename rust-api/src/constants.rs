@@ -314,6 +314,10 @@ pub const DEFAULT_DEFRY: u32 = 3;
 pub const VALID_UPSCALE_SCALES: &[u32] = &[2, 4];
 pub const DEFAULT_UPSCALE_SCALE: u32 = 4;
 
+// Upscale入力画像の最大ピクセル数（UPSCALE_COST_TABLEの最大値に対応）
+// これを超える画像はAPIが 400 "Image resolution too high" を返す
+pub const UPSCALE_MAX_PIXELS: u64 = 1_048_576;  // 1024 × 1024
+
 // =============================================================================
 // Enhance Level Presets
 // =============================================================================

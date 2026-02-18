@@ -42,12 +42,14 @@ Tests/NovelAIAPITests/       # XCTest テスト
 
 ## ドキュメント
 
-- @docs/getting-started.md — 利用者向けクイックスタート
-- @docs/api-reference.md — メソッド・パラメータ・型の一覧
-- @docs/architecture.md — モジュール構造・設計判断 (開発者向け)
-- @docs/api-protocol.md — NovelAI API の HTTP プロトコル詳細 (移植者向け)
-- @docs/tokenizer-internals.md — トークナイザーアルゴリズム詳細
-- @docs/anlas_cost_calculation_analysis.md — コスト計算ロジック逆解析
+必要に応じて対応中の問題に関連するドキュメントのみ参照してください。
+
+- docs/getting-started.md — 利用者向けクイックスタート
+- docs/api-reference.md — メソッド・パラメータ・型の一覧
+- docs/architecture.md — モジュール構造・設計判断 (開発者向け)
+- docs/tokenizer-internals.md — トークナイザーアルゴリズム詳細
+- ../../docs/api-protocol.md — NovelAI API の HTTP プロトコル詳細 (共通)
+- ../../docs/anlas-cost-calculation.md — コスト計算ロジック逆解析 (共通)
 
 ## 主要パターン
 

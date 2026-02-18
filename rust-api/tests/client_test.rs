@@ -255,6 +255,7 @@ mod response_parsing {
 
 mod payload_building {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn build_base_payload_structure() {
@@ -362,7 +363,7 @@ mod payload_building {
 
         let v4p = &payload["parameters"]["v4_prompt"];
         assert_eq!(v4p["caption"]["base_caption"], "1girl");
-        assert_eq!(v4p["use_coords"], true);
+        assert_eq!(v4p["use_coords"], false);
         assert_eq!(v4p["use_order"], true);
         assert_eq!(
             v4p["caption"]["char_captions"]
@@ -448,7 +449,7 @@ mod payload_building {
         let params = GenerateParams::default();
         let mut payload = payload::build_base_payload(&params, 0, "");
         payload::apply_character_prompts(&mut payload, &[]);
-        assert!(payload["parameters"]["characterPrompts"].is_null());
+        assert_eq!(payload["parameters"]["characterPrompts"], json!([]));
     }
 
     #[test]
@@ -485,7 +486,7 @@ mod payload_building {
         let payload = payload::build_base_payload(&params, 999, "neg");
 
         let p = &payload["parameters"];
-        assert_eq!(p["qualityToggle"], true);
+        assert_eq!(p["qualityToggle"], false);
         assert_eq!(p["legacy"], false);
         assert_eq!(p["legacy_v3_extend"], false);
         assert_eq!(p["deliberate_euler_ancestral_bug"], false);
