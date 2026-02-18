@@ -6,7 +6,6 @@ use base64::Engine;
 use secrecy::{ExposeSecret, SecretString};
 use sha2::{Digest, Sha256};
 
-use crate::anlas;
 use crate::constants;
 use crate::error::{NovelAIError, Result};
 use crate::schemas::*;
