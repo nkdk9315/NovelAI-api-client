@@ -261,7 +261,7 @@ public final class NovelAIClient: @unchecked Sendable {
         let anlasBefore = await tryGetBalance()
 
         // Choose endpoint: stream for charRef or infill
-        let useStream = (params.characterReference != nil) || (params.action == .infill)
+        let useStream = (params.characterReference != nil) || (params.action == .infill) || (params.action == .img2img)
         let apiUrlString = useStream ? streamURL() : apiURL()
 
         let payloadData = try JSONSerialization.data(withJSONObject: payload)
@@ -348,12 +348,21 @@ public final class NovelAIClient: @unchecked Sendable {
 
         // Get image data and auto-detect dimensions
         let dims = try getImageDimensions(params.image)
+
+        // Reject images exceeding MAX_PIXELS (matches official site behavior)
+        let totalPixels = dims.width * dims.height
+        if totalPixels > MAX_PIXELS {
+            throw NovelAIError.validation(
+                "Image resolution too high for augment (\(dims.width)x\(dims.height) = \(totalPixels) pixels, max: \(MAX_PIXELS)). " +
+                "Resize the image to \(MAX_PIXELS) pixels or fewer before augmenting."
+            )
+        }
         let b64Image = dims.buffer.base64EncodedString()
 
         // Get initial balance
         let anlasBefore = await tryGetBalance()
 
-        // Build payload with auto-detected dimensions
+        // Build payload
         var payload: [String: Any] = [
             "req_type": params.reqType.rawValue,
             "use_new_shared_trial": true,
@@ -447,6 +456,16 @@ public final class NovelAIClient: @unchecked Sendable {
 
         // Get image data and auto-detect dimensions
         let dims = try getImageDimensions(params.image)
+
+        // Validate upscale pixel limit (matches official site behavior)
+        let pixels = dims.width * dims.height
+        if pixels > UPSCALE_MAX_PIXELS {
+            throw NovelAIError.validation(
+                "Image resolution too high for upscale (\(dims.width)x\(dims.height) = \(pixels) pixels, max: \(UPSCALE_MAX_PIXELS)). " +
+                "Resize the image to \(UPSCALE_MAX_PIXELS) pixels or fewer before upscaling."
+            )
+        }
+
         let b64Image = dims.buffer.base64EncodedString()
 
         // Get initial balance
@@ -536,6 +555,7 @@ public final class NovelAIClient: @unchecked Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue(USER_AGENT, forHTTPHeaderField: "User-Agent")
         if let contentType = contentType {
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }

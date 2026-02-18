@@ -73,49 +73,7 @@ async fn test_img2img(client: &NovelAIClient, input_image: &str, output_dir: &st
     Ok(())
 }
 
-/// Test 2: Infill with mask only
-async fn test_infill_only(
-    client: &NovelAIClient,
-    input_image: &str,
-    output_dir: &str,
-) -> Result<()> {
-    println!("\n=== Test: Infill (Mask Only) ===");
-
-    // Create mask: 832x1216, white rectangle at center (116,208) size 600x800
-    let mask_bytes = create_mask(832, 1216, 116, 208, 600, 800)?;
-    println!("  Created in-memory mask (832x1216, rect at 116,208 600x800)");
-
-    let params = GenerateParams::builder("1girl, smiling, happy")
-        .action(GenerateAction::Infill {
-            source_image: ImageInput::FilePath(input_image.into()),
-            mask: ImageInput::Bytes(mask_bytes),
-            mask_strength: 0.7,
-            color_correct: false,
-            hybrid_strength: None,
-            hybrid_noise: None,
-        })
-        .width(832)
-        .height(1216)
-        .save_dir(output_dir)
-        .build()?;
-
-    let result = client.generate(&params).await?;
-
-    println!(
-        "  Infill (Mask Only) success! Saved to: {}",
-        result.saved_path.as_deref().unwrap_or("N/A")
-    );
-    println!(
-        "  Anlas consumed: {}",
-        result
-            .anlas_consumed
-            .map_or("N/A".into(), |v| v.to_string())
-    );
-
-    Ok(())
-}
-
-/// Test 3: Infill + Img2Img hybrid mode
+/// Test 2: Infill + Img2Img hybrid mode
 async fn test_infill_with_img2img(
     client: &NovelAIClient,
     input_image: &str,
@@ -184,13 +142,7 @@ async fn main() -> Result<()> {
     let success = test_img2img(&client, input_image, output_dir).await.is_ok();
     results.push(("Img2Img", success));
 
-    // Test 2: Infill (Mask Only)
-    let success = test_infill_only(&client, input_image, output_dir)
-        .await
-        .is_ok();
-    results.push(("Infill (Mask Only)", success));
-
-    // Test 3: Infill + Img2Img (Hybrid)
+    // Test 2: Infill + Img2Img (Hybrid)
     let success = test_infill_with_img2img(&client, input_image, output_dir)
         .await
         .is_ok();

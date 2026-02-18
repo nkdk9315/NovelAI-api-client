@@ -57,7 +57,7 @@ Anlas.swift                      (純粋関数, 外部依存なし)
     │
     ▼
 [3] API呼び出し (Retry.swift: fetchWithRetry)
-    │   - URL: characterReference or infill → STREAM_URL, それ以外 → API_URL
+    │   - URL: characterReference or infill or img2img → STREAM_URL, それ以外 → API_URL
     │   - URLSession.shared で HTTPリクエスト
     │   - Content-Type: application/json
     │   - Authorization: Bearer <apiKey>
@@ -66,7 +66,7 @@ Anlas.swift                      (純粋関数, 外部依存なし)
     │
     ▼
 [4] レスポンスパース (Response.swift)
-    │   - stream URL → parseStreamResponse (ZIP → PNG → msgpack → 埋め込みPNG フォールバック)
+    │   - stream URL → parseStreamResponse (ZIP → PNG → フレーム化msgpack → 埋め込みPNG → raw msgpack フォールバック)
     │   - 通常 URL → parseZipResponse (ZIPから画像エントリ抽出)
     │
     ▼
@@ -85,7 +85,7 @@ NovelAI APIは3つの形式でレスポンスを返す可能性がある:
 - `.png` / `.webp` / `.jpg` / `.jpeg` 拡張子のエントリを検索
 - ZIPボム防御: エントリ数上限 (10), 展開サイズ上限 (50MB), 圧縮比上限 (100)
 
-### msgpack stream (character_reference / infill)
+### msgpack stream (img2img / character_reference / infill)
 - msgpack-swift でデコード
 - `data` または `image` フィールドからバイナリ取得
 - パース失敗時: PNGマジックバイト (89 50 4E 47) を探してIENDチャンクまで切り出し
@@ -99,10 +99,13 @@ NovelAI APIは3つの形式でレスポンスを返す可能性がある:
 ```
 1. ZIP シグネチャ (PK) → parseZipResponse
 2. PNG シグネチャ (先頭) → そのまま返却
-3. 埋め込み PNG バイト検索 → IEND まで切り出し (フルサイズ優先)
-4. msgpack パース → data/image フィールド
-5. すべて失敗 → NovelAIError.parse
+3. フレーム化 msgpack (4バイト BE 長プレフィックス) → 最終フレーム抽出 + エラー検出
+4. 埋め込み PNG バイト検索 (末尾から) → IEND まで切り出し
+5. Raw msgpack パース → data/image フィールド (後方互換フォールバック)
+6. すべて失敗 → NovelAIError.parse
 ```
+
+> フレーム化msgpackが埋め込みPNG検索より優先される。フレーム化パースは最終フレーム（フル解像度画像）を正しく抽出できるが、PNG検索では途中のプレビュー画像にマッチする可能性があるため。
 
 ## バリデーション設計
 

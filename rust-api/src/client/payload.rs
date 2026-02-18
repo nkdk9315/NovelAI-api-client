@@ -25,7 +25,7 @@ pub fn build_base_payload(
             "steps": params.steps,
             "n_samples": 1,
             "ucPreset": 0,
-            "qualityToggle": true,
+            "qualityToggle": false,
             "autoSmea": false,
             "dynamic_thresholding": false,
             "controlnet_strength": 1,
@@ -55,7 +55,7 @@ pub fn apply_img2img_params(
     seed: u64,
 ) -> Result<()> {
     if let GenerateAction::Img2Img { ref source_image, strength, noise } = params.action {
-        let b64 = utils::image::get_image_base64(source_image)?;
+        let b64 = utils::image::resize_image_for_img2img(source_image, params.width, params.height)?;
         let extra_seed = if seed == 0 {
             constants::MAX_SEED as u64
         } else {
@@ -65,6 +65,8 @@ pub fn apply_img2img_params(
         payload["parameters"]["strength"] = serde_json::json!(strength);
         payload["parameters"]["noise"] = serde_json::json!(noise);
         payload["parameters"]["extra_noise_seed"] = serde_json::json!(extra_seed);
+        payload["parameters"]["stream"] = serde_json::Value::String("msgpack".to_string());
+        payload["parameters"]["image_format"] = serde_json::Value::String("png".to_string());
     }
     Ok(())
 }
@@ -93,9 +95,12 @@ pub fn apply_infill_params(
         };
         payload["model"] = serde_json::Value::String(model_name);
 
-        // Source image
-        let source_buffer = utils::image::get_image_buffer(source_image)?;
-        let source_base64 = BASE64.encode(&source_buffer);
+        // Source image: resize to target dimensions (same as img2img)
+        let source_base64 = utils::image::resize_image_for_img2img(
+            source_image, params.width, params.height
+        )?;
+        let source_buffer = BASE64.decode(source_base64.as_bytes())
+            .map_err(|e| crate::error::NovelAIError::Image(format!("Failed to decode resized source image: {}", e)))?;
 
         // Mask: resize to 1/8 of target dimensions
         let mask_buffer = utils::image::get_image_buffer(mask)?;
@@ -207,12 +212,13 @@ pub fn build_v4_prompt_structure(
         })
         .collect();
 
+    let has_characters = !char_caps.is_empty();
     payload["parameters"]["v4_prompt"] = serde_json::json!({
         "caption": {
             "base_caption": prompt,
             "char_captions": char_caps,
         },
-        "use_coords": true,
+        "use_coords": has_characters,
         "use_order": true,
     });
 
@@ -230,10 +236,9 @@ pub fn apply_character_prompts(
     payload: &mut serde_json::Value,
     char_configs: &[CharacterConfig],
 ) {
-    if char_configs.is_empty() {
-        return;
+    if !char_configs.is_empty() {
+        payload["parameters"]["use_coords"] = serde_json::json!(true);
     }
-    payload["parameters"]["use_coords"] = serde_json::json!(true);
     let prompts: Vec<serde_json::Value> = char_configs
         .iter()
         .map(|c| {

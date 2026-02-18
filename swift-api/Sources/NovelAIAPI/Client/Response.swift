@@ -129,13 +129,44 @@ func parseStreamResponse(_ data: Data, logger: Logger? = nil) throws -> Data {
         return data
     }
 
-    // 3. Search for embedded PNG (last occurrence = full-resolution image)
+    // 3. Try parsing as length-prefixed binary frames (4-byte big-endian length + msgpack data)
+    //    This handles error events from the server before searching for embedded data.
+    //    We accumulate image data across frames and return the last one (highest resolution).
+    do {
+        let frames = parseBinaryFrames(data)
+        if !frames.isEmpty {
+            let decoder = MessagePackDecoder()
+            var lastImageData: Data? = nil
+            for frame in frames {
+                // Check for error events
+                if let errorEvent = try? decoder.decode(MsgpackErrorEvent.self, from: frame),
+                   errorEvent.event_type == "error" {
+                    let code = errorEvent.code.flatMap { Int($0) } ?? 500
+                    let message = errorEvent.message ?? "Unknown server error"
+                    throw NovelAIError.api(statusCode: code, message: message)
+                }
+                // Try to extract image data from frame (accumulate, last frame = full resolution)
+                if let imageData = tryParseMsgpack(frame) {
+                    lastImageData = imageData
+                }
+            }
+            if let imageData = lastImageData {
+                return imageData
+            }
+        }
+    } catch let error as NovelAIError {
+        throw error
+    } catch {
+        logger?.warn("[NovelAI] Binary frame parse failed: \(error.localizedDescription)")
+    }
+
+    // 4. Search for embedded PNG (last occurrence = full-resolution image)
     if let pngData = extractLastPNG(from: data) {
         logger?.warn("[NovelAI] Found embedded PNG in stream response via byte search")
         return pngData
     }
 
-    // 4. Fallback: msgpack stream parsing
+    // 5. Fallback: msgpack stream parsing (without frame handling, for backwards compatibility)
     if let msgpackData = tryParseMsgpack(data) {
         logger?.warn("[NovelAI] Extracted image from msgpack stream response")
         return msgpackData
@@ -212,7 +243,43 @@ private func tryParseMsgpack(_ data: Data) -> Data? {
     return nil
 }
 
+// MARK: - Binary Frame Parsing
+
+/// Parses binary-framed stream data: each frame is a 4-byte big-endian length prefix
+/// followed by the frame payload.
+///
+/// - Parameter data: Raw bytes that may contain length-prefixed frames.
+/// - Returns: An array of frame payloads extracted from the data.
+private func parseBinaryFrames(_ data: Data) -> [Data] {
+    var frames: [Data] = []
+    var offset = data.startIndex
+
+    while offset + 4 <= data.endIndex {
+        let frameLen = Int(data[offset]) << 24
+            | Int(data[offset + 1]) << 16
+            | Int(data[offset + 2]) << 8
+            | Int(data[offset + 3])
+        offset += 4
+
+        guard frameLen > 0, offset + frameLen <= data.endIndex else {
+            break
+        }
+
+        frames.append(Data(data[offset..<(offset + frameLen)]))
+        offset += frameLen
+    }
+
+    return frames
+}
+
 // MARK: - Msgpack Helper Types
+
+/// Msgpack error event with `event_type`, optional `message`, and optional `code` fields.
+private struct MsgpackErrorEvent: Decodable {
+    let event_type: String
+    let message: String?
+    let code: String?
+}
 
 /// Msgpack message with a binary `data` field.
 private struct MsgpackDataBinary: Decodable {

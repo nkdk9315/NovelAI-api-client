@@ -11,6 +11,7 @@ import { Unpackr } from 'msgpackr';
 import * as Constants from './constants';
 import * as Schemas from './schemas';
 import * as Utils from './utils';
+import { clampToMaxPixels } from './anlas';
 
 export interface Logger {
   warn(message: string, ...args: unknown[]): void;
@@ -385,7 +386,7 @@ export class NovelAIClient {
         steps: validatedParams.steps!,
         n_samples: 1,
         ucPreset: 0,
-        qualityToggle: true,
+        qualityToggle: false,
         autoSmea: false,
         dynamic_thresholding: false,
         controlnet_strength: 1,
@@ -411,16 +412,23 @@ export class NovelAIClient {
   /**
    * Apply Img2Img parameters to the payload
    */
-  private applyImg2ImgParams(
+  private async applyImg2ImgParams(
     payload: GenerationPayload,
-    validatedParams: Schemas.GenerateParams,
+    validatedParams: Schemas.GenerateParams & { width: number; height: number },
     seed: number
-  ): void {
+  ): Promise<void> {
     if (validatedParams.action === "img2img" && validatedParams.source_image) {
-      payload.parameters.image = Utils.getImageBase64(validatedParams.source_image);
+      // Resize source image to match output dimensions to avoid server errors with oversized images
+      payload.parameters.image = await Utils.resizeImageForImg2Img(
+        validatedParams.source_image,
+        validatedParams.width,
+        validatedParams.height
+      );
       payload.parameters.strength = validatedParams.img2img_strength;
       payload.parameters.noise = validatedParams.img2img_noise;
       payload.parameters.extra_noise_seed = seed === 0 ? Constants.MAX_SEED : seed - 1;
+      payload.parameters.stream = "msgpack";
+      payload.parameters.image_format = "png";
     }
   }
 
@@ -440,11 +448,15 @@ export class NovelAIClient {
     if (!validatedParams.model.endsWith('-inpainting')) {
       payload.model = validatedParams.model + "-inpainting";
     }
-    
-    // 元画像を取得
-    const sourceImageBuffer = Utils.getImageBuffer(validatedParams.source_image);
-    const sourceImageBase64 = sourceImageBuffer.toString('base64');
-    
+
+    // 元画像をターゲットサイズにリサイズ（img2imgと同様）
+    const sourceImageBase64 = await Utils.resizeImageForImg2Img(
+      validatedParams.source_image,
+      validatedParams.width,
+      validatedParams.height
+    );
+    const sourceImageBuffer = Buffer.from(sourceImageBase64, 'base64');
+
     // マスク画像を処理（1/8サイズにリサイズ）
     const maskBuffer = Utils.getImageBuffer(validatedParams.mask);
     const resizedMask = await Utils.resizeMaskImage(
@@ -453,11 +465,11 @@ export class NovelAIClient {
       validatedParams.height
     );
     const maskBase64 = resizedMask.toString('base64');
-    
+
     // cache_secret_keyを生成
     const imageCacheSecretKey = Utils.calculateCacheSecretKey(sourceImageBuffer);
     const maskCacheSecretKey = Utils.calculateCacheSecretKey(resizedMask);
-    
+
     // パラメータ設定
     if (validatedParams.mask_strength == null) {
       throw new Error('mask_strength is required for infill action');
@@ -465,7 +477,7 @@ export class NovelAIClient {
     const maskStrength = validatedParams.mask_strength;
     const hybridStrength = validatedParams.hybrid_img2img_strength ?? maskStrength;
     const hybridNoise = validatedParams.hybrid_img2img_noise ?? 0;
-    
+
     // Inpaint用パラメータを設定
     payload.parameters.image = sourceImageBase64;
     payload.parameters.mask = maskBase64;
@@ -526,14 +538,15 @@ export class NovelAIClient {
     prompt: string,
     negativePrompt: string,
     charCaptions: ReturnType<typeof Schemas.characterToCaptionDict>[],
-    charNegativeCaptions: ReturnType<typeof Schemas.characterToNegativeCaptionDict>[]
+    charNegativeCaptions: ReturnType<typeof Schemas.characterToNegativeCaptionDict>[],
+    hasCharacters: boolean
   ): void {
     payload.parameters.v4_prompt = {
       caption: {
         base_caption: prompt,
         char_captions: charCaptions,
       },
-      use_coords: true,
+      use_coords: hasCharacters,
       use_order: true,
     };
     payload.parameters.v4_negative_prompt = {
@@ -554,13 +567,13 @@ export class NovelAIClient {
   ): void {
     if (charConfigs.length > 0) {
       payload.parameters.use_coords = true;
-      payload.parameters.characterPrompts = charConfigs.map(char => ({
-        prompt: char.prompt,
-        uc: char.negative_prompt,
-        center: { x: char.center_x, y: char.center_y },
-        enabled: true,
-      }));
     }
+    payload.parameters.characterPrompts = charConfigs.map(char => ({
+      prompt: char.prompt,
+      uc: char.negative_prompt,
+      center: { x: char.center_x, y: char.center_y },
+      enabled: true,
+    }));
   }
 
   // ===========================================================================
@@ -614,20 +627,20 @@ export class NovelAIClient {
 
     // Build payload using helper methods
     const payload = this.buildBasePayload(validatedParams, seed, negativePrompt);
-    
+
     // Apply action-specific parameters
-    this.applyImg2ImgParams(payload, validatedParams, seed);
+    await this.applyImg2ImgParams(payload, validatedParams, seed);
     await this.applyInfillParams(payload, validatedParams, seed);
-    
+
     // Apply additional features
     this.applyVibeParams(payload, vibeEncodings, vibeStrengths, vibeInfoList);
-    
+
     if (charRefData) {
       this.applyCharRefParams(payload, charRefData);
     }
 
     // Build prompt structures
-    this.buildV4PromptStructure(payload, validatedParams.prompt, negativePrompt, charCaptions, charNegativeCaptions);
+    this.buildV4PromptStructure(payload, validatedParams.prompt, negativePrompt, charCaptions, charNegativeCaptions, charConfigs.length > 0);
     this.applyCharacterPrompts(payload, charConfigs);
 
     // Get initial balance
@@ -640,8 +653,9 @@ export class NovelAIClient {
     }
 
     // Make Request
-    const useStream = (validatedParams.character_reference !== undefined && validatedParams.character_reference !== null) 
-      || validatedParams.action === "infill";
+    const useStream = (validatedParams.character_reference !== undefined && validatedParams.character_reference !== null)
+      || validatedParams.action === "infill"
+      || validatedParams.action === "img2img";
     const apiUrl = useStream ? Constants.STREAM_URL : Constants.API_URL;
 
     const response = await this.fetchWithRetry(
@@ -708,7 +722,7 @@ export class NovelAIClient {
   }
 
   private async saveImage(result: { image_data: Buffer | Uint8Array }, savePath: string) {
-      await this.saveToFile(savePath, result.image_data);
+    await this.saveToFile(savePath, result.image_data);
   }
 
   private parseZipResponse(content: Buffer): Buffer {
@@ -736,44 +750,92 @@ export class NovelAIClient {
   private parseStreamResponse(content: Buffer): Buffer {
     // Check for ZIP signature (PK)
     if (content.length > 1 && content[0] === 0x50 && content[1] === 0x4b) {
-        return this.parseZipResponse(content);
+      return this.parseZipResponse(content);
     }
 
     // Check for PNG signature
     const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     if (content.length > 8 && content.subarray(0, 8).equals(pngSignature)) {
-        return content;
+      return content;
     }
 
-    // msgpack stream parsing
+    // Try parsing as length-prefixed msgpack frames (4-byte big-endian length + msgpack data)
     try {
+      const frames = this.parseBinaryFrames(content);
+      if (frames.length > 0) {
         const unpackr = new Unpackr({ useRecords: false });
-        const values = unpackr.unpackMultiple(content);
-
-        for (const val of values) {
-             if (val && typeof val === 'object') {
-                 if (val['data']) return val['data'];
-                 if (val['image']) return val['image'];
-             }
+        let lastImageData: Buffer | null = null;
+        for (const frame of frames) {
+          try {
+            const val = unpackr.unpack(frame);
+            if (val && typeof val === 'object') {
+              // Check for error events
+              if (val['event_type'] === 'error') {
+                const code = val['code'] || val['status_code'] || 500;
+                const message = val['message'] || 'Unknown server error';
+                throw new Error(`API error (${code}): ${message}`);
+              }
+              if (val['data']) lastImageData = val['data'];
+              else if (val['image']) lastImageData = val['image'];
+            }
+          } catch (e) {
+            if (e instanceof Error && e.message.startsWith('API error')) throw e;
+          }
         }
+        if (lastImageData) return lastImageData;
+      }
     } catch (e) {
-        this.logger.warn('[NovelAI] msgpack parse failed, falling back to PNG detection:', e instanceof Error ? e.message : 'Unknown error');
+      if (e instanceof Error && e.message.startsWith('API error')) throw e;
+      this.logger.warn('[NovelAI] Binary frame parse failed:', e instanceof Error ? e.message : 'Unknown error');
+    }
+
+    // msgpack stream parsing (without frame handling, for backwards compatibility)
+    try {
+      const unpackr = new Unpackr({ useRecords: false });
+      const values = unpackr.unpackMultiple(content);
+      let lastImageData: Buffer | null = null;
+
+      for (const val of values) {
+        if (val && typeof val === 'object') {
+          if (val['data']) lastImageData = val['data'];
+          else if (val['image']) lastImageData = val['image'];
+        }
+      }
+      if (lastImageData) return lastImageData;
+    } catch (e) {
+      this.logger.warn('[NovelAI] msgpack parse failed, falling back to PNG detection:', e instanceof Error ? e.message : 'Unknown error');
     }
 
     // Fallback: search for PNG magic bytes
     const pngStart = content.indexOf(pngSignature);
     if (pngStart !== -1) {
-        // Search for IEND chunk to get exact PNG end
-        const iendMarker = Buffer.from([0x49, 0x45, 0x4e, 0x44]);
-        const iendPos = content.indexOf(iendMarker, pngStart);
-        if (iendPos !== -1) {
-            // IEND chunk: 4 bytes length + 4 bytes "IEND" + 4 bytes CRC
-            return content.subarray(pngStart, iendPos + 8);
-        }
-        return content.subarray(pngStart);
+      // Search for IEND chunk to get exact PNG end
+      const iendMarker = Buffer.from([0x49, 0x45, 0x4e, 0x44]);
+      const iendPos = content.indexOf(iendMarker, pngStart);
+      if (iendPos !== -1) {
+        // IEND chunk: 4 bytes length + 4 bytes "IEND" + 4 bytes CRC
+        return content.subarray(pngStart, iendPos + 8);
+      }
+      return content.subarray(pngStart);
     }
 
     throw new Error(`Cannot parse stream response (length: ${content.length})`);
+  }
+
+  /**
+   * Parse binary-framed stream: each frame is 4-byte big-endian length + payload
+   */
+  private parseBinaryFrames(content: Buffer): Buffer[] {
+    const frames: Buffer[] = [];
+    let offset = 0;
+    while (offset + 4 <= content.length) {
+      const frameLen = content.readUInt32BE(offset);
+      offset += 4;
+      if (frameLen <= 0 || offset + frameLen > content.length) break;
+      frames.push(content.subarray(offset, offset + frameLen));
+      offset += frameLen;
+    }
+    return frames;
   }
 
   /**
@@ -787,6 +849,15 @@ export class NovelAIClient {
 
     // Get image data and auto-detect dimensions
     const { width, height, buffer: imageBuffer } = await Utils.getImageDimensions(validatedParams.image);
+
+    // Reject images exceeding MAX_PIXELS (matches official site behavior)
+    const totalPixels = width * height;
+    if (totalPixels > Constants.MAX_PIXELS) {
+      throw new Error(
+        `Image resolution too high for augment (${width}x${height} = ${totalPixels} pixels, max: ${Constants.MAX_PIXELS}). ` +
+        `Resize the image to ${Constants.MAX_PIXELS} pixels or fewer before augmenting.`
+      );
+    }
     const b64Image = imageBuffer.toString('base64');
 
     // Get initial balance
@@ -799,7 +870,7 @@ export class NovelAIClient {
       this.logger.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
-    // Build payload with auto-detected dimensions
+    // Build payload
     const payload: any = {
       req_type: validatedParams.req_type,
       use_new_shared_trial: true,
@@ -896,6 +967,16 @@ export class NovelAIClient {
 
     // Get image data and auto-detect dimensions
     const { width, height, buffer: imageBuffer } = await Utils.getImageDimensions(validatedParams.image);
+
+    // Validate upscale pixel limit (matches official site behavior)
+    const pixels = width * height;
+    if (pixels > Constants.UPSCALE_MAX_PIXELS) {
+      throw new Error(
+        `Image resolution too high for upscale (${width}x${height} = ${pixels} pixels, max: ${Constants.UPSCALE_MAX_PIXELS}). ` +
+        `Resize the image to ${Constants.UPSCALE_MAX_PIXELS} pixels or fewer before upscaling.`
+      );
+    }
+
     const b64Image = imageBuffer.toString('base64');
 
     // Get initial balance

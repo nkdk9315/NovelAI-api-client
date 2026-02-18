@@ -26,7 +26,7 @@ func buildBasePayload(
         "steps": params.steps,
         "n_samples": 1,
         "ucPreset": 0,
-        "qualityToggle": true,
+        "qualityToggle": false,
         "autoSmea": false,
         "dynamic_thresholding": false,
         "controlnet_strength": 1,
@@ -40,7 +40,7 @@ func buildBasePayload(
         "legacy_uc": false,
         "normalize_reference_strength_multiple": true,
         "inpaintImg2ImgStrength": 1,
-        "seed": seed,
+        "seed": Int(seed),
         "negative_prompt": negativePrompt,
         "deliberate_euler_ancestral_bug": false,
         "prefer_brownian": true,
@@ -72,11 +72,14 @@ func applyImg2ImgParams(
 
     var parameters = payload["parameters"] as? [String: Any] ?? [:]
 
-    let imageBase64 = try getImageBase64(sourceImage)
+    // Resize source image to match output dimensions to avoid server errors with oversized images
+    let imageBase64 = try resizeImageForImg2Img(sourceImage, targetWidth: params.width, targetHeight: params.height)
     parameters["image"] = imageBase64
     parameters["strength"] = params.img2imgStrength
     parameters["noise"] = params.img2imgNoise
-    parameters["extra_noise_seed"] = seed == 0 ? MAX_SEED : seed - 1
+    parameters["extra_noise_seed"] = Int(seed == 0 ? MAX_SEED : seed - 1)
+    parameters["stream"] = "msgpack"
+    parameters["image_format"] = "png"
 
     payload["parameters"] = parameters
 }
@@ -106,9 +109,13 @@ func applyInfillParams(
 
     var parameters = payload["parameters"] as? [String: Any] ?? [:]
 
-    // Get source image
-    let sourceImageBuffer = try getImageBuffer(sourceImage)
-    let sourceImageBase64 = sourceImageBuffer.base64EncodedString()
+    // Resize source image to target dimensions (same as img2img)
+    let sourceImageBase64 = try resizeImageForImg2Img(
+        sourceImage, targetWidth: params.width, targetHeight: params.height
+    )
+    guard let sourceImageBuffer = Data(base64Encoded: sourceImageBase64) else {
+        throw NovelAIError.image("Failed to decode resized source image")
+    }
 
     // Resize mask to 1/8 dimensions
     let maskBuffer = try getImageBuffer(params.mask!)
@@ -133,7 +140,7 @@ func applyInfillParams(
     parameters["strength"] = hybridStrength
     parameters["noise"] = hybridNoise
     parameters["add_original_image"] = false
-    parameters["extra_noise_seed"] = seed == 0 ? MAX_SEED : seed - 1
+    parameters["extra_noise_seed"] = Int(seed == 0 ? MAX_SEED : seed - 1)
     parameters["inpaintImg2ImgStrength"] = maskStrength
     parameters["img2img"] = [
         "strength": maskStrength,
@@ -186,7 +193,7 @@ func applyCharRefParams(
     var parameters = payload["parameters"] as? [String: Any] ?? [:]
 
     parameters["director_reference_images"] = charRefs.images
-    parameters["director_reference_descriptions"] = charRefs.descriptions
+    parameters["director_reference_descriptions"] = charRefs.descriptions.map { $0.toDictionary() }
     parameters["director_reference_information_extracted"] = charRefs.infoExtracted
     parameters["director_reference_strength_values"] = charRefs.strengthValues
     parameters["director_reference_secondary_strength_values"] = charRefs.secondaryStrengthValues
@@ -204,14 +211,15 @@ func applyCharRefParams(
 /// along with use_coords and use_order flags.
 func buildV4PromptStructure(
     prompt: String,
-    charCaptions: [[String: Any]]
+    charCaptions: [[String: Any]],
+    hasCharacters: Bool
 ) -> [String: Any] {
     return [
         "caption": [
             "base_caption": prompt,
             "char_captions": charCaptions,
         ] as [String: Any],
-        "use_coords": true,
+        "use_coords": hasCharacters,
         "use_order": true,
     ]
 }
@@ -244,13 +252,13 @@ func applyCharacterPrompts(
     _ payload: inout [String: Any],
     params: GenerateParams
 ) {
-    guard let characters = params.characters, !characters.isEmpty else {
-        return
-    }
-
     var parameters = payload["parameters"] as? [String: Any] ?? [:]
 
-    parameters["use_coords"] = true
+    let characters = params.characters ?? []
+
+    if !characters.isEmpty {
+        parameters["use_coords"] = true
+    }
     parameters["characterPrompts"] = characters.map { char -> [String: Any] in
         [
             "prompt": char.prompt,
@@ -278,9 +286,11 @@ func applyV4PromptStructures(
 ) {
     var parameters = payload["parameters"] as? [String: Any] ?? [:]
 
+    let hasCharacters = !charCaptions.isEmpty
     parameters["v4_prompt"] = buildV4PromptStructure(
         prompt: prompt,
-        charCaptions: charCaptions
+        charCaptions: charCaptions,
+        hasCharacters: hasCharacters
     )
     parameters["v4_negative_prompt"] = buildV4NegativePromptStructure(
         negativePrompt: negativePrompt,

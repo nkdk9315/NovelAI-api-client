@@ -489,17 +489,17 @@ async fn main() {
 
     // if let Err(e) = example_img2img().await { print_error(&e.into()); }
 
-    // if let Err(e) = example_img2img_with_vibes().await {
-    //     print_error(&e);
-    // }
+    if let Err(e) = example_img2img_with_vibes().await {
+       print_error(&e);
+    }
 
     // if let Err(e) = example_multi_character().await { print_error(&e.into()); }
 
     // if let Err(e) = example_encode_vibe().await { print_error(&e.into()); }
 
-    if let Err(e) = example_character_reference().await {
-        print_error(&e);
-    }
+    //if let Err(e) = example_character_reference().await {
+    //    print_error(&e);
+    //}
 
     // if let Err(e) = example_character_reference_styles().await { print_error(&e.into()); }
 

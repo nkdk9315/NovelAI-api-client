@@ -213,8 +213,50 @@ pub fn looks_like_file_path(s: &str) -> bool {
     s.contains('/') || s.contains('\\')
 }
 
+/// Resize an image to the specified dimensions and return as base64.
+///
+/// Used for img2img to ensure the source image matches the target output
+/// dimensions, preventing server 500 errors from oversized images.
+pub fn resize_image_for_img2img(
+    input: &ImageInput,
+    target_width: u32,
+    target_height: u32,
+) -> Result<String> {
+    let buffer = get_image_buffer(input)?;
+    let img = load_image_safe(&buffer)?;
+    let resized = image::imageops::resize(
+        &img,
+        target_width,
+        target_height,
+        image::imageops::FilterType::Lanczos3,
+    );
+    let dynamic = image::DynamicImage::ImageRgba8(resized);
+    let png_bytes = encode_to_png(&dynamic)?;
+    Ok(BASE64.encode(&png_bytes))
+}
+
 /// Convert an ImageInput to a base64 string.
 pub fn get_image_base64(input: &ImageInput) -> Result<String> {
     let buffer = get_image_buffer(input)?;
     Ok(BASE64.encode(&buffer))
+}
+
+/// Resize an image buffer to the specified dimensions and return as PNG bytes.
+///
+/// Used for augment dimension clamping — resizes images that exceed MAX_PIXELS
+/// before sending to the API.
+pub fn resize_image_buffer(
+    buffer: &[u8],
+    target_width: u32,
+    target_height: u32,
+) -> Result<Vec<u8>> {
+    let img = load_image_safe(buffer)?;
+    let resized = image::imageops::resize(
+        &img,
+        target_width,
+        target_height,
+        image::imageops::FilterType::Lanczos3,
+    );
+    let dynamic = image::DynamicImage::ImageRgba8(resized);
+    encode_to_png(&dynamic)
 }

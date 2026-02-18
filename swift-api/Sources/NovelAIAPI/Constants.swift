@@ -157,6 +157,10 @@ public let DEFAULT_DEFRY: Int = 3
 public let VALID_UPSCALE_SCALES: [Int] = [2, 4]
 public let DEFAULT_UPSCALE_SCALE: Int = 4
 
+// Upscale入力画像の最大ピクセル数（UPSCALE_COST_TABLEの最大値に対応）
+// これを超える画像はAPIが 400 "Image resolution too high" を返す
+public let UPSCALE_MAX_PIXELS: Int = 1_048_576  // 1024 × 1024
+
 // MARK: - Enhance Presets
 
 public struct EnhanceLevelPreset: Sendable {
@@ -220,6 +224,10 @@ public let UPSCALE_COST_TABLE: [(maxPixels: Int, cost: Int)] = [
 
 // Upscale Opus free pixel limit
 public let UPSCALE_OPUS_FREE_PIXELS: Int = 409_600
+
+// MARK: - HTTP Client Constants
+
+public let USER_AGENT = "novelai-swift-api/0.1.0"
 
 // MARK: - Network & Security Constants
 

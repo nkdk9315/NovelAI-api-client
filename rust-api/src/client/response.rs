@@ -98,13 +98,13 @@ pub fn parse_zip_response(content: &[u8]) -> Result<Vec<u8>> {
 /// Parse a stream response using fallback chain:
 /// 1. ZIP signature (PK) → parse_zip_response
 /// 2. PNG signature at start → return as-is
-/// 3. PNG magic byte search (last occurrence) → slice to IEND
-/// 4. msgpack parse → extract data/image field
+/// 3. Framed msgpack parse → extract last frame's data/image field (full resolution)
+/// 4. Embedded PNG search (last occurrence) → slice to IEND
+/// 5. Raw msgpack stream parse → extract data/image field
 ///
-/// PNG search is prioritized over msgpack because streaming responses contain
-/// msgpack preview messages followed by a raw full-resolution PNG at the end.
-/// The msgpack `data`/`image` fields hold low-resolution previews, so we must
-/// extract the trailing PNG first.
+/// Framed msgpack is prioritized over embedded PNG search because the framed
+/// parser correctly extracts the last frame (full-resolution image), while PNG
+/// search may match a preview image embedded earlier in the stream.
 pub fn parse_stream_response(content: &[u8], logger: &dyn Logger) -> Result<Vec<u8>> {
     // 1. Check for ZIP signature (PK)
     if content.len() > 1 && content[0] == 0x50 && content[1] == 0x4b {
@@ -116,7 +116,22 @@ pub fn parse_stream_response(content: &[u8], logger: &dyn Logger) -> Result<Vec<
         return Ok(content.to_vec());
     }
 
-    // 3. Search for embedded PNG (last occurrence = full-resolution image)
+    // 3. Try framed msgpack parsing (4-byte length-prefixed binary frames)
+    //    This must run before embedded PNG search because framed msgpack correctly
+    //    extracts the last frame (full resolution), while PNG search may find a
+    //    preview image embedded earlier in the stream.
+    match try_parse_framed_msgpack(content) {
+        FramedMsgpackResult::ImageData(data) => return Ok(data),
+        FramedMsgpackResult::Error { message } => {
+            return Err(NovelAIError::Api {
+                status_code: 500,
+                message,
+            });
+        }
+        FramedMsgpackResult::None => {}
+    }
+
+    // 4. Search for embedded PNG (last occurrence = full-resolution image)
     if let Some(png_start) = rfind_subsequence(content, &PNG_SIGNATURE) {
         let iend_marker: [u8; 4] = [0x49, 0x45, 0x4e, 0x44];
         if let Some(iend_offset) = find_subsequence(&content[png_start..], &iend_marker) {
@@ -127,7 +142,7 @@ pub fn parse_stream_response(content: &[u8], logger: &dyn Logger) -> Result<Vec<
         return Ok(content[png_start..].to_vec());
     }
 
-    // 4. Fallback: msgpack stream parsing
+    // 5. Fallback: raw msgpack stream parsing
     match try_parse_msgpack(content) {
         Some(data) => return Ok(data),
         None => {
@@ -148,6 +163,132 @@ pub fn parse_stream_response(content: &[u8], logger: &dyn Logger) -> Result<Vec<
 // =============================================================================
 
 const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/// Result of attempting to parse framed msgpack data.
+enum FramedMsgpackResult {
+    /// Successfully extracted image data from a frame.
+    ImageData(Vec<u8>),
+    /// Found an error event in a frame.
+    Error { message: String },
+    /// No actionable data found in frames.
+    None,
+}
+
+/// Split binary content into frames based on 4-byte big-endian length prefixes.
+///
+/// Each frame is: [4-byte BE length][payload of that length].
+/// Returns a vector of payload byte slices.
+fn parse_binary_frames(content: &[u8]) -> Vec<&[u8]> {
+    let mut frames = Vec::new();
+    let mut offset = 0;
+    while offset + 4 <= content.len() {
+        let len = u32::from_be_bytes([
+            content[offset],
+            content[offset + 1],
+            content[offset + 2],
+            content[offset + 3],
+        ]) as usize;
+        offset += 4;
+        if len == 0 || offset + len > content.len() {
+            break;
+        }
+        frames.push(&content[offset..offset + len]);
+        offset += len;
+    }
+    frames
+}
+
+/// Try to parse 4-byte length-prefixed binary frames as msgpack.
+///
+/// For each frame, decodes as msgpack and checks for:
+/// - Error events (`event_type == "error"` with a `message` field)
+/// - Image data (`data` or `image` binary/string fields)
+///
+/// Returns the first actionable result found.
+fn try_parse_framed_msgpack(content: &[u8]) -> FramedMsgpackResult {
+    if content.len() > MAX_MSGPACK_PARSE_SIZE || content.len() < 4 {
+        return FramedMsgpackResult::None;
+    }
+
+    let frames = parse_binary_frames(content);
+    if frames.is_empty() {
+        return FramedMsgpackResult::None;
+    }
+
+    // Collect image data from the last frame that has it (highest resolution)
+    let mut last_image_data: Option<Vec<u8>> = None;
+
+    for frame in &frames {
+        let mut cursor = std::io::Cursor::new(*frame);
+        if let Ok(val) = rmpv::decode::read_value(&mut cursor) {
+            if let rmpv::Value::Map(ref entries) = val {
+                let mut event_type: Option<&str> = None;
+                let mut error_message: Option<String> = None;
+                let mut frame_image_data: Option<Vec<u8>> = None;
+
+                for (key, value) in entries {
+                    let key_str = match key {
+                        rmpv::Value::String(s) => match s.as_str() {
+                            Some(s) => s,
+                            None => continue,
+                        },
+                        _ => continue,
+                    };
+
+                    match key_str {
+                        "event_type" | "event" => {
+                            if let rmpv::Value::String(s) = value {
+                                event_type = s.as_str();
+                            }
+                        }
+                        "message" | "error" => {
+                            let msg = match value {
+                                rmpv::Value::String(s) => {
+                                    s.as_str().map(|s| s.to_string())
+                                }
+                                _ => None,
+                            };
+                            if msg.is_some() {
+                                error_message = msg;
+                            }
+                        }
+                        "data" | "image" => {
+                            let candidate = match value {
+                                rmpv::Value::Binary(data) => Some(data.clone()),
+                                rmpv::Value::String(s) => Some(s.as_bytes().to_vec()),
+                                _ => None,
+                            };
+                            if candidate.is_some() {
+                                frame_image_data = candidate;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Check for error event first
+                if let Some(et) = event_type {
+                    if et == "error" {
+                        let message = error_message.unwrap_or_else(|| {
+                            "Unknown error from API stream".to_string()
+                        });
+                        return FramedMsgpackResult::Error { message };
+                    }
+                }
+
+                // Track image data (keep the last one found for highest resolution)
+                if frame_image_data.is_some() {
+                    last_image_data = frame_image_data;
+                }
+            }
+        }
+    }
+
+    match last_image_data {
+        Some(data) => FramedMsgpackResult::ImageData(data),
+        None => FramedMsgpackResult::None,
+    }
+}
 
 /// Try to parse msgpack stream, extracting 'data' or 'image' binary fields.
 ///

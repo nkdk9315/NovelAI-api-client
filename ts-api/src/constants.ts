@@ -20,9 +20,9 @@ export const UPSCALE_URL = process.env.NOVELAI_UPSCALE_URL ?? "https://api.novel
 // =============================================================================
 
 export const DEFAULT_NEGATIVE = [
-    "nsfw", "lowres", "artistic error", "film grain", "scan artifacts",
-    "worst quality", "bad quality", "jpeg artifacts", "very displeasing",
-    "chromatic aberration", "dithering", "halftone", "screentone"
+  "nsfw", "lowres", "artistic error", "film grain", "scan artifacts",
+  "worst quality", "bad quality", "jpeg artifacts", "very displeasing",
+  "chromatic aberration", "dithering", "halftone", "screentone"
 ].join(", ");
 
 export const DEFAULT_MODEL = "nai-diffusion-4-5-full";
@@ -49,35 +49,35 @@ export const DEFAULT_INPAINT_COLOR_CORRECT = true;
 
 // サンプラー
 export const VALID_SAMPLERS = [
-    "k_euler",
-    "k_euler_ancestral",
-    "k_dpmpp_2s_ancestral",
-    "k_dpmpp_2m_sde",
-    "k_dpmpp_2m",
-    "k_dpmpp_sde",
+  "k_euler",
+  "k_euler_ancestral",
+  "k_dpmpp_2s_ancestral",
+  "k_dpmpp_2m_sde",
+  "k_dpmpp_2m",
+  "k_dpmpp_sde",
 ] as const;
 
 // モデル
 export const VALID_MODELS = [
-    "nai-diffusion-4-curated-preview",
-    "nai-diffusion-4-full",
-    "nai-diffusion-4-5-curated",
-    "nai-diffusion-4-5-full",
+  "nai-diffusion-4-curated-preview",
+  "nai-diffusion-4-full",
+  "nai-diffusion-4-5-curated",
+  "nai-diffusion-4-5-full",
 ] as const;
 
 // ノイズスケジュール
 export const VALID_NOISE_SCHEDULES = [
-    "karras",
-    "exponential",
-    "polyexponential",
+  "karras",
+  "exponential",
+  "polyexponential",
 ] as const;
 
 // モデルキーマップ（Vibeファイル用）
 export const MODEL_KEY_MAP = {
-    "nai-diffusion-4-curated-preview": "v4curated",
-    "nai-diffusion-4-full": "v4full",
-    "nai-diffusion-4-5-curated": "v4-5curated",
-    "nai-diffusion-4-5-full": "v4-5full",
+  "nai-diffusion-4-curated-preview": "v4curated",
+  "nai-diffusion-4-full": "v4full",
+  "nai-diffusion-4-5-curated": "v4-5curated",
+  "nai-diffusion-4-5-full": "v4-5full",
 } as const;
 
 
@@ -149,6 +149,10 @@ export const DEFAULT_DEFRY = 3;
 // Upscaleスケール
 export const VALID_UPSCALE_SCALES = [2, 4] as const;
 export const DEFAULT_UPSCALE_SCALE = 4;
+
+// Upscale入力画像の最大ピクセル数（UPSCALE_COST_TABLEの最大値に対応）
+// これを超える画像はAPIが 400 "Image resolution too high" を返す
+export const UPSCALE_MAX_PIXELS = 1_048_576;  // 1024 × 1024
 
 
 // =============================================================================

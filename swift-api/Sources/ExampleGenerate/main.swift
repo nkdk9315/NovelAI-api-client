@@ -246,7 +246,7 @@ print(String(repeating: "=", count: 50))
 await exampleImg2imgWithVibes()
 // await exampleMultiCharacter()
 // await exampleEncodeVibe()
-// await exampleCharacterReference()
+await exampleCharacterReference()
 // await exampleCharacterReferenceStyles()
 
 print("\n使用したい例のコード内のコメントを外して実行してください。")

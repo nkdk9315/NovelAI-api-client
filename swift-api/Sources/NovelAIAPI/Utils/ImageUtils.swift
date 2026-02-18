@@ -146,6 +146,120 @@ public func getImageBase64(_ input: ImageInput) throws -> String {
     return buffer.base64EncodedString()
 }
 
+/// Resize an image to the specified dimensions and return as a base64 string.
+///
+/// Used for img2img to resize the source image to match the output dimensions
+/// before sending to the API. Large images (exceeding ~3M pixels) cause server
+/// errors, so resizing to the target width/height avoids this issue.
+///
+/// The image is resized using `fill` fit (stretches to exact dimensions without
+/// preserving aspect ratio), matching the TypeScript implementation's `sharp`
+/// `fit: 'fill'` behavior.
+///
+/// - Parameters:
+///   - input: The source image input.
+///   - targetWidth: The desired output width in pixels.
+///   - targetHeight: The desired output height in pixels.
+/// - Returns: Base64-encoded PNG string of the resized image.
+/// - Throws: `NovelAIError.image` if the image cannot be loaded or resized.
+public func resizeImageForImg2Img(_ input: ImageInput, targetWidth: Int, targetHeight: Int) throws -> String {
+    #if canImport(CoreGraphics)
+    let buffer = try getImageBuffer(input)
+
+    guard let imageSource = CGImageSourceCreateWithData(buffer as CFData, nil),
+          let sourceImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
+        throw NovelAIError.image("Failed to load source image for img2img resize")
+    }
+
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    guard let context = CGContext(
+        data: nil,
+        width: targetWidth,
+        height: targetHeight,
+        bitsPerComponent: 8,
+        bytesPerRow: targetWidth * 4,
+        space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else {
+        throw NovelAIError.image("Failed to create graphics context for img2img resize")
+    }
+
+    context.interpolationQuality = .high
+    context.draw(sourceImage, in: CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
+
+    guard let resizedImage = context.makeImage() else {
+        throw NovelAIError.image("Failed to create resized image for img2img")
+    }
+
+    // Encode to PNG
+    let mutableData = NSMutableData()
+    guard let destination = CGImageDestinationCreateWithData(mutableData as CFMutableData, "public.png" as CFString, 1, nil) else {
+        throw NovelAIError.image("Failed to create PNG encoder for img2img resize")
+    }
+    CGImageDestinationAddImage(destination, resizedImage, nil)
+    guard CGImageDestinationFinalize(destination) else {
+        throw NovelAIError.image("Failed to encode resized image as PNG")
+    }
+
+    return (mutableData as Data).base64EncodedString()
+    #else
+    throw NovelAIError.image("CoreGraphics is not available on this platform")
+    #endif
+}
+
+/// Resize an image buffer to the specified dimensions and return as Data.
+///
+/// Used for augment dimension clamping — resizes images that exceed MAX_PIXELS
+/// before sending to the API.
+///
+/// - Parameters:
+///   - buffer: The source image data.
+///   - targetWidth: The desired output width in pixels.
+///   - targetHeight: The desired output height in pixels.
+/// - Returns: PNG-encoded Data of the resized image.
+/// - Throws: `NovelAIError.image` if the image cannot be loaded or resized.
+public func resizeImageBuffer(_ buffer: Data, targetWidth: Int, targetHeight: Int) throws -> Data {
+    #if canImport(CoreGraphics)
+    guard let imageSource = CGImageSourceCreateWithData(buffer as CFData, nil),
+          let sourceImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
+        throw NovelAIError.image("Failed to load source image for augment resize")
+    }
+
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    guard let context = CGContext(
+        data: nil,
+        width: targetWidth,
+        height: targetHeight,
+        bitsPerComponent: 8,
+        bytesPerRow: targetWidth * 4,
+        space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else {
+        throw NovelAIError.image("Failed to create graphics context for augment resize")
+    }
+
+    context.interpolationQuality = .high
+    context.draw(sourceImage, in: CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
+
+    guard let resizedImage = context.makeImage() else {
+        throw NovelAIError.image("Failed to create resized image for augment")
+    }
+
+    let mutableData = NSMutableData()
+    guard let destination = CGImageDestinationCreateWithData(mutableData as CFMutableData, "public.png" as CFString, 1, nil) else {
+        throw NovelAIError.image("Failed to create PNG encoder for augment resize")
+    }
+    CGImageDestinationAddImage(destination, resizedImage, nil)
+    guard CGImageDestinationFinalize(destination) else {
+        throw NovelAIError.image("Failed to encode resized image as PNG")
+    }
+
+    return mutableData as Data
+    #else
+    throw NovelAIError.image("CoreGraphics is not available on this platform")
+    #endif
+}
+
 // MARK: - Private Extensions
 
 private extension UInt8 {

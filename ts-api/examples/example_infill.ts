@@ -48,68 +48,7 @@ async function testImg2Img() {
 }
 
 /**
- * Test 2: Infill (マスクのみ) - マスク領域のみを再生成
- * ※ マスク画像が必要（白=再生成エリア, 黒=保持エリア）
- */
-async function testInfillOnly() {
-  console.log('\n=== Test: Infill (Mask Only) ===');
-
-  // 簡易マスク画像を作成（中央部分を白にする）
-  const maskPath = path.join(OUTPUT_DIR, 'temp_mask.png');
-
-  // sharpがなければスキップ
-  try {
-    const sharp = (await import('sharp')).default;
-
-    // 832x1216 の画像、中央600x800を白、それ以外を黒
-    const mask = await sharp({
-      create: {
-        width: 832,
-        height: 1216,
-        channels: 4,
-        background: { r: 0, g: 0, b: 0, alpha: 255 }
-      }
-    })
-      .composite([{
-        input: Buffer.from(
-          `<svg width="832" height="1216">
-          <rect x="116" y="208" width="600" height="800" fill="white"/>
-        </svg>`
-        ),
-        top: 0,
-        left: 0
-      }])
-      .png()
-      .toBuffer();
-
-    fs.writeFileSync(maskPath, mask);
-    console.log(`   Created temp mask: ${maskPath}`);
-
-    const result = await client.generate({
-      prompt: '1girl, smiling, happy',
-      action: 'infill',
-      source_image: INPUT_IMAGE,
-      mask: maskPath,
-      mask_strength: 0.7,  // マスク反映度
-      width: 832,
-      height: 1216,
-      save_dir: OUTPUT_DIR,
-    });
-    console.log('✅ Infill (Mask Only) success!');
-    console.log(`   Saved to: ${result.saved_path}`);
-    console.log(`   Anlas consumed: ${result.anlas_consumed}`);
-
-    // 一時ファイル削除
-    fs.unlinkSync(maskPath);
-    return true;
-  } catch (error) {
-    console.error('❌ Infill (Mask Only) failed:', error);
-    return false;
-  }
-}
-
-/**
- * Test 3: Infill + Img2Img (ハイブリッドモード) - マスクと元画像参照を同時使用
+ * Test 2: Infill + Img2Img (ハイブリッドモード) - マスクと元画像参照を同時使用
  */
 async function testInfillWithImg2Img() {
   console.log('\n=== Test: Infill + Img2Img (Hybrid Mode) ===');
@@ -185,12 +124,9 @@ async function main() {
   const results: { name: string; success: boolean }[] = [];
 
   // Test 1: Img2Img
-  results.push({ name: 'Img2Img', success: await testImg2Img() });
+  // results.push({ name: 'Img2Img', success: await testImg2Img() });
 
-  // Test 2: Infill (Mask Only)
-  results.push({ name: 'Infill (Mask Only)', success: await testInfillOnly() });
-
-  // Test 3: Infill + Img2Img (Hybrid)
+  // Test 2: Infill + Img2Img (Hybrid)
   results.push({ name: 'Infill + Img2Img', success: await testInfillWithImg2Img() });
 
   // 結果サマリー
@@ -209,5 +145,4 @@ async function main() {
     console.log('\nAll tests passed!');
   }
 }
-
 main();
