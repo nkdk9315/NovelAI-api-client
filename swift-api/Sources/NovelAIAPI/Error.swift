@@ -20,6 +20,8 @@ public enum NovelAIError: Error, LocalizedError {
     case parse(String)
     /// File I/O error
     case io(String)
+    /// Insufficient Anlas balance for the requested operation
+    case insufficientAnlas(required: Int, available: Int)
     /// Other/unexpected error
     case other(String)
 
@@ -34,6 +36,8 @@ public enum NovelAIError: Error, LocalizedError {
         case .api(let code, let msg): return "API error (\(code)): \(msg)"
         case .parse(let msg): return "Parse error: \(msg)"
         case .io(let msg): return "I/O error: \(msg)"
+        case .insufficientAnlas(let required, let available):
+            return "Insufficient Anlas: required \(required), available \(available)"
         case .other(let msg): return "Error: \(msg)"
         }
     }
