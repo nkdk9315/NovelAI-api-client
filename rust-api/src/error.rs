@@ -40,6 +40,9 @@ pub enum NovelAIError {
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
+    #[error("Insufficient Anlas: required {required}, available {available}")]
+    InsufficientAnlas { required: u64, available: u64 },
+
     #[error("{0}")]
     Other(String),
 }

@@ -1460,4 +1460,231 @@ mod integration {
 
         clear_mock_urls();
     }
+
+    // -------------------------------------------------------------------------
+    // Anlas Validation
+    // -------------------------------------------------------------------------
+
+    #[tokio::test]
+    #[serial]
+    async fn generate_insufficient_anlas_throws_error() {
+        let mut server = mockito::Server::new_async().await;
+        set_mock_urls(&server.url());
+
+        // Balance: 5 Anlas (insufficient for default 832x1216 @ 23 steps = 17 Anlas)
+        let _balance_mock = server
+            .mock("GET", "/user/subscription")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"trainingStepsLeft":{"fixedTrainingStepsLeft":5,"purchasedTrainingSteps":0},"tier":0}"#)
+            .create_async()
+            .await;
+
+        let client = NovelAIClient::new(Some("test-key"), None).unwrap();
+        let params = GenerateParams {
+            prompt: "1girl".to_string(),
+            seed: Some(1),
+            ..Default::default()
+        };
+        let result = client.generate(&params).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            NovelAIError::InsufficientAnlas { required, available } => {
+                assert!(required > available, "required={}, available={}", required, available);
+                assert_eq!(available, 5);
+            }
+            e => panic!("Expected InsufficientAnlas error, got: {:?}", e),
+        }
+
+        clear_mock_urls();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn encode_vibe_insufficient_anlas_throws_error() {
+        let mut server = mockito::Server::new_async().await;
+        set_mock_urls(&server.url());
+
+        // Balance: 1 Anlas (insufficient for encode_vibe = 2 Anlas)
+        let _balance_mock = server
+            .mock("GET", "/user/subscription")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"trainingStepsLeft":{"fixedTrainingStepsLeft":1,"purchasedTrainingSteps":0},"tier":0}"#)
+            .create_async()
+            .await;
+
+        let input_png = create_test_png(64, 64);
+        let client = NovelAIClient::new(Some("test-key"), None).unwrap();
+        let params = EncodeVibeParams {
+            image: ImageInput::Bytes(input_png),
+            ..Default::default()
+        };
+        let result = client.encode_vibe(&params).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            NovelAIError::InsufficientAnlas { required, available } => {
+                assert_eq!(required, 2);
+                assert_eq!(available, 1);
+            }
+            e => panic!("Expected InsufficientAnlas error, got: {:?}", e),
+        }
+
+        clear_mock_urls();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn augment_insufficient_anlas_throws_error() {
+        let mut server = mockito::Server::new_async().await;
+        set_mock_urls(&server.url());
+
+        // Balance: 5 Anlas (insufficient for augment of a 1024x1024 image)
+        let _balance_mock = server
+            .mock("GET", "/user/subscription")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"trainingStepsLeft":{"fixedTrainingStepsLeft":5,"purchasedTrainingSteps":0},"tier":0}"#)
+            .create_async()
+            .await;
+
+        let input_png = create_test_png(1024, 1024);
+        let client = NovelAIClient::new(Some("test-key"), None).unwrap();
+        let params = AugmentParams {
+            req_type: constants::AugmentReqType::Colorize,
+            image: ImageInput::Bytes(input_png),
+            prompt: None,
+            defry: None,
+            save: SaveTarget::None,
+        };
+        let result = client.augment_image(&params).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            NovelAIError::InsufficientAnlas { required, available } => {
+                assert!(required > available);
+                assert_eq!(available, 5);
+            }
+            e => panic!("Expected InsufficientAnlas error, got: {:?}", e),
+        }
+
+        clear_mock_urls();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn upscale_insufficient_anlas_throws_error() {
+        let mut server = mockito::Server::new_async().await;
+        set_mock_urls(&server.url());
+
+        // Balance: 0 Anlas (insufficient for upscale)
+        let _balance_mock = server
+            .mock("GET", "/user/subscription")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"trainingStepsLeft":{"fixedTrainingStepsLeft":0,"purchasedTrainingSteps":0},"tier":0}"#)
+            .create_async()
+            .await;
+
+        let input_png = create_test_png(512, 512);
+        let client = NovelAIClient::new(Some("test-key"), None).unwrap();
+        let params = UpscaleParams {
+            image: ImageInput::Bytes(input_png),
+            scale: 4,
+            save: SaveTarget::None,
+        };
+        let result = client.upscale_image(&params).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            NovelAIError::InsufficientAnlas { required, available } => {
+                assert!(required > 0);
+                assert_eq!(available, 0);
+            }
+            e => panic!("Expected InsufficientAnlas error, got: {:?}", e),
+        }
+
+        clear_mock_urls();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn generate_succeeds_when_balance_fetch_fails_for_validation() {
+        let mut server = mockito::Server::new_async().await;
+        set_mock_urls(&server.url());
+
+        let png = create_test_png(64, 64);
+        let zip = create_test_zip_with_png(&png);
+
+        // Balance returns 500 for all calls (simplest mock)
+        let _balance_mock = server
+            .mock("GET", "/user/subscription")
+            .with_status(500)
+            .with_body("Internal Server Error")
+            .create_async()
+            .await;
+
+        let _gen_mock = server
+            .mock("POST", "/ai/generate-image")
+            .with_status(200)
+            .with_body(zip)
+            .create_async()
+            .await;
+
+        let client = NovelAIClient::new(Some("test-key"), None).unwrap();
+        let params = GenerateParams {
+            prompt: "test".to_string(),
+            seed: Some(1),
+            ..Default::default()
+        };
+        let result = client.generate(&params).await.unwrap();
+
+        // Should succeed since balance fetch failed gracefully
+        assert_eq!(result.image_data, png);
+        // No balance info available
+        assert!(result.anlas_remaining.is_none());
+
+        clear_mock_urls();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn generate_opus_free_with_zero_balance() {
+        let mut server = mockito::Server::new_async().await;
+        set_mock_urls(&server.url());
+
+        let png = create_test_png(64, 64);
+        let zip = create_test_zip_with_png(&png);
+
+        // Tier 3 (Opus), 0 balance - free generation should pass
+        let _balance_mock = server
+            .mock("GET", "/user/subscription")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"trainingStepsLeft":{"fixedTrainingStepsLeft":0,"purchasedTrainingSteps":0},"tier":3}"#)
+            .create_async()
+            .await;
+
+        let _gen_mock = server
+            .mock("POST", "/ai/generate-image")
+            .with_status(200)
+            .with_body(zip)
+            .create_async()
+            .await;
+
+        let client = NovelAIClient::new(Some("test-key"), None).unwrap();
+        // Default params: 832x1216 @ 28 steps → Opus free (totalCost = 0)
+        let params = GenerateParams {
+            prompt: "test".to_string(),
+            seed: Some(1),
+            ..Default::default()
+        };
+        let result = client.generate(&params).await.unwrap();
+
+        assert_eq!(result.image_data, png);
+
+        clear_mock_urls();
+    }
 }

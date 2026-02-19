@@ -45,6 +45,13 @@ public final class NovelAIClient: @unchecked Sendable {
         self.session = URLSession.shared
     }
 
+    /// Internal initializer for testing - allows injecting a custom URLSession.
+    internal init(apiKey: String, session: URLSession, logger: Logger? = nil) {
+        self.apiKey = apiKey
+        self.session = session
+        self.logger = logger ?? DefaultLogger()
+    }
+
     // MARK: - Public API: Anlas Balance
 
     /// Get the current Anlas (training steps) balance.
@@ -103,7 +110,15 @@ public final class NovelAIClient: @unchecked Sendable {
         let sourceHash = sha256Hex(imageBuffer)
 
         // Get initial balance
-        let anlasBefore = await tryGetBalance()
+        let balanceBefore = await tryGetBalance()
+
+        // Pre-flight balance check
+        if let balance = balanceBefore {
+            let total = balance.fixedTrainingStepsLeft + balance.purchasedTrainingSteps
+            if VIBE_ENCODE_PRICE > total {
+                throw NovelAIError.insufficientAnlas(required: VIBE_ENCODE_PRICE, available: total)
+            }
+        }
 
         // Build payload
         let payload: [String: Any] = [
@@ -133,11 +148,13 @@ public final class NovelAIClient: @unchecked Sendable {
         let encoding = responseData.base64EncodedString()
 
         // Get final balance
-        let anlasAfter = await tryGetBalance()
-        let anlasRemaining = anlasAfter
+        let balanceAfter = await tryGetBalance()
+        let anlasRemaining: Int? = balanceAfter.map { $0.fixedTrainingStepsLeft + $0.purchasedTrainingSteps }
         let anlasConsumed: Int?
-        if let before = anlasBefore, let after = anlasAfter {
-            anlasConsumed = before - after
+        if let before = balanceBefore, let after = balanceAfter {
+            let beforeTotal = before.fixedTrainingStepsLeft + before.purchasedTrainingSteps
+            let afterTotal = after.fixedTrainingStepsLeft + after.purchasedTrainingSteps
+            anlasConsumed = beforeTotal - afterTotal
         } else {
             anlasConsumed = nil
         }
@@ -258,7 +275,39 @@ public final class NovelAIClient: @unchecked Sendable {
         applyCharacterPrompts(&payload, params: params)
 
         // Get initial balance
-        let anlasBefore = await tryGetBalance()
+        let balanceBefore = await tryGetBalance()
+
+        // Pre-flight balance check
+        if let balance = balanceBefore {
+            let total = balance.fixedTrainingStepsLeft + balance.purchasedTrainingSteps
+            let genMode: GenerationMode
+            let genStrength: Double
+            switch params.action {
+            case .img2img:
+                genMode = .img2img
+                genStrength = params.img2imgStrength
+            case .infill:
+                genMode = .inpaint
+                genStrength = params.maskStrength ?? 1.0
+            default:
+                genMode = .txt2img
+                genStrength = 1.0
+            }
+            if let costResult = try? calculateGenerationCost(GenerationCostParams(
+                width: params.width,
+                height: params.height,
+                steps: params.steps,
+                smea: .off,
+                mode: genMode,
+                strength: genStrength,
+                nSamples: 1,
+                tier: balance.tier,
+                vibeCount: vibeEncodings.count,
+                vibeUnencodedCount: 0
+            )), !costResult.error, costResult.totalCost > total {
+                throw NovelAIError.insufficientAnlas(required: costResult.totalCost, available: total)
+            }
+        }
 
         // Choose endpoint: stream for charRef or infill
         let useStream = (params.characterReference != nil) || (params.action == .infill) || (params.action == .img2img)
@@ -289,11 +338,13 @@ public final class NovelAIClient: @unchecked Sendable {
         }
 
         // Get final balance
-        let anlasAfter = await tryGetBalance()
-        let anlasRemaining = anlasAfter
+        let balanceAfter = await tryGetBalance()
+        let anlasRemaining: Int? = balanceAfter.map { $0.fixedTrainingStepsLeft + $0.purchasedTrainingSteps }
         let anlasConsumed: Int?
-        if let before = anlasBefore, let after = anlasAfter {
-            anlasConsumed = before - after
+        if let before = balanceBefore, let after = balanceAfter {
+            let beforeTotal = before.fixedTrainingStepsLeft + before.purchasedTrainingSteps
+            let afterTotal = after.fixedTrainingStepsLeft + after.purchasedTrainingSteps
+            anlasConsumed = beforeTotal - afterTotal
         } else {
             anlasConsumed = nil
         }
@@ -360,7 +411,20 @@ public final class NovelAIClient: @unchecked Sendable {
         let b64Image = dims.buffer.base64EncodedString()
 
         // Get initial balance
-        let anlasBefore = await tryGetBalance()
+        let balanceBefore = await tryGetBalance()
+
+        // Pre-flight balance check
+        if let balance = balanceBefore {
+            let total = balance.fixedTrainingStepsLeft + balance.purchasedTrainingSteps
+            if let costResult = try? calculateAugmentCost(AugmentCostParams(
+                tool: params.reqType,
+                width: dims.width,
+                height: dims.height,
+                tier: balance.tier
+            )), costResult.effectiveCost > total {
+                throw NovelAIError.insufficientAnlas(required: costResult.effectiveCost, available: total)
+            }
+        }
 
         // Build payload
         var payload: [String: Any] = [
@@ -403,11 +467,13 @@ public final class NovelAIClient: @unchecked Sendable {
         let imageData = try parseZipResponse(responseData)
 
         // Get final balance
-        let anlasAfter = await tryGetBalance()
-        let anlasRemaining = anlasAfter
+        let balanceAfter = await tryGetBalance()
+        let anlasRemaining: Int? = balanceAfter.map { $0.fixedTrainingStepsLeft + $0.purchasedTrainingSteps }
         let anlasConsumed: Int?
-        if let before = anlasBefore, let after = anlasAfter {
-            anlasConsumed = before - after
+        if let before = balanceBefore, let after = balanceAfter {
+            let beforeTotal = before.fixedTrainingStepsLeft + before.purchasedTrainingSteps
+            let afterTotal = after.fixedTrainingStepsLeft + after.purchasedTrainingSteps
+            anlasConsumed = beforeTotal - afterTotal
         } else {
             anlasConsumed = nil
         }
@@ -469,7 +535,19 @@ public final class NovelAIClient: @unchecked Sendable {
         let b64Image = dims.buffer.base64EncodedString()
 
         // Get initial balance
-        let anlasBefore = await tryGetBalance()
+        let balanceBefore = await tryGetBalance()
+
+        // Pre-flight balance check
+        if let balance = balanceBefore {
+            let total = balance.fixedTrainingStepsLeft + balance.purchasedTrainingSteps
+            if let costResult = try? calculateUpscaleCost(UpscaleCostParams(
+                width: dims.width,
+                height: dims.height,
+                tier: balance.tier
+            )), !costResult.error, let cost = costResult.cost, cost > total {
+                throw NovelAIError.insufficientAnlas(required: cost, available: total)
+            }
+        }
 
         let payload: [String: Any] = [
             "image": b64Image,
@@ -503,11 +581,13 @@ public final class NovelAIClient: @unchecked Sendable {
         }
 
         // Get final balance
-        let anlasAfter = await tryGetBalance()
-        let anlasRemaining = anlasAfter
+        let balanceAfter = await tryGetBalance()
+        let anlasRemaining: Int? = balanceAfter.map { $0.fixedTrainingStepsLeft + $0.purchasedTrainingSteps }
         let anlasConsumed: Int?
-        if let before = anlasBefore, let after = anlasAfter {
-            anlasConsumed = before - after
+        if let before = balanceBefore, let after = balanceAfter {
+            let beforeTotal = before.fixedTrainingStepsLeft + before.purchasedTrainingSteps
+            let afterTotal = after.fixedTrainingStepsLeft + after.purchasedTrainingSteps
+            anlasConsumed = beforeTotal - afterTotal
         } else {
             anlasConsumed = nil
         }
@@ -568,10 +648,9 @@ public final class NovelAIClient: @unchecked Sendable {
     // MARK: - Private Helpers: Balance
 
     /// Try to get the current Anlas balance, returning nil on error.
-    private func tryGetBalance() async -> Int? {
+    private func tryGetBalance() async -> AnlasBalance? {
         do {
-            let balance = try await getAnlasBalance()
-            return balance.fixedTrainingStepsLeft + balance.purchasedTrainingSteps
+            return try await getAnlasBalance()
         } catch {
             logger.warn("[NovelAI] Failed to get Anlas balance: \(error.localizedDescription)")
             return nil

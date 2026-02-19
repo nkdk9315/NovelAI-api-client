@@ -11,7 +11,7 @@ import { Unpackr } from 'msgpackr';
 import * as Constants from './constants';
 import * as Schemas from './schemas';
 import * as Utils from './utils';
-import { clampToMaxPixels } from './anlas';
+import { clampToMaxPixels, calculateGenerationCost, calculateAugmentCost, calculateUpscaleCost, SubscriptionTier } from './anlas';
 
 export interface Logger {
   warn(message: string, ...args: unknown[]): void;
@@ -22,6 +22,18 @@ const defaultLogger: Logger = {
   warn: console.warn.bind(console),
   error: console.error.bind(console),
 };
+
+export class InsufficientAnlasError extends Error {
+  readonly required: number;
+  readonly available: number;
+
+  constructor(required: number, available: number) {
+    super(`Insufficient Anlas: required ${required}, available ${available}`);
+    this.name = 'InsufficientAnlasError';
+    this.required = required;
+    this.available = available;
+  }
+}
 
 // Helper types for return values
 export interface AnlasBalance {
@@ -216,6 +228,11 @@ export class NovelAIClient {
     } catch (e) {
       // Log but continue - Anlas tracking is optional
       this.logger.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
+    }
+
+    // Pre-flight balance check
+    if (anlasBefore !== null && Constants.VIBE_ENCODE_PRICE > anlasBefore) {
+      throw new InsufficientAnlasError(Constants.VIBE_ENCODE_PRICE, anlasBefore);
     }
 
     const payload = {
@@ -645,11 +662,36 @@ export class NovelAIClient {
 
     // Get initial balance
     let anlasBefore: number | null = null;
+    let balanceTier: SubscriptionTier = 0;
     try {
       const balance = await this.getAnlasBalance();
       anlasBefore = balance.total;
+      balanceTier = balance.tier as SubscriptionTier;
     } catch (e) {
       this.logger.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
+    }
+
+    // Pre-flight balance check
+    if (anlasBefore !== null) {
+      const action = validatedParams.action!;
+      const genMode = action === 'infill' ? 'inpaint' as const : action === 'img2img' ? 'img2img' as const : 'txt2img' as const;
+      const genStrength = action === 'img2img' ? (validatedParams.img2img_strength ?? 1.0) :
+                          action === 'infill' ? (validatedParams.mask_strength ?? 1.0) : 1.0;
+      const costResult = calculateGenerationCost({
+        width: validatedParams.width,
+        height: validatedParams.height,
+        steps: validatedParams.steps!,
+        smea: 'off',
+        mode: genMode,
+        strength: genStrength,
+        nSamples: 1,
+        tier: balanceTier,
+        vibeCount: vibeEncodings.length,
+        vibeUnencodedCount: 0,
+      });
+      if (!costResult.error && costResult.totalCost > anlasBefore) {
+        throw new InsufficientAnlasError(costResult.totalCost, anlasBefore);
+      }
     }
 
     // Make Request
@@ -862,12 +904,27 @@ export class NovelAIClient {
 
     // Get initial balance
     let anlasBefore: number | null = null;
+    let balanceTier: SubscriptionTier = 0;
     try {
       const balance = await this.getAnlasBalance();
       anlasBefore = balance.total;
+      balanceTier = balance.tier as SubscriptionTier;
     } catch (e) {
       // Log but continue - Anlas tracking is optional
       this.logger.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
+    }
+
+    // Pre-flight balance check
+    if (anlasBefore !== null) {
+      const augCost = calculateAugmentCost({
+        tool: validatedParams.req_type as any,
+        width,
+        height,
+        tier: balanceTier,
+      });
+      if (augCost.effectiveCost > anlasBefore) {
+        throw new InsufficientAnlasError(augCost.effectiveCost, anlasBefore);
+      }
     }
 
     // Build payload
@@ -981,12 +1038,26 @@ export class NovelAIClient {
 
     // Get initial balance
     let anlasBefore: number | null = null;
+    let balanceTier: SubscriptionTier = 0;
     try {
       const balance = await this.getAnlasBalance();
       anlasBefore = balance.total;
+      balanceTier = balance.tier as SubscriptionTier;
     } catch (e) {
       // Log but continue - Anlas tracking is optional
       this.logger.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
+    }
+
+    // Pre-flight balance check
+    if (anlasBefore !== null) {
+      const upscaleCost = calculateUpscaleCost({
+        width,
+        height,
+        tier: balanceTier,
+      });
+      if (!upscaleCost.error && upscaleCost.cost !== null && upscaleCost.cost > anlasBefore) {
+        throw new InsufficientAnlasError(upscaleCost.cost, anlasBefore);
+      }
     }
 
     const payload = {

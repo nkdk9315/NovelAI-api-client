@@ -171,7 +171,18 @@ impl NovelAIClient {
         let source_hash = format!("{:x}", hasher.finalize());
 
         // Get initial balance (only if tracking is enabled)
-        let anlas_before = self.try_get_balance_if_tracking().await;
+        let balance_before = self.try_get_balance_if_tracking().await;
+        let anlas_before = balance_before.as_ref().map(|b| b.total);
+
+        // Pre-flight balance check
+        if let Some(ref balance) = balance_before {
+            if balance.total < constants::VIBE_ENCODE_PRICE as u64 {
+                return Err(NovelAIError::InsufficientAnlas {
+                    required: constants::VIBE_ENCODE_PRICE as u64,
+                    available: balance.total,
+                });
+            }
+        }
 
         let payload = serde_json::json!({
             "image": b64_image,
@@ -267,7 +278,43 @@ impl NovelAIClient {
         let (body, use_stream) = self.build_generate_payload(params, seed)?;
 
         // Get initial balance (only if tracking is enabled)
-        let anlas_before = self.try_get_balance_if_tracking().await;
+        let balance_before = self.try_get_balance_if_tracking().await;
+        let anlas_before = balance_before.as_ref().map(|b| b.total);
+
+        // Pre-flight balance check
+        if let Some(ref balance) = balance_before {
+            use crate::anlas::{GenerationCostParams, GenerationMode, SmeaMode};
+            let (mode, strength) = match &params.action {
+                crate::schemas::GenerateAction::Img2Img { strength, .. } => {
+                    (GenerationMode::Img2Img, *strength)
+                }
+                crate::schemas::GenerateAction::Infill { mask_strength, .. } => {
+                    (GenerationMode::Inpaint, *mask_strength)
+                }
+                _ => (GenerationMode::Txt2Img, 1.0),
+            };
+            let vibe_count = params.vibes.as_ref().map(|v| v.len() as u64).unwrap_or(0);
+            if let Ok(cost_result) = crate::anlas::calculate_generation_cost(&GenerationCostParams {
+                width: params.width,
+                height: params.height,
+                steps: params.steps,
+                smea: SmeaMode::Off,
+                mode,
+                strength,
+                n_samples: 1,
+                tier: balance.tier,
+                vibe_count,
+                vibe_unencoded_count: 0,
+                ..Default::default()
+            }) {
+                if cost_result.total_cost > balance.total {
+                    return Err(NovelAIError::InsufficientAnlas {
+                        required: cost_result.total_cost,
+                        available: balance.total,
+                    });
+                }
+            }
+        }
 
         // Send the request
         let api_url = if use_stream {
@@ -423,7 +470,34 @@ impl NovelAIClient {
         }
         let b64_image = BASE64.encode(&image_buffer);
 
-        let anlas_before = self.try_get_balance_if_tracking().await;
+        let balance_before = self.try_get_balance_if_tracking().await;
+        let anlas_before = balance_before.as_ref().map(|b| b.total);
+
+        // Pre-flight balance check
+        if let Some(ref balance) = balance_before {
+            use crate::anlas::{AugmentCostParams, AugmentToolType};
+            let tool = match params.req_type {
+                constants::AugmentReqType::Colorize => AugmentToolType::Colorize,
+                constants::AugmentReqType::Declutter => AugmentToolType::Declutter,
+                constants::AugmentReqType::Emotion => AugmentToolType::Emotion,
+                constants::AugmentReqType::Sketch => AugmentToolType::Sketch,
+                constants::AugmentReqType::Lineart => AugmentToolType::Lineart,
+                constants::AugmentReqType::BgRemoval => AugmentToolType::BgRemoval,
+            };
+            if let Ok(cost_result) = crate::anlas::calculate_augment_cost(&AugmentCostParams {
+                tool,
+                width,
+                height,
+                tier: balance.tier,
+            }) {
+                if cost_result.effective_cost > balance.total {
+                    return Err(NovelAIError::InsufficientAnlas {
+                        required: cost_result.effective_cost,
+                        available: balance.total,
+                    });
+                }
+            }
+        }
 
         let mut payload = serde_json::json!({
             "req_type": params.req_type.as_str(),
@@ -519,7 +593,29 @@ impl NovelAIClient {
 
         let b64_image = BASE64.encode(&image_buffer);
 
-        let anlas_before = self.try_get_balance_if_tracking().await;
+        let balance_before = self.try_get_balance_if_tracking().await;
+        let anlas_before = balance_before.as_ref().map(|b| b.total);
+
+        // Pre-flight balance check
+        if let Some(ref balance) = balance_before {
+            use crate::anlas::UpscaleCostParams;
+            if let Ok(cost_result) = crate::anlas::calculate_upscale_cost(&UpscaleCostParams {
+                width,
+                height,
+                tier: balance.tier,
+            }) {
+                if !cost_result.error {
+                    if let Some(cost) = cost_result.cost {
+                        if cost > balance.total {
+                            return Err(NovelAIError::InsufficientAnlas {
+                                required: cost,
+                                available: balance.total,
+                            });
+                        }
+                    }
+                }
+            }
+        }
 
         let payload = serde_json::json!({
             "image": b64_image,
@@ -588,12 +684,12 @@ impl NovelAIClient {
     // =========================================================================
 
     /// Get balance before an operation, only if balance tracking is enabled.
-    async fn try_get_balance_if_tracking(&self) -> Option<u64> {
+    async fn try_get_balance_if_tracking(&self) -> Option<AnlasBalance> {
         if !self.track_balance {
             return None;
         }
         match self.get_anlas_balance().await {
-            Ok(balance) => Some(balance.total),
+            Ok(balance) => Some(balance),
             Err(e) => {
                 self.logger.warn(&format!(
                     "[NovelAI] Failed to get initial Anlas balance: {}",
