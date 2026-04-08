@@ -221,6 +221,9 @@ pub enum NoiseSchedule {
     #[serde(rename = "polyexponential")]
     #[strum(serialize = "polyexponential")]
     Polyexponential,
+    #[serde(rename = "native")]
+    #[strum(serialize = "native")]
+    Native,
 }
 
 impl NoiseSchedule {
