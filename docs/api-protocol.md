@@ -14,8 +14,8 @@ Authorization: Bearer <api_key>
 
 | エンドポイント | メソッド | Content-Type (リクエスト) | レスポンス形式 | 用途 |
 |---------------|---------|--------------------------|---------------|------|
-| `https://image.novelai.net/ai/generate-image` | POST | `application/json` | ZIP (PNGエントリ) | 画像生成 (通常) |
-| `https://image.novelai.net/ai/generate-image-stream` | POST | `application/json` | msgpack stream | 画像生成 (img2img/charref/infill) |
+| `https://image.novelai.net/ai/generate-image` | POST | `multipart/form-data` | ZIP (PNGエントリ) | 画像生成 (レガシー、非推奨) |
+| `https://image.novelai.net/ai/generate-image-stream` | POST | `multipart/form-data` | msgpack stream | 画像生成 (推奨、全フロー) |
 | `https://image.novelai.net/ai/encode-vibe` | POST | `application/json` | バイナリ (encoding) | Vibeエンコード |
 | `https://image.novelai.net/ai/augment-image` | POST | `application/json` | ZIP (PNGエントリ) | 画像加工 |
 | `https://api.novelai.net/ai/upscale` | POST | `application/json` | ZIP or raw image | アップスケール |
@@ -29,10 +29,22 @@ Authorization: Bearer <api_key>
 
 ### エンドポイント選択条件
 
-- `character_reference` が指定されている → `STREAM_URL`
-- `action === "infill"` → `STREAM_URL`
-- `action === "img2img"` → `STREAM_URL`
-- それ以外 → `API_URL`
+公式サイトはすべての generate フロー (txt2img / img2img / infill / charref) を **`STREAM_URL` (`/ai/generate-image-stream`)** に送り、`stream: "msgpack"` で msgpack ストリーム応答を受け取る。レガシーの非 stream エンドポイント (`generate-image`) は早期/中間フレームを返すケースがあり、ノイズ・低解像度状の出力につながるため使用しない。
+
+### リクエスト形式
+
+公式サイトは `multipart/form-data` で送信する。JSON ペイロードは `request` フィールドに `filename="blob"`, `Content-Type: application/json` で格納する:
+
+```
+------WebKitFormBoundaryXXX
+Content-Disposition: form-data; name="request"; filename="blob"
+Content-Type: application/json
+
+{ ...JSON payload... }
+------WebKitFormBoundaryXXX--
+```
+
+> **言語別実装状況**: ts-api / rust-api / swift-api いずれも multipart + 常時 stream に対応済み。
 
 ### ペイロード構造 (GenerationPayload)
 
@@ -57,8 +69,8 @@ Authorization: Bearer <api_key>
   "sampler": "k_euler_ancestral",
   "steps": 23,
   "n_samples": 1,
-  "ucPreset": 0,
-  "qualityToggle": false,
+  "ucPreset": 2,
+  "qualityToggle": true,
   "autoSmea": false,
   "dynamic_thresholding": false,
   "controlnet_strength": 1,
@@ -68,20 +80,29 @@ Authorization: Bearer <api_key>
   "noise_schedule": "karras",
   "legacy_v3_extend": false,
   "skip_cfg_above_sigma": null,
-  "use_coords": false,
+  "use_coords": true,
   "legacy_uc": false,
   "normalize_reference_strength_multiple": true,
-  "inpaintImg2ImgStrength": 1,
+  "inpaintImg2ImgStrength": 0.85,
   "seed": 1234567890,
+  "extra_noise_seed": 1234567889,
   "negative_prompt": "<negative_prompt>",
   "deliberate_euler_ancestral_bug": false,
-  "prefer_brownian": true
+  "prefer_brownian": true,
+  "stream": "msgpack",
+  "image_format": "png"
 }
 ```
 
+- `ucPreset`/`qualityToggle`: 公式サイトの既定 (Heavy UC + Quality Tags ON)。
+- `use_coords`: 公式は txt2img でも常に `true`。
+- `inpaintImg2ImgStrength`: 公式既定 `0.85` (infill 時は `mask_strength` で上書き)。
+- `extra_noise_seed`: 全フローで送信。`seed === 0` の場合は `MAX_SEED (4294967295)`、それ以外は `seed - 1`。
+- `stream`/`image_format`: 全フローで付与。
+
 ### v4_prompt 構造
 
-全リクエストに付与される V4 プロンプト構造。`use_coords` はキャラクター設定の有無に応じて動的に設定される (`characters` が存在する場合は `true`、それ以外は `false`):
+全リクエストに付与される V4 プロンプト構造。`use_coords` は公式サイトでは常に `true`:
 
 ```json
 {
@@ -95,7 +116,7 @@ Authorization: Bearer <api_key>
         }
       ]
     },
-    "use_coords": false,
+    "use_coords": true,
     "use_order": true
   },
   "v4_negative_prompt": {
@@ -133,25 +154,6 @@ Authorization: Bearer <api_key>
 
 ---
 
-## stream vs 非stream の使い分け
-
-| 条件 | エンドポイント | レスポンス形式 |
-|------|--------------|---------------|
-| `character_reference` あり | `generate-image-stream` | msgpack |
-| `action === "infill"` | `generate-image-stream` | msgpack |
-| `action === "img2img"` | `generate-image-stream` | msgpack |
-| それ以外 | `generate-image` | ZIP |
-
-stream エンドポイント使用時は以下が追加される:
-```json
-{
-  "stream": "msgpack",
-  "image_format": "png"
-}
-```
-
----
-
 ## img2img 固有パラメータ
 
 `action: "img2img"` 時に parameters に追加:
@@ -160,14 +162,11 @@ stream エンドポイント使用時は以下が追加される:
 {
   "image": "<source_image_base64>",
   "strength": 0.62,
-  "noise": 0.0,
-  "extra_noise_seed": 1234567889,
-  "stream": "msgpack",
-  "image_format": "png"
+  "noise": 0.0
 }
 ```
 
-- `extra_noise_seed`: `seed === 0` の場合は `MAX_SEED (4294967295)`、それ以外は `seed - 1`
+`extra_noise_seed` / `stream` / `image_format` は基本ペイロードに常時含まれるためここでは追加不要。
 
 ### ソース画像リサイズ
 
@@ -220,16 +219,13 @@ nai-diffusion-4-5-full → nai-diffusion-4-5-full-inpainting
   "strength": 0.45,
   "noise": 0,
   "add_original_image": false,
-  "extra_noise_seed": 1234567889,
   "inpaintImg2ImgStrength": 0.68,
   "img2img": {
     "strength": 0.68,
     "color_correct": true
   },
   "image_cache_secret_key": "<sha256_of_source_image>",
-  "mask_cache_secret_key": "<sha256_of_resized_mask>",
-  "image_format": "png",
-  "stream": "msgpack"
+  "mask_cache_secret_key": "<sha256_of_resized_mask>"
 }
 ```
 
@@ -276,9 +272,7 @@ nai-diffusion-4-5-full → nai-diffusion-4-5-full-inpainting
   ],
   "director_reference_information_extracted": [1.0],
   "director_reference_strength_values": [0.6],
-  "director_reference_secondary_strength_values": [0.0],
-  "stream": "msgpack",
-  "image_format": "png"
+  "director_reference_secondary_strength_values": [0.0]
 }
 ```
 

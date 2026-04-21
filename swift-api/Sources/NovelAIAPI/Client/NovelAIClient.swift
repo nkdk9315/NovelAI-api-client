@@ -254,8 +254,8 @@ public final class NovelAIClient: @unchecked Sendable {
         var payload = buildBasePayload(params, seed: seed, negativePrompt: negativePrompt)
 
         // Apply action-specific parameters
-        try applyImg2ImgParams(&payload, params: params, seed: seed)
-        try applyInfillParams(&payload, params: params, seed: seed)
+        try applyImg2ImgParams(&payload, params: params)
+        try applyInfillParams(&payload, params: params)
 
         // Apply additional features
         applyVibeParams(&payload, vibeEncodings: vibeEncodings, vibeStrengths: vibeStrengths, vibeInfoList: vibeInfoList)
@@ -309,15 +309,16 @@ public final class NovelAIClient: @unchecked Sendable {
             }
         }
 
-        // Choose endpoint: stream for charRef or infill
-        let useStream = (params.characterReference != nil) || (params.action == .infill) || (params.action == .img2img)
-        let apiUrlString = useStream ? streamURL() : apiURL()
-
+        // 公式サイトはすべての generate フローを stream エンドポイントに送り、
+        // multipart/form-data の `request` フィールド (filename `blob`) に
+        // JSON ペイロードを格納する。レガシー非 stream 経路は早期/中間フレームを
+        // 返すケースがありノイズ・低解像度状の出力につながるため使用しない。
         let payloadData = try JSONSerialization.data(withJSONObject: payload)
-        guard let url = URL(string: apiUrlString) else {
+        guard let url = URL(string: streamURL()) else {
             throw NovelAIError.other("Invalid API URL")
         }
-        let request = buildRequest(url: url, method: "POST", body: payloadData, contentType: "application/json")
+        let (multipartBody, contentType) = buildMultipartRequestBody(jsonPayload: payloadData)
+        let request = buildRequest(url: url, method: "POST", body: multipartBody, contentType: contentType)
 
         let (responseData, _) = try await fetchWithRetry(
             request: request,
@@ -329,13 +330,8 @@ public final class NovelAIClient: @unchecked Sendable {
         // Validate response size
         try validateResponseSize(responseData)
 
-        // Parse response
-        let imageData: Data
-        if useStream {
-            imageData = try parseStreamResponse(responseData, logger: logger)
-        } else {
-            imageData = try parseZipResponse(responseData)
-        }
+        // Parse response (always streamed msgpack)
+        let imageData = try parseStreamResponse(responseData, logger: logger)
 
         // Get final balance
         let balanceAfter = await tryGetBalance()
@@ -629,6 +625,22 @@ public final class NovelAIClient: @unchecked Sendable {
     }
 
     // MARK: - Private Helpers: Request Building
+
+    /// Build a multipart/form-data body containing the JSON payload as a `request`
+    /// field with filename `blob` (matches the official site's request format
+    /// for `/ai/generate-image-stream`). Returns the body bytes and the
+    /// `Content-Type` header value (with the generated boundary).
+    private func buildMultipartRequestBody(jsonPayload: Data) -> (Data, String) {
+        let boundary = "----NovelAIAPIBoundary\(UUID().uuidString)"
+        var body = Data()
+        let lineBreak = "\r\n"
+        body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"request\"; filename=\"blob\"\(lineBreak)".data(using: .utf8)!)
+        body.append("Content-Type: application/json\(lineBreak)\(lineBreak)".data(using: .utf8)!)
+        body.append(jsonPayload)
+        body.append("\(lineBreak)--\(boundary)--\(lineBreak)".data(using: .utf8)!)
+        return (body, "multipart/form-data; boundary=\(boundary)")
+    }
 
     /// Build an HTTP request with authorization header and optional content type.
     private func buildRequest(url: URL, method: String, body: Data?, contentType: String?) -> URLRequest {
