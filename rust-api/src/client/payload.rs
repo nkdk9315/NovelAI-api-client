@@ -12,6 +12,11 @@ pub fn build_base_payload(
     seed: u64,
     negative_prompt: &str,
 ) -> serde_json::Value {
+    let extra_noise_seed = if seed == 0 {
+        constants::MAX_SEED as u64
+    } else {
+        seed - 1
+    };
     serde_json::json!({
         "input": params.prompt,
         "model": params.model.as_str(),
@@ -24,8 +29,8 @@ pub fn build_base_payload(
             "sampler": params.sampler.as_str(),
             "steps": params.steps,
             "n_samples": 1,
-            "ucPreset": 0,
-            "qualityToggle": false,
+            "ucPreset": 2,
+            "qualityToggle": true,
             "autoSmea": false,
             "dynamic_thresholding": false,
             "controlnet_strength": 1,
@@ -35,14 +40,17 @@ pub fn build_base_payload(
             "noise_schedule": params.noise_schedule.as_str(),
             "legacy_v3_extend": false,
             "skip_cfg_above_sigma": null,
-            "use_coords": false,
+            "use_coords": true,
             "legacy_uc": false,
             "normalize_reference_strength_multiple": true,
-            "inpaintImg2ImgStrength": 1,
+            "inpaintImg2ImgStrength": 0.85,
             "seed": seed,
+            "extra_noise_seed": extra_noise_seed,
             "negative_prompt": negative_prompt,
             "deliberate_euler_ancestral_bug": false,
             "prefer_brownian": true,
+            "stream": "msgpack",
+            "image_format": "png",
         },
         "use_new_shared_trial": true,
     })
@@ -52,21 +60,12 @@ pub fn build_base_payload(
 pub fn apply_img2img_params(
     payload: &mut serde_json::Value,
     params: &GenerateParams,
-    seed: u64,
 ) -> Result<()> {
     if let GenerateAction::Img2Img { ref source_image, strength, noise } = params.action {
         let b64 = utils::image::resize_image_for_img2img(source_image, params.width, params.height)?;
-        let extra_seed = if seed == 0 {
-            constants::MAX_SEED as u64
-        } else {
-            seed - 1
-        };
         payload["parameters"]["image"] = serde_json::Value::String(b64);
         payload["parameters"]["strength"] = serde_json::json!(strength);
         payload["parameters"]["noise"] = serde_json::json!(noise);
-        payload["parameters"]["extra_noise_seed"] = serde_json::json!(extra_seed);
-        payload["parameters"]["stream"] = serde_json::Value::String("msgpack".to_string());
-        payload["parameters"]["image_format"] = serde_json::Value::String("png".to_string());
     }
     Ok(())
 }
@@ -75,7 +74,6 @@ pub fn apply_img2img_params(
 pub fn apply_infill_params(
     payload: &mut serde_json::Value,
     params: &GenerateParams,
-    seed: u64,
 ) -> Result<()> {
     if let GenerateAction::Infill {
         ref source_image,
@@ -116,18 +114,11 @@ pub fn apply_infill_params(
         let effective_hybrid_strength = hybrid_strength.unwrap_or(mask_strength);
         let effective_hybrid_noise = hybrid_noise.unwrap_or(0.0);
 
-        let extra_seed = if seed == 0 {
-            constants::MAX_SEED as u64
-        } else {
-            seed - 1
-        };
-
         payload["parameters"]["image"] = serde_json::Value::String(source_base64);
         payload["parameters"]["mask"] = serde_json::Value::String(mask_base64);
         payload["parameters"]["strength"] = serde_json::json!(effective_hybrid_strength);
         payload["parameters"]["noise"] = serde_json::json!(effective_hybrid_noise);
         payload["parameters"]["add_original_image"] = serde_json::json!(false);
-        payload["parameters"]["extra_noise_seed"] = serde_json::json!(extra_seed);
         payload["parameters"]["inpaintImg2ImgStrength"] = serde_json::json!(mask_strength);
         payload["parameters"]["img2img"] = serde_json::json!({
             "strength": mask_strength,
@@ -137,8 +128,6 @@ pub fn apply_infill_params(
             serde_json::Value::String(image_cache_key);
         payload["parameters"]["mask_cache_secret_key"] =
             serde_json::Value::String(mask_cache_key);
-        payload["parameters"]["image_format"] = serde_json::Value::String("png".to_string());
-        payload["parameters"]["stream"] = serde_json::Value::String("msgpack".to_string());
     }
 
     Ok(())
@@ -176,8 +165,6 @@ pub fn apply_char_ref_params(
         serde_json::json!(char_ref_data.strength_values);
     payload["parameters"]["director_reference_secondary_strength_values"] =
         serde_json::json!(char_ref_data.secondary_strength_values);
-    payload["parameters"]["stream"] = serde_json::Value::String("msgpack".to_string());
-    payload["parameters"]["image_format"] = serde_json::Value::String("png".to_string());
 }
 
 /// Build V4 prompt structure for the payload.
@@ -212,13 +199,12 @@ pub fn build_v4_prompt_structure(
         })
         .collect();
 
-    let has_characters = !char_caps.is_empty();
     payload["parameters"]["v4_prompt"] = serde_json::json!({
         "caption": {
             "base_caption": prompt,
             "char_captions": char_caps,
         },
-        "use_coords": has_characters,
+        "use_coords": true,
         "use_order": true,
     });
 

@@ -25,17 +25,65 @@ pub async fn fetch_with_retry(
     operation_name: &str,
     logger: &dyn Logger,
 ) -> Result<reqwest::Response> {
+    fetch_with_retry_inner(client, url, method, body, false, api_key, operation_name, logger).await
+}
+
+/// Same as `fetch_with_retry`, but sends the body as multipart/form-data
+/// with field name `request` and filename `blob` (matches the official
+/// site's request format for `/ai/generate-image-stream`).
+pub async fn fetch_with_retry_multipart(
+    client: &reqwest::Client,
+    url: &str,
+    body: &str,
+    api_key: &str,
+    operation_name: &str,
+    logger: &dyn Logger,
+) -> Result<reqwest::Response> {
+    fetch_with_retry_inner(
+        client,
+        url,
+        reqwest::Method::POST,
+        Some(body),
+        true,
+        api_key,
+        operation_name,
+        logger,
+    )
+    .await
+}
+
+async fn fetch_with_retry_inner(
+    client: &reqwest::Client,
+    url: &str,
+    method: reqwest::Method,
+    body: Option<&str>,
+    multipart: bool,
+    api_key: &str,
+    operation_name: &str,
+    logger: &dyn Logger,
+) -> Result<reqwest::Response> {
     for attempt in 0..=MAX_RETRIES {
         let mut request = client
             .request(method.clone(), url)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("User-Agent", USER_AGENT);
 
-        // Set content-type for POST requests with body
+        // Set body. Generate endpoints use multipart/form-data with the
+        // JSON payload in a `request` field (filename `blob`); other
+        // endpoints continue to use plain application/json.
         if let Some(body_str) = body {
-            request = request
-                .header("Content-Type", "application/json")
-                .body(body_str.to_owned());
+            if multipart {
+                let part = reqwest::multipart::Part::bytes(body_str.as_bytes().to_vec())
+                    .file_name("blob")
+                    .mime_str("application/json")
+                    .map_err(|e| NovelAIError::Other(format!("multipart mime: {}", e)))?;
+                let form = reqwest::multipart::Form::new().part("request", part);
+                request = request.multipart(form);
+            } else {
+                request = request
+                    .header("Content-Type", "application/json")
+                    .body(body_str.to_owned());
+            }
         } else {
             request = request.header("Accept", "application/json");
         }

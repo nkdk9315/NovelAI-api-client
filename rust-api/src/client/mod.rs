@@ -323,11 +323,10 @@ impl NovelAIClient {
             constants::api_url()
         };
 
-        let response = retry::fetch_with_retry(
+        let response = retry::fetch_with_retry_multipart(
             &self.http_client,
             &api_url,
-            reqwest::Method::POST,
-            Some(&body),
+            &body,
             self.api_key.expose_secret(),
             "Generation",
             &*self.logger,
@@ -406,8 +405,8 @@ impl NovelAIClient {
         // Build payload
         let mut payload_val =
             payload::build_base_payload(params, seed, negative_prompt);
-        payload::apply_img2img_params(&mut payload_val, params, seed)?;
-        payload::apply_infill_params(&mut payload_val, params, seed)?;
+        payload::apply_img2img_params(&mut payload_val, params)?;
+        payload::apply_infill_params(&mut payload_val, params)?;
         payload::apply_vibe_params(
             &mut payload_val,
             &vibe_encodings,
@@ -426,9 +425,10 @@ impl NovelAIClient {
         );
         payload::apply_character_prompts(&mut payload_val, char_configs);
 
-        let use_stream = params.character_reference.is_some()
-            || params.action.is_infill()
-            || params.action.is_img2img();
+        // Official site routes all generate flows through the streaming
+        // endpoint with `stream: "msgpack"`. The legacy non-stream endpoint
+        // can return early/intermediate frames, producing noisy output.
+        let use_stream = true;
 
         let body = serde_json::to_string(&payload_val)?;
         Ok((body, use_stream))

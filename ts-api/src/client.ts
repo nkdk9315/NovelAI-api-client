@@ -402,8 +402,8 @@ export class NovelAIClient {
         sampler: validatedParams.sampler!,
         steps: validatedParams.steps!,
         n_samples: 1,
-        ucPreset: 0,
-        qualityToggle: false,
+        ucPreset: 2,
+        qualityToggle: true,
         autoSmea: false,
         dynamic_thresholding: false,
         controlnet_strength: 1,
@@ -413,14 +413,17 @@ export class NovelAIClient {
         noise_schedule: validatedParams.noise_schedule!,
         legacy_v3_extend: false,
         skip_cfg_above_sigma: null,
-        use_coords: false,
+        use_coords: true,
         legacy_uc: false,
         normalize_reference_strength_multiple: true,
-        inpaintImg2ImgStrength: 1,
+        inpaintImg2ImgStrength: 0.85,
         seed: seed,
+        extra_noise_seed: seed === 0 ? Constants.MAX_SEED : seed - 1,
         negative_prompt: negativePrompt,
         deliberate_euler_ancestral_bug: false,
         prefer_brownian: true,
+        stream: "msgpack",
+        image_format: "png",
       },
       use_new_shared_trial: true,
     };
@@ -431,8 +434,7 @@ export class NovelAIClient {
    */
   private async applyImg2ImgParams(
     payload: GenerationPayload,
-    validatedParams: Schemas.GenerateParams & { width: number; height: number },
-    seed: number
+    validatedParams: Schemas.GenerateParams & { width: number; height: number }
   ): Promise<void> {
     if (validatedParams.action === "img2img" && validatedParams.source_image) {
       // Resize source image to match output dimensions to avoid server errors with oversized images
@@ -443,9 +445,6 @@ export class NovelAIClient {
       );
       payload.parameters.strength = validatedParams.img2img_strength;
       payload.parameters.noise = validatedParams.img2img_noise;
-      payload.parameters.extra_noise_seed = seed === 0 ? Constants.MAX_SEED : seed - 1;
-      payload.parameters.stream = "msgpack";
-      payload.parameters.image_format = "png";
     }
   }
 
@@ -454,8 +453,7 @@ export class NovelAIClient {
    */
   private async applyInfillParams(
     payload: GenerationPayload,
-    validatedParams: Schemas.GenerateParams & { width: number; height: number; model: string },
-    seed: number
+    validatedParams: Schemas.GenerateParams & { width: number; height: number; model: string }
   ): Promise<void> {
     if (validatedParams.action !== "infill" || !validatedParams.source_image || !validatedParams.mask) {
       return;
@@ -501,7 +499,6 @@ export class NovelAIClient {
     payload.parameters.strength = hybridStrength;
     payload.parameters.noise = hybridNoise;
     payload.parameters.add_original_image = false;
-    payload.parameters.extra_noise_seed = seed === 0 ? Constants.MAX_SEED : seed - 1;
     payload.parameters.inpaintImg2ImgStrength = maskStrength;
     payload.parameters.img2img = {
       strength: maskStrength,
@@ -509,8 +506,6 @@ export class NovelAIClient {
     };
     payload.parameters.image_cache_secret_key = imageCacheSecretKey;
     payload.parameters.mask_cache_secret_key = maskCacheSecretKey;
-    payload.parameters.image_format = "png";
-    payload.parameters.stream = "msgpack";
   }
 
   /**
@@ -543,8 +538,6 @@ export class NovelAIClient {
     payload.parameters.director_reference_information_extracted = info_extracted;
     payload.parameters.director_reference_strength_values = strength_values;
     payload.parameters.director_reference_secondary_strength_values = secondary_strength_values;
-    payload.parameters.stream = "msgpack";
-    payload.parameters.image_format = "png";
   }
 
   /**
@@ -555,15 +548,14 @@ export class NovelAIClient {
     prompt: string,
     negativePrompt: string,
     charCaptions: ReturnType<typeof Schemas.characterToCaptionDict>[],
-    charNegativeCaptions: ReturnType<typeof Schemas.characterToNegativeCaptionDict>[],
-    hasCharacters: boolean
+    charNegativeCaptions: ReturnType<typeof Schemas.characterToNegativeCaptionDict>[]
   ): void {
     payload.parameters.v4_prompt = {
       caption: {
         base_caption: prompt,
         char_captions: charCaptions,
       },
-      use_coords: hasCharacters,
+      use_coords: true,
       use_order: true,
     };
     payload.parameters.v4_negative_prompt = {
@@ -646,8 +638,8 @@ export class NovelAIClient {
     const payload = this.buildBasePayload(validatedParams, seed, negativePrompt);
 
     // Apply action-specific parameters
-    await this.applyImg2ImgParams(payload, validatedParams, seed);
-    await this.applyInfillParams(payload, validatedParams, seed);
+    await this.applyImg2ImgParams(payload, validatedParams);
+    await this.applyInfillParams(payload, validatedParams);
 
     // Apply additional features
     this.applyVibeParams(payload, vibeEncodings, vibeStrengths, vibeInfoList);
@@ -657,7 +649,7 @@ export class NovelAIClient {
     }
 
     // Build prompt structures
-    this.buildV4PromptStructure(payload, validatedParams.prompt, negativePrompt, charCaptions, charNegativeCaptions, charConfigs.length > 0);
+    this.buildV4PromptStructure(payload, validatedParams.prompt, negativePrompt, charCaptions, charNegativeCaptions);
     this.applyCharacterPrompts(payload, charConfigs);
 
     // Get initial balance
@@ -695,26 +687,31 @@ export class NovelAIClient {
     }
 
     // Make Request
-    const useStream = (validatedParams.character_reference !== undefined && validatedParams.character_reference !== null)
-      || validatedParams.action === "infill"
-      || validatedParams.action === "img2img";
-    const apiUrl = useStream ? Constants.STREAM_URL : Constants.API_URL;
+    // 公式サイトはすべての generate フローを stream エンドポイントに送り、
+    // multipart/form-data の `request` フィールド (filename `blob`) に
+    // JSON ペイロードを格納する。レガシー非 stream 経路は早期/中間フレームを
+    // 返すケースがありノイズ・低解像度状の出力につながるため使用しない。
+    const formData = new FormData();
+    formData.append(
+      "request",
+      new Blob([JSON.stringify(payload)], { type: "application/json" }),
+      "blob"
+    );
 
     const response = await this.fetchWithRetry(
-      apiUrl,
+      Constants.STREAM_URL,
       {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${this.apiKey}`,
-          "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body: formData,
       },
       'Generation'
     );
 
     const responseBuffer = await this.getResponseBuffer(response);
-    const imageData = useStream ? this.parseStreamResponse(responseBuffer) : this.parseZipResponse(responseBuffer);
+    const imageData = this.parseStreamResponse(responseBuffer);
 
     // Get final balance
     let anlasRemaining: number | null = null;

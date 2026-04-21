@@ -57,17 +57,20 @@ Anlas.swift                      (純粋関数, 外部依存なし)
     │
     ▼
 [3] API呼び出し (Retry.swift: fetchWithRetry)
-    │   - URL: characterReference or infill or img2img → STREAM_URL, それ以外 → API_URL
-    │   - URLSession.shared で HTTPリクエスト
-    │   - Content-Type: application/json
+    │   - URL: 常に STREAM_URL (`/ai/generate-image-stream`)
+    │     ※ 公式サイトと同様、txt2img も含めて全フローを stream に統一。
+    │       非 stream の `generate-image` は早期/中間フレームを返すケースがあり、
+    │       ノイズ・低解像度状の出力につながるため使用しない。
+    │   - Content-Type: multipart/form-data
+    │     ※ `request` フィールド (filename `blob`, Content-Type `application/json`)
+    │       に JSON ペイロードを格納。NovelAIClient.buildMultipartRequestBody が組み立て。
     │   - Authorization: Bearer <apiKey>
     │   - 429/ネットワークエラー → exponential backoff リトライ
     │   - Task.sleep + withThrowingTaskGroup で60秒タイムアウト
     │
     ▼
 [4] レスポンスパース (Response.swift)
-    │   - stream URL → parseStreamResponse (ZIP → PNG → フレーム化msgpack → 埋め込みPNG → raw msgpack フォールバック)
-    │   - 通常 URL → parseZipResponse (ZIPから画像エントリ抽出)
+    │   - 常に parseStreamResponse (ZIP → PNG → フレーム化msgpack → 埋め込みPNG → raw msgpack フォールバック)
     │
     ▼
 [5] 結果構築 + 保存
@@ -79,13 +82,13 @@ Anlas.swift                      (純粋関数, 外部依存なし)
 
 NovelAI APIは3つの形式でレスポンスを返す可能性がある:
 
-### ZIP形式 (通常の generate)
+### ZIP形式 (augment / upscale / レガシー generate)
 - マジックバイト: `PK` (0x50, 0x4b)
 - ZIPFoundation で展開
 - `.png` / `.webp` / `.jpg` / `.jpeg` 拡張子のエントリを検索
 - ZIPボム防御: エントリ数上限 (10), 展開サイズ上限 (50MB), 圧縮比上限 (100)
 
-### msgpack stream (img2img / character_reference / infill)
+### msgpack stream (generate 全フロー)
 - msgpack-swift でデコード
 - `data` または `image` フィールドからバイナリ取得
 - パース失敗時: PNGマジックバイト (89 50 4E 47) を探してIENDチャンクまで切り出し

@@ -17,6 +17,7 @@ func buildBasePayload(
     seed: UInt32,
     negativePrompt: String
 ) -> [String: Any] {
+    let extraNoiseSeed = Int(seed == 0 ? MAX_SEED : seed - 1)
     let parameters: [String: Any] = [
         "params_version": 3,
         "width": params.width,
@@ -25,8 +26,8 @@ func buildBasePayload(
         "sampler": params.sampler.rawValue,
         "steps": params.steps,
         "n_samples": 1,
-        "ucPreset": 0,
-        "qualityToggle": false,
+        "ucPreset": 2,
+        "qualityToggle": true,
         "autoSmea": false,
         "dynamic_thresholding": false,
         "controlnet_strength": 1,
@@ -36,14 +37,17 @@ func buildBasePayload(
         "noise_schedule": params.noiseSchedule.rawValue,
         "legacy_v3_extend": false,
         "skip_cfg_above_sigma": NSNull(), // Explicit JSON null — API expects this key present with null value
-        "use_coords": false,
+        "use_coords": true,
         "legacy_uc": false,
         "normalize_reference_strength_multiple": true,
-        "inpaintImg2ImgStrength": 1,
+        "inpaintImg2ImgStrength": 0.85,
         "seed": Int(seed),
+        "extra_noise_seed": extraNoiseSeed,
         "negative_prompt": negativePrompt,
         "deliberate_euler_ancestral_bug": false,
         "prefer_brownian": true,
+        "stream": "msgpack",
+        "image_format": "png",
     ]
 
     return [
@@ -63,8 +67,7 @@ func buildBasePayload(
 /// image, strength, noise, and extra_noise_seed fields.
 func applyImg2ImgParams(
     _ payload: inout [String: Any],
-    params: GenerateParams,
-    seed: UInt32
+    params: GenerateParams
 ) throws {
     guard params.action == .img2img, let sourceImage = params.sourceImage else {
         return
@@ -77,9 +80,6 @@ func applyImg2ImgParams(
     parameters["image"] = imageBase64
     parameters["strength"] = params.img2imgStrength
     parameters["noise"] = params.img2imgNoise
-    parameters["extra_noise_seed"] = Int(seed == 0 ? MAX_SEED : seed - 1)
-    parameters["stream"] = "msgpack"
-    parameters["image_format"] = "png"
 
     payload["parameters"] = parameters
 }
@@ -92,8 +92,7 @@ func applyImg2ImgParams(
 /// and all inpaint-specific parameter fields.
 func applyInfillParams(
     _ payload: inout [String: Any],
-    params: GenerateParams,
-    seed: UInt32
+    params: GenerateParams
 ) throws {
     guard params.action == .infill,
           let sourceImage = params.sourceImage,
@@ -140,7 +139,6 @@ func applyInfillParams(
     parameters["strength"] = hybridStrength
     parameters["noise"] = hybridNoise
     parameters["add_original_image"] = false
-    parameters["extra_noise_seed"] = Int(seed == 0 ? MAX_SEED : seed - 1)
     parameters["inpaintImg2ImgStrength"] = maskStrength
     parameters["img2img"] = [
         "strength": maskStrength,
@@ -148,8 +146,6 @@ func applyInfillParams(
     ] as [String: Any]
     parameters["image_cache_secret_key"] = imageCacheSecretKey
     parameters["mask_cache_secret_key"] = maskCacheSecretKey
-    parameters["image_format"] = "png"
-    parameters["stream"] = "msgpack"
 
     payload["parameters"] = parameters
 }
@@ -197,8 +193,6 @@ func applyCharRefParams(
     parameters["director_reference_information_extracted"] = charRefs.infoExtracted
     parameters["director_reference_strength_values"] = charRefs.strengthValues
     parameters["director_reference_secondary_strength_values"] = charRefs.secondaryStrengthValues
-    parameters["stream"] = "msgpack"
-    parameters["image_format"] = "png"
 
     payload["parameters"] = parameters
 }
@@ -211,15 +205,14 @@ func applyCharRefParams(
 /// along with use_coords and use_order flags.
 func buildV4PromptStructure(
     prompt: String,
-    charCaptions: [[String: Any]],
-    hasCharacters: Bool
+    charCaptions: [[String: Any]]
 ) -> [String: Any] {
     return [
         "caption": [
             "base_caption": prompt,
             "char_captions": charCaptions,
         ] as [String: Any],
-        "use_coords": hasCharacters,
+        "use_coords": true,
         "use_order": true,
     ]
 }
@@ -286,11 +279,9 @@ func applyV4PromptStructures(
 ) {
     var parameters = payload["parameters"] as? [String: Any] ?? [:]
 
-    let hasCharacters = !charCaptions.isEmpty
     parameters["v4_prompt"] = buildV4PromptStructure(
         prompt: prompt,
-        charCaptions: charCaptions,
-        hasCharacters: hasCharacters
+        charCaptions: charCaptions
     )
     parameters["v4_negative_prompt"] = buildV4NegativePromptStructure(
         negativePrompt: negativePrompt,

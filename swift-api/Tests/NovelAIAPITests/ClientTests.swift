@@ -450,8 +450,9 @@ final class PayloadConstructionTests: XCTestCase {
         XCTAssertEqual(parameters?["n_samples"] as? Int, 1)
         XCTAssertEqual(parameters?["seed"] as? Int, 42)
         XCTAssertEqual(parameters?["negative_prompt"] as? String, "bad quality")
-        XCTAssertEqual(parameters?["ucPreset"] as? Int, 0)
-        XCTAssertEqual(parameters?["qualityToggle"] as? Bool, false)
+        // Defaults updated to match the official site (Heavy UC + quality tags ON, etc.)
+        XCTAssertEqual(parameters?["ucPreset"] as? Int, 2)
+        XCTAssertEqual(parameters?["qualityToggle"] as? Bool, true)
         XCTAssertEqual(parameters?["autoSmea"] as? Bool, false)
         XCTAssertEqual(parameters?["dynamic_thresholding"] as? Bool, false)
         XCTAssertEqual(parameters?["controlnet_strength"] as? Int, 1)
@@ -461,12 +462,17 @@ final class PayloadConstructionTests: XCTestCase {
         XCTAssertEqual(parameters?["noise_schedule"] as? String, DEFAULT_NOISE_SCHEDULE.rawValue)
         XCTAssertEqual(parameters?["legacy_v3_extend"] as? Bool, false)
         XCTAssertTrue(parameters?["skip_cfg_above_sigma"] is NSNull)
-        XCTAssertEqual(parameters?["use_coords"] as? Bool, false)
+        XCTAssertEqual(parameters?["use_coords"] as? Bool, true)
         XCTAssertEqual(parameters?["legacy_uc"] as? Bool, false)
         XCTAssertEqual(parameters?["normalize_reference_strength_multiple"] as? Bool, true)
-        XCTAssertEqual(parameters?["inpaintImg2ImgStrength"] as? Int, 1)
+        XCTAssertEqual(parameters?["inpaintImg2ImgStrength"] as? Double, 0.85)
         XCTAssertEqual(parameters?["deliberate_euler_ancestral_bug"] as? Bool, false)
         XCTAssertEqual(parameters?["prefer_brownian"] as? Bool, true)
+        // Always sent to the streaming endpoint with msgpack frames + PNG.
+        XCTAssertEqual(parameters?["stream"] as? String, "msgpack")
+        XCTAssertEqual(parameters?["image_format"] as? String, "png")
+        // extra_noise_seed = seed - 1 (or MAX_SEED when seed == 0).
+        XCTAssertEqual(parameters?["extra_noise_seed"] as? Int, 41)
     }
 
     func testBuildBasePayloadWithCustomModel() {
@@ -518,12 +524,13 @@ final class PayloadConstructionTests: XCTestCase {
         let seed: UInt32 = 42
         var payload = buildBasePayload(params, seed: seed, negativePrompt: "")
 
-        try applyImg2ImgParams(&payload, params: params, seed: seed)
+        try applyImg2ImgParams(&payload, params: params)
 
         let parameters = payload["parameters"] as? [String: Any]
         XCTAssertNotNil(parameters?["image"] as? String)
         XCTAssertEqual(parameters?["strength"] as? Double, 0.7)
         XCTAssertEqual(parameters?["noise"] as? Double, 0.1)
+        // extra_noise_seed is now set in the base payload, not by applyImg2ImgParams.
         XCTAssertEqual(parameters?["extra_noise_seed"] as? Int, 41)
     }
 
@@ -535,7 +542,7 @@ final class PayloadConstructionTests: XCTestCase {
         )
         var payload = buildBasePayload(params, seed: 0, negativePrompt: "")
 
-        try applyImg2ImgParams(&payload, params: params, seed: 0)
+        try applyImg2ImgParams(&payload, params: params)
 
         let parameters = payload["parameters"] as? [String: Any]
         XCTAssertEqual(parameters?["extra_noise_seed"] as? Int, Int(MAX_SEED))
@@ -545,7 +552,7 @@ final class PayloadConstructionTests: XCTestCase {
         let params = GenerateParams(prompt: "test", action: .generate)
         var payload = buildBasePayload(params, seed: 42, negativePrompt: "")
 
-        try applyImg2ImgParams(&payload, params: params, seed: 42)
+        try applyImg2ImgParams(&payload, params: params)
 
         let parameters = payload["parameters"] as? [String: Any]
         // Should not have added an image field
@@ -602,6 +609,7 @@ final class PayloadConstructionTests: XCTestCase {
         XCTAssertEqual(parameters?["director_reference_information_extracted"] as? [Double], [1.0])
         XCTAssertEqual(parameters?["director_reference_strength_values"] as? [Double], [0.6])
         XCTAssertEqual(parameters?["director_reference_secondary_strength_values"] as? [Double], [0.0])
+        // stream/image_format are now set in the base payload, not by applyCharRefParams.
         XCTAssertEqual(parameters?["stream"] as? String, "msgpack")
         XCTAssertEqual(parameters?["image_format"] as? String, "png")
     }
@@ -609,7 +617,7 @@ final class PayloadConstructionTests: XCTestCase {
     // MARK: - buildV4PromptStructure Tests
 
     func testBuildV4PromptStructureCorrectFormat() {
-        let result = buildV4PromptStructure(prompt: "1girl", charCaptions: [], hasCharacters: false)
+        let result = buildV4PromptStructure(prompt: "1girl", charCaptions: [])
 
         let caption = result["caption"] as? [String: Any]
         XCTAssertNotNil(caption)
@@ -619,7 +627,8 @@ final class PayloadConstructionTests: XCTestCase {
         XCTAssertNotNil(charCaptions)
         XCTAssertTrue(charCaptions!.isEmpty)
 
-        XCTAssertEqual(result["use_coords"] as? Bool, false)
+        // 公式は txt2img でも use_coords=true。
+        XCTAssertEqual(result["use_coords"] as? Bool, true)
         XCTAssertEqual(result["use_order"] as? Bool, true)
     }
 
@@ -627,7 +636,7 @@ final class PayloadConstructionTests: XCTestCase {
         let charCaps: [[String: Any]] = [
             ["char_caption": "a girl", "centers": [["x": 0.3, "y": 0.5]]],
         ]
-        let result = buildV4PromptStructure(prompt: "test", charCaptions: charCaps, hasCharacters: true)
+        let result = buildV4PromptStructure(prompt: "test", charCaptions: charCaps)
 
         let caption = result["caption"] as? [String: Any]
         let charCaptions = caption?["char_captions"] as? [[String: Any]]
@@ -694,8 +703,8 @@ final class PayloadConstructionTests: XCTestCase {
         let charPrompts = parameters?["characterPrompts"] as? [[String: Any]]
         XCTAssertNotNil(charPrompts)
         XCTAssertEqual(charPrompts?.count, 0)
-        // use_coords should remain false from buildBasePayload
-        XCTAssertEqual(parameters?["use_coords"] as? Bool, false)
+        // use_coords is now always true in the base payload (matches the official site).
+        XCTAssertEqual(parameters?["use_coords"] as? Bool, true)
     }
 
     // MARK: - applyV4PromptStructures Tests

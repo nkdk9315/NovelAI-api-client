@@ -50,15 +50,19 @@ anlas-browser.ts     (再エクスポートのみ)
     │
     ▼
 [3] API呼び出し (fetchWithRetry)
-    │   - URL: character_reference or infill or img2img → STREAM_URL, それ以外 → API_URL
-    │   - Content-Type: application/json
+    │   - URL: 常に STREAM_URL (`/ai/generate-image-stream`)
+    │     ※ 公式サイトと同様、txt2img も含めて全フローを stream に統一。
+    │       非 stream の `generate-image` は早期/中間フレームを返すケースがあり、
+    │       ノイズ・低解像度状の出力につながるため使用しない。
+    │   - Content-Type: multipart/form-data
+    │     ※ `request` フィールドに JSON ペイロードを Blob (filename `blob`,
+    │       Content-Type `application/json`) として格納。公式サイトと同形式。
     │   - Authorization: Bearer <apiKey>
     │   - 429/ネットワークエラー → exponential backoff リトライ
     │
     ▼
 [4] レスポンスパース
-    │   - stream URL → parseStreamResponse (ZIP → PNG → フレーム化msgpack → raw msgpack → 埋め込みPNG フォールバック)
-    │   - 通常 URL → parseZipResponse (ZIPから画像エントリ抽出)
+    │   - 常に parseStreamResponse (ZIP → PNG → フレーム化msgpack → raw msgpack → 埋め込みPNG フォールバック)
     │
     ▼
 [5] 結果構築 + 保存
@@ -70,13 +74,13 @@ anlas-browser.ts     (再エクスポートのみ)
 
 NovelAI APIは3つの形式でレスポンスを返す可能性がある:
 
-### ZIP形式 (通常の generate)
+### ZIP形式 (augment / upscale / レガシー generate)
 - マジックバイト: `PK` (0x50, 0x4b)
 - adm-zip で展開
 - `.png` / `.webp` / `.jpg` 拡張子のエントリを検索
 - ZIPボム防御: エントリ数上限 (10), 展開サイズ上限 (50MB), 圧縮比上限 (100)
 
-### msgpack stream (img2img / character_reference / infill)
+### msgpack stream (generate 全フロー)
 - msgpackr の `unpackMultiple` でパース
 - `data` または `image` フィールドからバイナリ取得
 - パース失敗時: PNGマジックバイト (89 50 4E 47) を探してIENDチャンクまで切り出し
