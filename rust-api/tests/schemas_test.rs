@@ -1753,13 +1753,13 @@ mod tests {
             }
 
             #[test]
-            fn should_accept_scale_4() {
+            fn should_reject_scale_4_server_always_upscales_2x() {
                 let params = UpscaleParams {
                     image: ImageInput::FilePath("test.png".into()),
                     scale: 4,
                     ..Default::default()
                 };
-                assert!(params.validate().is_ok());
+                assert!(params.validate().is_err());
             }
 
             #[test]
@@ -1832,7 +1832,7 @@ mod tests {
         fn should_accept_valid_result_with_integer_scale_and_dimensions() {
             let result = UpscaleResult {
                 image_data: vec![1, 2, 3],
-                scale: 4,
+                scale: 2,
                 output_width: 2048,
                 output_height: 1536,
                 anlas_remaining: None,

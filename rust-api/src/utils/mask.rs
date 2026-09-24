@@ -2,7 +2,6 @@ use crate::error::{NovelAIError, Result};
 use crate::utils::image::{load_image_safe, encode_to_png};
 
 use image::{DynamicImage, GrayImage, Luma};
-use sha2::{Digest, Sha256};
 
 // =============================================================================
 // Mask Region / Center types
@@ -25,13 +24,6 @@ pub struct MaskCenter {
 // =============================================================================
 // Public Functions
 // =============================================================================
-
-/// Calculate SHA256 hash of image data (for cache_secret_key).
-pub fn calculate_cache_secret_key(image_data: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(image_data);
-    format!("{:x}", hasher.finalize())
-}
 
 /// Resize mask image to 1/8 of target dimensions (API specification).
 pub fn resize_mask_image(

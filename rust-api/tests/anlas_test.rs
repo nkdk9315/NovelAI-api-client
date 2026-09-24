@@ -937,14 +937,13 @@ mod calculate_augment_cost_tests {
 mod calculate_upscale_cost_tests {
     use super::*;
 
+    fn cost(width: u32, height: u32, tier: u32) -> novelai_api::anlas::UpscaleCostResult {
+        calculate_upscale_cost(&UpscaleCostParams { width, height, tier }).unwrap()
+    }
+
     #[test]
     fn k1_512x512_tier0() {
-        let result = calculate_upscale_cost(&UpscaleCostParams {
-            width: 512,
-            height: 512,
-            tier: 0,
-        })
-        .unwrap();
+        let result = cost(512, 512, 0);
         assert_eq!(result.pixels, 262144);
         assert_eq!(result.cost, Some(1));
         assert!(!result.is_opus_free);
@@ -952,120 +951,42 @@ mod calculate_upscale_cost_tests {
     }
 
     #[test]
-    fn k2_640x640_tier0() {
-        let result = calculate_upscale_cost(&UpscaleCostParams {
-            width: 640,
-            height: 640,
-            tier: 0,
-        })
-        .unwrap();
-        assert_eq!(result.pixels, 409600);
-        assert_eq!(result.cost, Some(2));
-        assert!(!result.is_opus_free);
-        assert!(!result.error);
-    }
-
-    #[test]
-    fn k3_512x1024_tier0() {
-        let result = calculate_upscale_cost(&UpscaleCostParams {
-            width: 512,
-            height: 1024,
-            tier: 0,
-        })
-        .unwrap();
-        assert_eq!(result.pixels, 524288);
-        assert_eq!(result.cost, Some(3));
-        assert!(!result.error);
-    }
-
-    #[test]
-    fn k4_1024x768_tier0() {
-        let result = calculate_upscale_cost(&UpscaleCostParams {
-            width: 1024,
-            height: 768,
-            tier: 0,
-        })
-        .unwrap();
-        assert_eq!(result.pixels, 786432);
-        assert_eq!(result.cost, Some(5));
-        assert!(!result.error);
-    }
-
-    #[test]
-    fn k5_1024x1024_tier0() {
-        let result = calculate_upscale_cost(&UpscaleCostParams {
-            width: 1024,
-            height: 1024,
-            tier: 0,
-        })
-        .unwrap();
+    fn k2_1024x1024_boundary_cost1() {
+        let result = cost(1024, 1024, 0);
         assert_eq!(result.pixels, 1048576);
-        assert_eq!(result.cost, Some(7));
+        assert_eq!(result.cost, Some(1));
+    }
+
+    #[test]
+    fn k3_1025x1024_cost2() {
+        assert_eq!(cost(1025, 1024, 0).cost, Some(2));
+    }
+
+    #[test]
+    fn k4_1472x1472_cost3() {
+        assert_eq!(cost(1472, 1472, 0).cost, Some(3));
+    }
+
+    #[test]
+    fn k5_2048x1536_boundary_cost4() {
+        let result = cost(2048, 1536, 0);
+        assert_eq!(result.pixels, 3145728);
+        assert_eq!(result.cost, Some(4));
         assert!(!result.error);
     }
 
     #[test]
-    fn k6_1025x1024_tier0_error_pixels_exceed() {
-        let result = calculate_upscale_cost(&UpscaleCostParams {
-            width: 1025,
-            height: 1024,
-            tier: 0,
-        })
-        .unwrap();
-        assert_eq!(result.pixels, 1049600);
+    fn k6_2048x1600_error_pixels_exceed() {
+        let result = cost(2048, 1600, 0);
         assert_eq!(result.cost, None);
         assert!(result.error);
         assert_eq!(result.error_code, Some(-3));
     }
 
     #[test]
-    fn k7_512x512_tier3_opus_free() {
-        let result = calculate_upscale_cost(&UpscaleCostParams {
-            width: 512,
-            height: 512,
-            tier: 3,
-        })
-        .unwrap();
-        assert_eq!(result.pixels, 262144);
-        assert!(result.is_opus_free);
-        assert_eq!(result.cost, Some(0));
-    }
-
-    #[test]
-    fn k8_640x640_tier3_opus_free() {
-        let result = calculate_upscale_cost(&UpscaleCostParams {
-            width: 640,
-            height: 640,
-            tier: 3,
-        })
-        .unwrap();
-        assert_eq!(result.pixels, 409600);
-        assert!(result.is_opus_free);
-        assert_eq!(result.cost, Some(0));
-    }
-
-    #[test]
-    fn k9_512x1024_tier3_not_opus_free() {
-        let result = calculate_upscale_cost(&UpscaleCostParams {
-            width: 512,
-            height: 1024,
-            tier: 3,
-        })
-        .unwrap();
-        assert_eq!(result.pixels, 524288);
+    fn k7_opus_is_not_free() {
+        let result = cost(512, 768, 3);
         assert!(!result.is_opus_free);
-        assert_eq!(result.cost, Some(3));
-    }
-
-    #[test]
-    fn k10_exact_boundary_512x512_cost_1() {
-        let result = calculate_upscale_cost(&UpscaleCostParams {
-            width: 512,
-            height: 512,
-            tier: 0,
-        })
-        .unwrap();
-        assert_eq!(result.pixels, 262144);
         assert_eq!(result.cost, Some(1));
     }
 }

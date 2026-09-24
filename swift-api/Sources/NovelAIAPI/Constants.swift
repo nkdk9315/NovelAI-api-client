@@ -19,7 +19,7 @@ public func encodeURL() -> String {
 
 public func subscriptionURL() -> String {
     ProcessInfo.processInfo.environment["NOVELAI_SUBSCRIPTION_URL"]
-        ?? "https://api.novelai.net/user/subscription"
+        ?? "https://image.novelai.net/user/subscription"
 }
 
 public func augmentURL() -> String {
@@ -29,7 +29,7 @@ public func augmentURL() -> String {
 
 public func upscaleURL() -> String {
     ProcessInfo.processInfo.environment["NOVELAI_UPSCALE_URL"]
-        ?? "https://api.novelai.net/ai/upscale"
+        ?? "https://image.novelai.net/ai/upscale"
 }
 
 // MARK: - Enums
@@ -154,8 +154,13 @@ public let MAX_DEFRY: Int = 5
 public let DEFAULT_DEFRY: Int = 3
 
 // Upscale
-public let VALID_UPSCALE_SCALES: [Int] = [2, 4]
-public let DEFAULT_UPSCALE_SCALE: Int = 4
+// サーバーは常に2倍で返す (倍率指定のパラメータはない)
+public let VALID_UPSCALE_SCALES: [Int] = [2]
+public let DEFAULT_UPSCALE_SCALE: Int = 2
+
+// Upscaleリクエストの固定値 (公式サイトと同じ)
+public let UPSCALE_MODEL: String = "nai-diffusion-5-curated"
+public let UPSCALE_DECLARED_BLUR_SIGMA: Double = 0
 
 // Upscale入力画像の最大ピクセル数（UPSCALE_COST_TABLEの最大値に対応）
 // これを超える画像はAPIが 400 "Image resolution too high" を返す
@@ -213,17 +218,13 @@ public let AUGMENT_MIN_PIXELS: Int = 1_048_576
 public let BG_REMOVAL_MULTIPLIER: Int = 3
 public let BG_REMOVAL_ADDEND: Int = 5
 
-// Upscale cost table [(maxPixels, cost)] in ascending order
+// Upscale cost table [(maxPixels, cost)] in ascending order. There is no Opus free tier.
 public let UPSCALE_COST_TABLE: [(maxPixels: Int, cost: Int)] = [
-    (262_144, 1),
-    (409_600, 2),
-    (524_288, 3),
-    (786_432, 5),
-    (1_048_576, 7),
+    (1_048_576, 1),
+    (1_747_627, 2),
+    (2_446_678, 3),
+    (3_145_728, 4),
 ]
-
-// Upscale Opus free pixel limit
-public let UPSCALE_OPUS_FREE_PIXELS: Int = 409_600
 
 // MARK: - HTTP Client Constants
 

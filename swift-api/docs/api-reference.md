@@ -316,14 +316,14 @@ func augmentImage(_ params: AugmentParams) async throws -> AugmentResult
 func upscaleImage(_ params: UpscaleParams) async throws -> UpscaleResult
 ```
 
-画像の解像度を2倍または4倍に拡大する。width/height は画像から自動検出。
+画像の解像度を2倍に拡大する (サーバーは常に2倍で返す)。入力は 1024×1024 相当 (1,048,576 px) 以下。コストは 1 Anlas (Opus でも無料ではない)。
 
 ### UpscaleParams
 
 | パラメータ | 型 | デフォルト | 説明 |
 |-----------|-----|-----------|------|
 | `image` | `ImageInput` | — (必須) | 対象画像 |
-| `scale` | `Int` | `4` | 拡大倍率 (2 or 4) |
+| `scale` | `Int` | `2` | 拡大倍率 (2 のみ。互換のために残している) |
 | `savePath` | `String?` | — | 保存先パス (排他) |
 | `saveDir` | `String?` | — | 保存先ディレクトリ (排他) |
 
@@ -431,7 +431,7 @@ TypeScript 版との違い: 文字列の自動判別 (`looksLikeFilePath`) で�
 | `DEFAULT_VIBE_INFO_EXTRACTED` | `0.7` | Vibe情報抽出量 |
 | `DEFAULT_IMG2IMG_STRENGTH` | `0.62` | img2img変化強度 |
 | `DEFAULT_INPAINT_COLOR_CORRECT` | `true` | Inpaint色補正 |
-| `DEFAULT_UPSCALE_SCALE` | `4` | アップスケール倍率 |
+| `DEFAULT_UPSCALE_SCALE` | `2` | アップスケール倍率 |
 | `DEFAULT_DEFRY` | `3` | Augment defry |
 | `MAX_SEED` | `4_294_967_295` | シード最大値 (2^32-1) |
 | `MAX_PIXELS` | `3_145_728` | 最大ピクセル数 |

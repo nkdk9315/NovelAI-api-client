@@ -9,9 +9,9 @@ use strum_macros::{AsRefStr, Display, EnumString, IntoStaticStr};
 const DEFAULT_API_URL: &str = "https://image.novelai.net/ai/generate-image";
 const DEFAULT_STREAM_URL: &str = "https://image.novelai.net/ai/generate-image-stream";
 const DEFAULT_ENCODE_URL: &str = "https://image.novelai.net/ai/encode-vibe";
-const DEFAULT_SUBSCRIPTION_URL: &str = "https://api.novelai.net/user/subscription";
+const DEFAULT_SUBSCRIPTION_URL: &str = "https://image.novelai.net/user/subscription";
 const DEFAULT_AUGMENT_URL: &str = "https://image.novelai.net/ai/augment-image";
-const DEFAULT_UPSCALE_URL: &str = "https://api.novelai.net/ai/upscale";
+const DEFAULT_UPSCALE_URL: &str = "https://image.novelai.net/ai/upscale";
 
 /// Validate that a URL uses HTTPS and points to a novelai.net domain.
 /// Returns the URL string if valid, or `None` if invalid.
@@ -314,8 +314,13 @@ pub const MAX_DEFRY: u32 = 5;
 pub const DEFAULT_DEFRY: u32 = 3;
 
 // Upscale
-pub const VALID_UPSCALE_SCALES: &[u32] = &[2, 4];
-pub const DEFAULT_UPSCALE_SCALE: u32 = 4;
+// The server always upscales 2x; there is no scale parameter in the request.
+pub const VALID_UPSCALE_SCALES: &[u32] = &[2];
+pub const DEFAULT_UPSCALE_SCALE: u32 = 2;
+
+// Fixed upscale request values (same as the official site)
+pub const UPSCALE_MODEL: &str = "nai-diffusion-5-curated";
+pub const UPSCALE_DECLARED_BLUR_SIGMA: f64 = 0.0;
 
 // Upscale入力画像の最大ピクセル数（UPSCALE_COST_TABLEの最大値に対応）
 // これを超える画像はAPIが 400 "Image resolution too high" を返す
@@ -384,17 +389,13 @@ pub const AUGMENT_MIN_PIXELS: u64 = 1_048_576;
 pub const BG_REMOVAL_MULTIPLIER: u64 = 3;
 pub const BG_REMOVAL_ADDEND: u64 = 5;
 
-// Upscale cost table [max_pixels, cost] (ascending)
+// Upscale cost table [max_pixels, cost] (ascending). There is no Opus free tier.
 pub const UPSCALE_COST_TABLE: &[(u64, u64)] = &[
-    (262_144, 1),
-    (409_600, 2),
-    (524_288, 3),
-    (786_432, 5),
-    (1_048_576, 7),
+    (1_048_576, 1),
+    (1_747_627, 2),
+    (2_446_678, 3),
+    (3_145_728, 4),
 ];
-
-// Upscale Opus free pixel limit
-pub const UPSCALE_OPUS_FREE_PIXELS: u64 = 409_600;
 
 // =============================================================================
 // Network & Security Constants

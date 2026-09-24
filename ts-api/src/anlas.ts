@@ -22,7 +22,6 @@ import {
   BG_REMOVAL_MULTIPLIER,
   BG_REMOVAL_ADDEND,
   UPSCALE_COST_TABLE,
-  UPSCALE_OPUS_FREE_PIXELS,
   MAX_PIXELS,
 } from './constants';
 
@@ -504,7 +503,7 @@ export function calculateAugmentCost(params: AugmentCostParams): AugmentCostResu
 
 /**
  * アップスケールのコストを計算
- * ピクセル数に基づくテーブル引きで価格を決定
+ * ピクセル数に基づくテーブル引きで価格を決定 (Opus無料なし)
  * @param params アップスケールパラメータ
  * @returns コスト計算結果
  */
@@ -513,13 +512,8 @@ export function calculateUpscaleCost(params: UpscaleCostParams): UpscaleCostResu
   assertPositiveFiniteInt(params.width, 'width');
   assertPositiveFiniteInt(params.height, 'height');
 
-  const tier = params.tier ?? 0;
+  // Opus無料はない (tier は互換のために受け取るだけ)
   const pixels = params.width * params.height;
-
-  // Opus無料判定
-  if (tier >= OPUS_MIN_TIER && pixels <= UPSCALE_OPUS_FREE_PIXELS) {
-    return { pixels, cost: 0, isOpusFree: true, error: false, errorCode: null };
-  }
 
   // コストテーブルから該当価格を検索（昇順テーブル、最初にマッチした時点で即リターン）
   for (const [threshold, price] of UPSCALE_COST_TABLE) {

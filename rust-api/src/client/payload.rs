@@ -97,18 +97,12 @@ pub fn apply_infill_params(
         let source_base64 = utils::image::resize_image_for_img2img(
             source_image, params.width, params.height
         )?;
-        let source_buffer = BASE64.decode(source_base64.as_bytes())
-            .map_err(|e| crate::error::NovelAIError::Image(format!("Failed to decode resized source image: {}", e)))?;
 
         // Mask: resize to 1/8 of target dimensions
         let mask_buffer = utils::image::get_image_buffer(mask)?;
         let resized_mask =
             utils::mask::resize_mask_image(&mask_buffer, params.width, params.height)?;
         let mask_base64 = BASE64.encode(&resized_mask);
-
-        // Cache secret keys (SHA256)
-        let image_cache_key = utils::mask::calculate_cache_secret_key(&source_buffer);
-        let mask_cache_key = utils::mask::calculate_cache_secret_key(&resized_mask);
 
         // Strength parameters
         let effective_hybrid_strength = hybrid_strength.unwrap_or(mask_strength);
@@ -124,10 +118,6 @@ pub fn apply_infill_params(
             "strength": mask_strength,
             "color_correct": color_correct,
         });
-        payload["parameters"]["image_cache_secret_key"] =
-            serde_json::Value::String(image_cache_key);
-        payload["parameters"]["mask_cache_secret_key"] =
-            serde_json::Value::String(mask_cache_key);
     }
 
     Ok(())

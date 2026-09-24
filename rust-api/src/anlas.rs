@@ -485,24 +485,13 @@ pub fn calculate_augment_cost(params: &AugmentCostParams) -> Result<AugmentCostR
 // =============================================================================
 
 /// Calculate upscale cost.
-/// Table lookup based on pixel count.
+/// Table lookup based on pixel count (no Opus free tier).
 pub fn calculate_upscale_cost(params: &UpscaleCostParams) -> Result<UpscaleCostResult, NovelAIError> {
     assert_positive_finite_int(params.width, "width")?;
     assert_positive_finite_int(params.height, "height")?;
 
-    let tier = params.tier;
+    // No Opus free tier for upscale; `params.tier` is accepted for compatibility only.
     let pixels = params.width as u64 * params.height as u64;
-
-    // Opus free check
-    if tier >= OPUS_MIN_TIER && pixels <= UPSCALE_OPUS_FREE_PIXELS {
-        return Ok(UpscaleCostResult {
-            pixels,
-            cost: Some(0),
-            is_opus_free: true,
-            error: false,
-            error_code: None,
-        });
-    }
 
     // Look up cost in table (ascending, return first match)
     for &(threshold, price) in UPSCALE_COST_TABLE {

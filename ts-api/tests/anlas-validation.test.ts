@@ -137,7 +137,7 @@ describe('Anlas pre-flight balance validation', () => {
       const pngBytes = await makePng(256, 256);
 
       await expect(
-        client.upscaleImage({ image: pngBytes, scale: 4 })
+        client.upscaleImage({ image: pngBytes, scale: 2 })
       ).rejects.toBeInstanceOf(InsufficientAnlasError);
     });
 
@@ -147,7 +147,7 @@ describe('Anlas pre-flight balance validation', () => {
       const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
 
       try {
-        await client.upscaleImage({ image: pngBytes, scale: 4 });
+        await client.upscaleImage({ image: pngBytes, scale: 2 });
       } catch (e) {
         expect(e).not.toBeInstanceOf(InsufficientAnlasError);
       }

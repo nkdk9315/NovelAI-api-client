@@ -112,18 +112,11 @@ func applyInfillParams(
     let sourceImageBase64 = try resizeImageForImg2Img(
         sourceImage, targetWidth: params.width, targetHeight: params.height
     )
-    guard let sourceImageBuffer = Data(base64Encoded: sourceImageBase64) else {
-        throw NovelAIError.image("Failed to decode resized source image")
-    }
 
     // Resize mask to 1/8 dimensions
     let maskBuffer = try getImageBuffer(params.mask!)
     let resizedMask = try resizeMaskImage(maskBuffer, targetWidth: params.width, targetHeight: params.height)
     let maskBase64 = resizedMask.base64EncodedString()
-
-    // Generate cache_secret_keys
-    let imageCacheSecretKey = calculateCacheSecretKey(sourceImageBuffer)
-    let maskCacheSecretKey = calculateCacheSecretKey(resizedMask)
 
     // Validate mask_strength is present
     guard let maskStrength = params.maskStrength else {
@@ -144,8 +137,6 @@ func applyInfillParams(
         "strength": maskStrength,
         "color_correct": params.inpaintColorCorrect,
     ] as [String: Any]
-    parameters["image_cache_secret_key"] = imageCacheSecretKey
-    parameters["mask_cache_secret_key"] = maskCacheSecretKey
 
     payload["parameters"] = parameters
 }

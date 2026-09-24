@@ -614,33 +614,6 @@ fn n4_invalid_image_data_throws() {
 }
 
 // =============================================================================
-// O. calculate_cache_secret_key
-// =============================================================================
-
-#[test]
-fn o1_returns_sha256_hex_string() {
-    let data = b"test image data";
-    let hash = utils::mask::calculate_cache_secret_key(data);
-    assert_eq!(hash.len(), 64); // SHA256 hex is 64 chars
-    assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
-}
-
-#[test]
-fn o2_same_input_produces_same_hash() {
-    let data = b"consistent data";
-    let hash1 = utils::mask::calculate_cache_secret_key(data);
-    let hash2 = utils::mask::calculate_cache_secret_key(data);
-    assert_eq!(hash1, hash2);
-}
-
-#[test]
-fn o3_different_input_produces_different_hash() {
-    let hash1 = utils::mask::calculate_cache_secret_key(b"data1");
-    let hash2 = utils::mask::calculate_cache_secret_key(b"data2");
-    assert_ne!(hash1, hash2);
-}
-
-// =============================================================================
 // P. resize_mask_image
 // =============================================================================
 

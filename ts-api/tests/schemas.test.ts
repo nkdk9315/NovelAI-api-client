@@ -1357,13 +1357,13 @@ describe('UpscaleParamsSchema', () => {
       expect(result.success).toBe(true);
     });
 
-    it('should accept scale 4', () => {
+    it('should reject scale 4 (server always upscales 2x)', () => {
       const params = {
         image: 'test.png',
         scale: 4,
       };
       const result = Schemas.UpscaleParamsSchema.safeParse(params);
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
     });
 
     it('should reject invalid scale values', () => {
@@ -1441,7 +1441,7 @@ describe('UpscaleResultSchema', () => {
   it('should accept valid result with integer scale and dimensions', () => {
     const result = Schemas.UpscaleResultSchema.safeParse({
       image_data: Buffer.from('test'),
-      scale: 4,
+      scale: 2,
       output_width: 2048,
       output_height: 1536,
     });
@@ -1471,7 +1471,7 @@ describe('UpscaleResultSchema', () => {
   it('should reject zero output_width', () => {
     const result = Schemas.UpscaleResultSchema.safeParse({
       image_data: Buffer.from('test'),
-      scale: 4,
+      scale: 2,
       output_width: 0,
       output_height: 1536,
     });
@@ -1481,7 +1481,7 @@ describe('UpscaleResultSchema', () => {
   it('should reject zero output_height', () => {
     const result = Schemas.UpscaleResultSchema.safeParse({
       image_data: Buffer.from('test'),
-      scale: 4,
+      scale: 2,
       output_width: 2048,
       output_height: 0,
     });

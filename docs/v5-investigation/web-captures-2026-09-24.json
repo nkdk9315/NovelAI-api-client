@@ -1,0 +1,379 @@
+{
+  "_meta": {
+    "captured_at": "2026-09-24",
+    "source": "novelai.net/image (Claude in Chrome, window.fetch hook)",
+    "note": "プロンプト本文は <PROMPT> に置換。Authorization は削除。cache_secret_key はクライアント側ランダム鍵による HMAC-SHA256 で秘匿性はないが短縮表記。画像本体は未収録。",
+    "stream_response": "application/msgpack: [uint32 BE length][msgpack map] の繰り返し。event_type=intermediate (samp_ix, step_ix, gen_id, sigma, image=JPEG) × steps, 最後に event_type=final (samp_ix, gen_id, image=WEBP/PNG)。error 時は event_type=error, message。"
+  },
+  "txt2img_transparent": {
+    "endpoint": "POST https://image.novelai.net/ai/generate-image-stream",
+    "request_headers": {
+      "Authorization": "Bearer <REDACTED>",
+      "x-correlation-id": "jB5SI6",
+      "x-initiated-at": "2026-09-24T13:37:14.324Z"
+    },
+    "multipart_parts": [
+      {
+        "name": "request",
+        "filename": "blob",
+        "type": "application/json"
+      }
+    ],
+    "request_json": {
+      "input": "<PROMPT>",
+      "model": "nai-diffusion-5-full",
+      "action": "generate",
+      "parameters": {
+        "params_version": 4,
+        "width": 832,
+        "height": 1216,
+        "scale": 7,
+        "sampler": "k_euler_ancestral",
+        "steps": 23,
+        "n_samples": 1,
+        "ucPresetId": "none",
+        "qualityPresetId": "light",
+        "tag_hint_transparent_background": true,
+        "autoSmea": false,
+        "dynamic_thresholding": false,
+        "controlnet_strength": 1,
+        "legacy": false,
+        "add_original_image": true,
+        "cfg_rescale": 0,
+        "legacy_v3_extend": false,
+        "use_coords": false,
+        "legacy_uc": false,
+        "normalize_reference_strength_multiple": true,
+        "inpaintImg2ImgStrength": 1,
+        "seed": 1295653252,
+        "characterPrompts": [],
+        "straight_alpha": true,
+        "tag_hint_qt": 3,
+        "tag_hint_uc_preset": 0,
+        "v4_prompt": {
+          "caption": {
+            "base_caption": "<PROMPT>",
+            "char_captions": []
+          },
+          "use_coords": false,
+          "use_order": true
+        },
+        "v4_negative_prompt": {
+          "caption": {
+            "base_caption": "monochrome, ",
+            "char_captions": []
+          },
+          "legacy_uc": false
+        },
+        "negative_prompt": "monochrome, ",
+        "deliberate_euler_ancestral_bug": false,
+        "prefer_brownian": true,
+        "noise_schedule": "karras",
+        "image_format": "webp",
+        "stream": "msgpack"
+      },
+      "use_new_shared_trial": true
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/msgpack",
+      "frames": 23,
+      "final_image": "WEBP VP8X(alpha+EXIF) + VP8L lossless, 832x1216"
+    }
+  },
+  "infill": {
+    "endpoint": "POST https://image.novelai.net/ai/generate-image-stream",
+    "request_headers": {
+      "Authorization": "Bearer <REDACTED>",
+      "x-correlation-id": "ZVpP5v",
+      "x-initiated-at": "2026-09-24T13:38:43.838Z"
+    },
+    "multipart_parts": [
+      {
+        "name": "image",
+        "filename": "blob",
+        "type": "image/png",
+        "size": 874163
+      },
+      {
+        "name": "mask",
+        "filename": "blob",
+        "type": "image/png",
+        "size": 27392
+      },
+      {
+        "name": "request",
+        "filename": "blob",
+        "type": "application/json"
+      }
+    ],
+    "request_json": {
+      "input": "<PROMPT>",
+      "model": "nai-diffusion-5-full-inpainting",
+      "action": "infill",
+      "parameters": {
+        "params_version": 4,
+        "width": 832,
+        "height": 1216,
+        "scale": 7,
+        "sampler": "k_euler_ancestral",
+        "steps": 23,
+        "n_samples": 1,
+        "strength": 0.7,
+        "noise": 0,
+        "ucPresetId": "none",
+        "qualityPresetId": "light",
+        "tag_hint_transparent_background": true,
+        "autoSmea": false,
+        "dynamic_thresholding": false,
+        "controlnet_strength": 1,
+        "legacy": false,
+        "add_original_image": false,
+        "cfg_rescale": 0,
+        "legacy_v3_extend": false,
+        "use_coords": false,
+        "legacy_uc": false,
+        "normalize_reference_strength_multiple": true,
+        "inpaintImg2ImgStrength": 1,
+        "image": "image",
+        "mask": "mask",
+        "characterPrompts": [],
+        "seed": 2849895151,
+        "straight_alpha": true,
+        "tag_hint_qt": 3,
+        "tag_hint_uc_preset": 0,
+        "extra_noise_seed": 2849895150,
+        "v4_prompt": {
+          "caption": {
+            "base_caption": "<PROMPT>",
+            "char_captions": []
+          },
+          "use_coords": false,
+          "use_order": true
+        },
+        "v4_negative_prompt": {
+          "caption": {
+            "base_caption": "monochrome, ",
+            "char_captions": []
+          },
+          "legacy_uc": false
+        },
+        "negative_prompt": "monochrome, ",
+        "deliberate_euler_ancestral_bug": false,
+        "prefer_brownian": true,
+        "noise_schedule": "karras",
+        "image_format": "webp",
+        "image_cache_secret_key": "<hmac 8650fb6c…>",
+        "mask_cache_secret_key": "<hmac be7a0c5d…>",
+        "stream": "msgpack"
+      },
+      "use_new_shared_trial": true
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/msgpack",
+      "frames": 23,
+      "final_image": "WEBP with alpha, 832x1216"
+    }
+  },
+  "img2img_cached": {
+    "endpoint": "POST https://image.novelai.net/ai/generate-image-stream",
+    "request_headers": {
+      "Authorization": "Bearer <REDACTED>",
+      "x-correlation-id": "SkLC7S",
+      "x-initiated-at": "2026-09-24T13:39:42.628Z"
+    },
+    "multipart_parts": [
+      {
+        "name": "request",
+        "filename": "blob",
+        "type": "application/json"
+      }
+    ],
+    "note": "直前の infill で同じ画像を送信済みのため image 本体は省略され image_cache_secret_key のみ。",
+    "request_json": {
+      "input": "<PROMPT>",
+      "model": "nai-diffusion-5-full",
+      "action": "img2img",
+      "parameters": {
+        "params_version": 4,
+        "width": 832,
+        "height": 1216,
+        "scale": 7,
+        "sampler": "k_euler_ancestral",
+        "steps": 23,
+        "n_samples": 1,
+        "strength": 0.7,
+        "noise": 0,
+        "ucPresetId": "none",
+        "qualityPresetId": "light",
+        "tag_hint_transparent_background": true,
+        "autoSmea": false,
+        "dynamic_thresholding": false,
+        "controlnet_strength": 1,
+        "legacy": false,
+        "add_original_image": true,
+        "cfg_rescale": 0,
+        "legacy_v3_extend": false,
+        "use_coords": false,
+        "legacy_uc": false,
+        "normalize_reference_strength_multiple": true,
+        "inpaintImg2ImgStrength": 1,
+        "seed": 989684936,
+        "characterPrompts": [],
+        "straight_alpha": true,
+        "tag_hint_qt": 3,
+        "tag_hint_uc_preset": 0,
+        "extra_noise_seed": 989684935,
+        "color_correct": false,
+        "v4_prompt": {
+          "caption": {
+            "base_caption": "<PROMPT>",
+            "char_captions": []
+          },
+          "use_coords": false,
+          "use_order": true
+        },
+        "v4_negative_prompt": {
+          "caption": {
+            "base_caption": "monochrome, ",
+            "char_captions": []
+          },
+          "legacy_uc": false
+        },
+        "negative_prompt": "monochrome, ",
+        "deliberate_euler_ancestral_bug": false,
+        "prefer_brownian": true,
+        "noise_schedule": "karras",
+        "image_format": "webp",
+        "image_cache_secret_key": "<hmac 8650fb6c…>",
+        "stream": "msgpack"
+      },
+      "use_new_shared_trial": true
+    },
+    "response": {
+      "status": 200,
+      "frames": 16,
+      "note": "steps × strength ≈ 16 ステップ分の intermediate"
+    }
+  },
+  "img2img_upload": {
+    "endpoint": "POST https://image.novelai.net/ai/generate-image-stream",
+    "request_headers": {
+      "Authorization": "Bearer <REDACTED>",
+      "x-correlation-id": "zpHVA7",
+      "x-initiated-at": "2026-09-24T13:40:28.656Z"
+    },
+    "multipart_parts": [
+      {
+        "name": "image",
+        "filename": "blob",
+        "type": "image/png",
+        "size": 1211008
+      },
+      {
+        "name": "request",
+        "filename": "blob",
+        "type": "application/json"
+      }
+    ],
+    "request_json": {
+      "input": "<PROMPT>",
+      "model": "nai-diffusion-5-full",
+      "action": "img2img",
+      "parameters": {
+        "params_version": 4,
+        "width": 832,
+        "height": 1216,
+        "scale": 7,
+        "sampler": "k_euler_ancestral",
+        "steps": 23,
+        "n_samples": 1,
+        "strength": 0.7,
+        "noise": 0,
+        "ucPresetId": "none",
+        "qualityPresetId": "light",
+        "tag_hint_transparent_background": true,
+        "autoSmea": false,
+        "dynamic_thresholding": false,
+        "controlnet_strength": 1,
+        "legacy": false,
+        "add_original_image": true,
+        "cfg_rescale": 0,
+        "legacy_v3_extend": false,
+        "use_coords": false,
+        "legacy_uc": false,
+        "normalize_reference_strength_multiple": true,
+        "inpaintImg2ImgStrength": 1,
+        "seed": 1876249869,
+        "image": "image",
+        "characterPrompts": [],
+        "straight_alpha": true,
+        "tag_hint_qt": 3,
+        "tag_hint_uc_preset": 0,
+        "extra_noise_seed": 1876249868,
+        "color_correct": false,
+        "v4_prompt": {
+          "caption": {
+            "base_caption": "<PROMPT>",
+            "char_captions": []
+          },
+          "use_coords": false,
+          "use_order": true
+        },
+        "v4_negative_prompt": {
+          "caption": {
+            "base_caption": "monochrome, ",
+            "char_captions": []
+          },
+          "legacy_uc": false
+        },
+        "negative_prompt": "monochrome, ",
+        "deliberate_euler_ancestral_bug": false,
+        "prefer_brownian": true,
+        "noise_schedule": "karras",
+        "image_format": "webp",
+        "image_cache_secret_key": "<hmac 7fcf742d…>",
+        "stream": "msgpack"
+      },
+      "use_new_shared_trial": true
+    },
+    "response": {
+      "status": 200
+    }
+  },
+  "augment_sketch": {
+    "endpoint": "POST https://image.novelai.net/ai/augment-image",
+    "request_headers": {
+      "Authorization": "Bearer <REDACTED>",
+      "x-correlation-id": "N2yI3a",
+      "x-initiated-at": "2026-09-24T13:39:22.267Z"
+    },
+    "multipart_parts": [
+      {
+        "name": "image",
+        "filename": "blob",
+        "type": "image/png",
+        "size": 864417
+      },
+      {
+        "name": "request",
+        "filename": "blob",
+        "type": "application/json",
+        "size": 91
+      }
+    ],
+    "request_json": {
+      "req_type": "sketch",
+      "use_new_shared_trial": true,
+      "width": 832,
+      "height": 1216,
+      "image": "image"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "binary/octet-stream",
+      "body": "ZIP (PK..)"
+    }
+  }
+}

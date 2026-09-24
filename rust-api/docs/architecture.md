@@ -209,10 +209,10 @@ Rust では PureUnigram の性能が十分なため、native バインディン�
           非 stream の `/ai/generate-image` は早期/中間フレームを返すケースがあり、
           ノイズ・低解像度状の出力につながるため使用しない。
      ↓
-7. fetch_with_retry_multipart() [multipart/form-data, exponential backoff, max 3 retries]
-     ※ 公式サイトと同形式で `multipart/form-data` の `request` フィールド (filename `blob`)
-       に JSON ペイロードを格納して送信する。encode-vibe / augment / upscale は従来通り
-       `application/json` を使用 (fetch_with_retry)。
+7. fetch_with_retry() [application/json, exponential backoff, max 3 retries]
+     ※ 画像は base64 でペイロードに直接入れる。multipart で送るとサーバーが
+       image/mask 等の文字列を別パートの名前として解釈し 400 になるため、
+       全エンドポイントで JSON ボディを使う。
      ↓
 8. レスポンスパース
      ├── ZIP → parse_zip_response()

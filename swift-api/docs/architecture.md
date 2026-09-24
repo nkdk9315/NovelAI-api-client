@@ -50,7 +50,7 @@ Anlas.swift                      (純粋関数, 外部依存なし)
 [2] ペイロード構築 (Payload.swift: buildBasePayload + apply* ヘルパー群)
     │   - 基本パラメータ → JSON Dictionary
     │   - img2img: sourceImage → base64
-    │   - infill: mask リサイズ (1/8), model + "-inpainting", cache_secret_key
+    │   - infill: mask リサイズ (1/8), model + "-inpainting"
     │   - vibes: .naiv4vibe → encoding 抽出
     │   - charref: 画像リサイズ + base64, director_reference_* パラメータ
     │   - characters: v4_prompt 構造構築
@@ -61,9 +61,9 @@ Anlas.swift                      (純粋関数, 外部依存なし)
     │     ※ 公式サイトと同様、txt2img も含めて全フローを stream に統一。
     │       非 stream の `generate-image` は早期/中間フレームを返すケースがあり、
     │       ノイズ・低解像度状の出力につながるため使用しない。
-    │   - Content-Type: multipart/form-data
-    │     ※ `request` フィールド (filename `blob`, Content-Type `application/json`)
-    │       に JSON ペイロードを格納。NovelAIClient.buildMultipartRequestBody が組み立て。
+    │   - Content-Type: application/json (画像は base64 でペイロードに直接入れる)
+    │     ※ multipart で送るとサーバーが image/mask 等の文字列を別パートの
+    │       名前として解釈し 400 になるため、JSON ボディで送る。
     │   - Authorization: Bearer <apiKey>
     │   - 429/ネットワークエラー → exponential backoff リトライ
     │   - Task.sleep + withThrowingTaskGroup で60秒タイムアウト
