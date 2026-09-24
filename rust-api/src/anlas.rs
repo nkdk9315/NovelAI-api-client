@@ -33,6 +33,7 @@ pub enum AugmentToolType {
     Sketch,
     Lineart,
     BgRemoval,
+    DeclutterKeepBubbles,
 }
 
 /// Generation cost calculation parameters
@@ -51,6 +52,10 @@ pub struct GenerationCostParams {
     pub vibe_unencoded_count: u64,
     pub mask_width: Option<u32>,
     pub mask_height: Option<u32>,
+    /// V5 models cost 1.5x
+    pub is_v5: bool,
+    /// V5 Opus usage exhausted (`usage.isNegative`): no Opus free generation for V5
+    pub opus_usage_exhausted: bool,
 }
 
 impl Default for GenerationCostParams {
@@ -69,6 +74,8 @@ impl Default for GenerationCostParams {
             vibe_unencoded_count: 0,
             mask_width: None,
             mask_height: None,
+            is_v5: false,
+            opus_usage_exhausted: false,
         }
     }
 }
@@ -78,6 +85,7 @@ impl Default for GenerationCostParams {
 pub struct GenerationCostResult {
     pub base_cost: u64,
     pub smea_multiplier: f64,
+    pub model_multiplier: f64,
     pub per_image_cost: f64,
     pub strength_multiplier: f64,
     pub adjusted_cost: u64,
@@ -353,7 +361,8 @@ pub fn calculate_generation_cost(params: &GenerationCostParams) -> Result<Genera
 
     // SMEA multiplier
     let smea_multiplier = get_smea_multiplier(params.smea);
-    let per_image_cost = base_cost as f64 * smea_multiplier;
+    let model_multiplier = if params.is_v5 { V5_COST_MULTIPLIER } else { 1.0 };
+    let per_image_cost = base_cost as f64 * smea_multiplier * model_multiplier;
 
     // Strength multiplier (txt2img is always 1.0)
     let strength_multiplier = match params.mode {
@@ -376,7 +385,8 @@ pub fn calculate_generation_cost(params: &GenerationCostParams) -> Result<Genera
     }
 
     // Opus free check (using corrected dimensions for consistency with cost calculation)
-    let is_opus_free = is_opus_free_generation(
+    // V5 is not Opus-free once the usage is exhausted
+    let is_opus_free = !(params.is_v5 && params.opus_usage_exhausted) && is_opus_free_generation(
         effective_width as u32,
         effective_height as u32,
         params.steps,
@@ -415,6 +425,7 @@ pub fn calculate_generation_cost(params: &GenerationCostParams) -> Result<Genera
     Ok(GenerationCostResult {
         base_cost,
         smea_multiplier,
+        model_multiplier,
         per_image_cost,
         strength_multiplier,
         adjusted_cost,
@@ -514,4 +525,41 @@ pub fn calculate_upscale_cost(params: &UpscaleCostParams) -> Result<UpscaleCostR
         error: true,
         error_code: Some(-3),
     })
+}
+
+
+// =============================================================================
+// V5 Opus usage
+// =============================================================================
+
+/// Summary of the V5 Opus usage, computed like the official site
+#[derive(Debug, Clone, PartialEq)]
+pub struct OpusUsageSummary {
+    /// Remaining (%); 0 when exhausted
+    pub remaining_percent: f64,
+    /// Refill rate (%/day); 0 when not refilling
+    pub refill_percent_per_day: f64,
+    /// Estimated number of images remaining
+    pub estimated_images_remaining: u64,
+    /// Low (exhausted or below 5%)
+    pub is_low: bool,
+    /// Exhausted: V5 generations consume Anlas
+    pub is_exhausted: bool,
+}
+
+/// Summarize `usage` with the official site's formulas.
+pub fn summarize_opus_usage(usage: &crate::schemas::OpusUsage) -> OpusUsageSummary {
+    let remaining_percent = if usage.is_negative { 0.0 } else { usage.percent.max(0.0) };
+    let refill_percent_per_day = if usage.time_until_next_percent <= 0.0 {
+        0.0
+    } else {
+        (86400.0 / usage.time_until_next_percent * 10.0).round() / 10.0
+    };
+    OpusUsageSummary {
+        remaining_percent,
+        refill_percent_per_day,
+        estimated_images_remaining: (OPUS_USAGE_IMAGES_PER_PERCENT * remaining_percent).round() as u64,
+        is_low: usage.is_negative || usage.percent < OPUS_USAGE_LOW_PERCENT,
+        is_exhausted: usage.is_negative,
+    }
 }

@@ -45,6 +45,8 @@ pub struct AnlasBalance {
     pub purchased: u64,
     pub total: u64,
     pub tier: u32,
+    /// V5 Opus free-generation usage (None for non-Opus accounts)
+    pub usage: Option<crate::schemas::OpusUsage>,
 }
 
 // =============================================================================
@@ -129,6 +131,7 @@ impl NovelAIClient {
             purchased,
             total: fixed + purchased,
             tier: data.tier,
+            usage: data.usage,
         })
     }
 
@@ -305,6 +308,8 @@ impl NovelAIClient {
                 tier: balance.tier,
                 vibe_count,
                 vibe_unencoded_count: 0,
+                is_v5: params.model.is_v5(),
+                opus_usage_exhausted: balance.usage.as_ref().is_some_and(|u| u.is_negative),
                 ..Default::default()
             }) {
                 if cost_result.total_cost > balance.total {
@@ -367,10 +372,13 @@ impl NovelAIClient {
         params: &GenerateParams,
         seed: u64,
     ) -> Result<(String, bool)> {
-        let negative_prompt = params
-            .negative_prompt
-            .as_deref()
-            .unwrap_or(constants::DEFAULT_NEGATIVE);
+        let default_negative = if params.model.is_v5() {
+            constants::DEFAULT_NEGATIVE_V5
+        } else {
+            constants::DEFAULT_NEGATIVE
+        };
+        let negative_prompt = params.negative_prompt.as_deref().unwrap_or(default_negative);
+        let prompt = params.effective_prompt();
 
         // Process character reference
         let char_ref_data = if let Some(ref char_ref) = params.character_reference {
@@ -421,7 +429,7 @@ impl NovelAIClient {
         }
         payload::build_v4_prompt_structure(
             &mut payload_val,
-            &params.prompt,
+            &prompt,
             negative_prompt,
             &char_captions,
             &char_neg_captions,
@@ -486,6 +494,7 @@ impl NovelAIClient {
                 constants::AugmentReqType::Sketch => AugmentToolType::Sketch,
                 constants::AugmentReqType::Lineart => AugmentToolType::Lineart,
                 constants::AugmentReqType::BgRemoval => AugmentToolType::BgRemoval,
+                constants::AugmentReqType::DeclutterKeepBubbles => AugmentToolType::DeclutterKeepBubbles,
             };
             if let Ok(cost_result) = crate::anlas::calculate_augment_cost(&AugmentCostParams {
                 tool,

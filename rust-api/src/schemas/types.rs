@@ -215,6 +215,22 @@ pub struct GenerateParams {
     pub seed: Option<u64>,
     pub sampler: Sampler,
     pub noise_schedule: NoiseSchedule,
+    /// V5 only: add "transparent background" to the prompt and request straight alpha
+    pub transparent_background: bool,
+}
+
+impl GenerateParams {
+    /// Prompt actually sent to the API (adds the transparent background tag when requested).
+    pub fn effective_prompt(&self) -> String {
+        let tag = crate::constants::TRANSPARENT_BACKGROUND_TAG;
+        if !self.transparent_background || self.prompt.contains(tag) {
+            self.prompt.clone()
+        } else if self.prompt.is_empty() {
+            tag.to_string()
+        } else {
+            format!("{}, {}", self.prompt, tag)
+        }
+    }
 }
 
 impl Default for GenerateParams {
@@ -236,6 +252,7 @@ impl Default for GenerateParams {
             seed: None,
             sampler: Sampler::default(),
             noise_schedule: NoiseSchedule::default(),
+            transparent_background: false,
         }
     }
 }
@@ -342,6 +359,20 @@ pub struct AnlasBalanceResponse {
     pub training_steps_left: TrainingStepsLeft,
     #[serde(default)]
     pub tier: u32,
+    /// V5 Opus free-generation usage (Opus only)
+    #[serde(default)]
+    pub usage: Option<OpusUsage>,
+}
+
+/// V5 Opus free-generation usage (`usage` in the subscription response)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpusUsage {
+    pub percent: f64,
+    #[serde(rename = "isNegative", default)]
+    pub is_negative: bool,
+    /// Seconds needed to refill 1%
+    #[serde(rename = "timeUntilNextPercent", default)]
+    pub time_until_next_percent: f64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

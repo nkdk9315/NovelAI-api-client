@@ -10,7 +10,7 @@ const BPE_CACHE_MAX_SIZE: usize = 10_000;
 
 /// Build byte-to-unicode mapping (GPT-2 style).
 /// Maps each byte (0-255) to a unique Unicode character.
-fn bytes_to_unicode() -> [char; 256] {
+pub(crate) fn bytes_to_unicode() -> [char; 256] {
     let mut result = ['\0'; 256];
 
     // Direct-mapped byte ranges

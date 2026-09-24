@@ -102,6 +102,12 @@ impl GenerateParamsBuilder {
         self
     }
 
+    /// V5 only: request a transparent background.
+    pub fn transparent_background(mut self, enabled: bool) -> Self {
+        self.params.transparent_background = enabled;
+        self
+    }
+
     // -- SaveTarget setters --------------------------------------------------
 
     /// Set save target to an exact file path.

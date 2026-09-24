@@ -1,6 +1,6 @@
 use crate::constants::*;
 use crate::error::{NovelAIError, Result};
-use crate::tokenizer::cache::get_t5_tokenizer;
+use crate::tokenizer::cache::count_prompt_tokens;
 use crate::utils::validate_safe_path;
 use super::types::*;
 
@@ -132,6 +132,31 @@ impl GenerateParams {
         self.validate_characters()?;
         self.validate_character_reference()?;
         self.validate_vibes()?;
+        self.validate_model_capabilities()?;
+        Ok(())
+    }
+
+    /// Validate features that depend on the model generation (V4 / V4.5 vs V5).
+    fn validate_model_capabilities(&self) -> Result<()> {
+        let model = self.model.as_str();
+        if self.model.is_v5() {
+            if self.vibes.as_ref().is_some_and(|v| !v.is_empty()) {
+                return Err(NovelAIError::Validation(format!(
+                    "Vibe Transfer is not supported by {}. Use a V4 / V4.5 model.",
+                    model
+                )));
+            }
+            if self.character_reference.is_some() {
+                return Err(NovelAIError::Validation(format!(
+                    "Character Reference is not supported by {}. Use a V4.5 model.",
+                    model
+                )));
+            }
+        } else if self.transparent_background {
+            return Err(NovelAIError::Validation(
+                "transparent_background is only supported by V5 models".to_string(),
+            ));
+        }
         Ok(())
     }
 
@@ -144,48 +169,43 @@ impl GenerateParams {
     }
 
     async fn validate_token_counts(&self) -> Result<()> {
-        let tokenizer = match get_t5_tokenizer(false).await {
-            Ok(t) => t,
-            Err(_) => return Ok(()), // Skip if tokenizer unavailable (matches TS behavior)
-        };
+        let model = self.model.as_str();
+        let max_tokens = self.model.max_tokens();
 
         // Positive prompt total
-        let mut positive_total = 0usize;
-        if !self.prompt.is_empty() {
-            positive_total += tokenizer.count_tokens(&self.prompt);
-        }
+        let mut positive_texts = vec![self.effective_prompt()];
+        let mut negative_texts = vec![self.negative_prompt.clone().unwrap_or_default()];
         if let Some(chars) = &self.characters {
-            for c in chars {
-                if !c.prompt.is_empty() {
-                    positive_total += tokenizer.count_tokens(&c.prompt);
-                }
+            positive_texts.extend(chars.iter().map(|c| c.prompt.clone()));
+            negative_texts.extend(chars.iter().map(|c| c.negative_prompt.clone()));
+        }
+
+        let mut positive_total = 0usize;
+        for text in positive_texts.iter().filter(|t| !t.is_empty()) {
+            match count_prompt_tokens(text, model).await {
+                Ok(n) => positive_total += n,
+                Err(_) => return Ok(()), // Skip if tokenizer unavailable (matches TS behavior)
             }
         }
-        if positive_total > MAX_TOKENS {
+        if positive_total > max_tokens {
             return Err(NovelAIError::Validation(format!(
                 "Total positive prompt token count ({}) exceeds maximum ({})",
-                positive_total, MAX_TOKENS
+                positive_total, max_tokens
             )));
         }
 
         // Negative prompt total
         let mut negative_total = 0usize;
-        if let Some(neg) = &self.negative_prompt {
-            if !neg.is_empty() {
-                negative_total += tokenizer.count_tokens(neg);
+        for text in negative_texts.iter().filter(|t| !t.is_empty()) {
+            match count_prompt_tokens(text, model).await {
+                Ok(n) => negative_total += n,
+                Err(_) => return Ok(()),
             }
         }
-        if let Some(chars) = &self.characters {
-            for c in chars {
-                if !c.negative_prompt.is_empty() {
-                    negative_total += tokenizer.count_tokens(&c.negative_prompt);
-                }
-            }
-        }
-        if negative_total > MAX_TOKENS {
+        if negative_total > max_tokens {
             return Err(NovelAIError::Validation(format!(
                 "Total negative prompt token count ({}) exceeds maximum ({})",
-                negative_total, MAX_TOKENS
+                negative_total, max_tokens
             )));
         }
 
@@ -346,11 +366,13 @@ impl GenerateParams {
 
     fn validate_characters(&self) -> Result<()> {
         if let Some(ref characters) = self.characters {
-            if characters.len() > MAX_CHARACTERS {
+            let max = self.model.max_characters();
+            if characters.len() > max {
                 return Err(NovelAIError::Validation(format!(
-                    "characters count ({}) exceeds maximum ({})",
+                    "characters count ({}) exceeds maximum ({}) for {}",
                     characters.len(),
-                    MAX_CHARACTERS
+                    max,
+                    self.model.as_str()
                 )));
             }
             for character in characters {
@@ -412,6 +434,12 @@ impl EncodeVibeParams {
         validate_image_input_not_empty(&self.image)?;
         validate_unit_range(self.information_extracted, "information_extracted")?;
         validate_unit_range(self.strength, "strength")?;
+        if self.model.is_v5() {
+            return Err(NovelAIError::Validation(format!(
+                "Vibe Transfer is not supported by {}. Use a V4 / V4.5 model.",
+                self.model.as_str()
+            )));
+        }
 
         // Validate save target (path traversal checks)
         validate_save_target(&self.save)?;
@@ -440,6 +468,7 @@ impl AugmentParams {
         let no_extra_params = matches!(
             self.req_type,
             AugmentReqType::Declutter
+                | AugmentReqType::DeclutterKeepBubbles
                 | AugmentReqType::Sketch
                 | AugmentReqType::Lineart
                 | AugmentReqType::BgRemoval
