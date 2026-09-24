@@ -43,7 +43,7 @@ anlas-browser.ts     (再エクスポートのみ)
 [2] ペイロード構築 (buildBasePayload + apply* ヘルパー群)
     │   - 基本パラメータ → GenerationPayload
     │   - img2img: source_image → base64
-    │   - infill: mask リサイズ (1/8), model + "-inpainting", cache_secret_key
+    │   - infill: mask リサイズ (1/8), model + "-inpainting"
     │   - vibes: .naiv4vibe → encoding 抽出
     │   - charref: 画像リサイズ + base64, director_reference_* パラメータ
     │   - characters: v4_prompt 構造構築
@@ -54,10 +54,10 @@ anlas-browser.ts     (再エクスポートのみ)
     │     ※ 公式サイトと同様、txt2img も含めて全フローを stream に統一。
     │       非 stream の `generate-image` は早期/中間フレームを返すケースがあり、
     │       ノイズ・低解像度状の出力につながるため使用しない。
-    │   - Content-Type: multipart/form-data
-    │     ※ `request` フィールドに JSON ペイロードを Blob (filename `blob`,
-    │       Content-Type `application/json`) として格納。公式サイトと同形式。
-    │   - Authorization: Bearer <apiKey>
+    │   - Content-Type: application/json (画像は base64 でペイロードに直接入れる)
+    │     ※ multipart で送るとサーバーが image/mask 等の文字列を別パートの
+    │       名前として解釈し 400 になるため、JSON ボディで送る。
+    │   - Authorization: Bearer <apiKey>, User-Agent: USER_AGENT
     │   - 429/ネットワークエラー → exponential backoff リトライ
     │
     ▼

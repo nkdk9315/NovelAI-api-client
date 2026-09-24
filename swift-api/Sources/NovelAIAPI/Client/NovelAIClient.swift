@@ -309,16 +309,14 @@ public final class NovelAIClient: @unchecked Sendable {
             }
         }
 
-        // 公式サイトはすべての generate フローを stream エンドポイントに送り、
-        // multipart/form-data の `request` フィールド (filename `blob`) に
-        // JSON ペイロードを格納する。レガシー非 stream 経路は早期/中間フレームを
-        // 返すケースがありノイズ・低解像度状の出力につながるため使用しない。
+        // stream エンドポイントに JSON ボディで送る (公式ドキュメントの形式)。
+        // multipart で送るとサーバーは image/mask 等の文字列を別パートの名前として
+        // 解釈するため、base64 を直接入れる場合は JSON でなければならない。
         let payloadData = try JSONSerialization.data(withJSONObject: payload)
         guard let url = URL(string: streamURL()) else {
             throw NovelAIError.other("Invalid API URL")
         }
-        let (multipartBody, contentType) = buildMultipartRequestBody(jsonPayload: payloadData)
-        let request = buildRequest(url: url, method: "POST", body: multipartBody, contentType: contentType)
+        let request = buildRequest(url: url, method: "POST", body: payloadData, contentType: "application/json")
 
         let (responseData, _) = try await fetchWithRetry(
             request: request,
@@ -547,9 +545,8 @@ public final class NovelAIClient: @unchecked Sendable {
 
         let payload: [String: Any] = [
             "image": b64Image,
-            "width": dims.width,
-            "height": dims.height,
-            "scale": params.scale,
+            "model": UPSCALE_MODEL,
+            "declared_blur_sigma": UPSCALE_DECLARED_BLUR_SIGMA,
         ]
 
         let payloadData = try JSONSerialization.data(withJSONObject: payload)
@@ -588,8 +585,13 @@ public final class NovelAIClient: @unchecked Sendable {
             anlasConsumed = nil
         }
 
-        let outputWidth = dims.width * params.scale
-        let outputHeight = dims.height * params.scale
+        // サーバーが返した実際のサイズを使う (通常は入力の2倍)
+        var outputWidth = dims.width * params.scale
+        var outputHeight = dims.height * params.scale
+        if let outDims = try? getImageDimensions(.bytes(imageData)) {
+            outputWidth = outDims.width
+            outputHeight = outDims.height
+        }
 
         var result = UpscaleResult(
             imageData: imageData,
@@ -625,22 +627,6 @@ public final class NovelAIClient: @unchecked Sendable {
     }
 
     // MARK: - Private Helpers: Request Building
-
-    /// Build a multipart/form-data body containing the JSON payload as a `request`
-    /// field with filename `blob` (matches the official site's request format
-    /// for `/ai/generate-image-stream`). Returns the body bytes and the
-    /// `Content-Type` header value (with the generated boundary).
-    private func buildMultipartRequestBody(jsonPayload: Data) -> (Data, String) {
-        let boundary = "----NovelAIAPIBoundary\(UUID().uuidString)"
-        var body = Data()
-        let lineBreak = "\r\n"
-        body.append("--\(boundary)\(lineBreak)".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"request\"; filename=\"blob\"\(lineBreak)".data(using: .utf8)!)
-        body.append("Content-Type: application/json\(lineBreak)\(lineBreak)".data(using: .utf8)!)
-        body.append(jsonPayload)
-        body.append("\(lineBreak)--\(boundary)--\(lineBreak)".data(using: .utf8)!)
-        return (body, "multipart/form-data; boundary=\(boundary)")
-    }
 
     /// Build an HTTP request with authorization header and optional content type.
     private func buildRequest(url: URL, method: String, body: Data?, contentType: String?) -> URLRequest {

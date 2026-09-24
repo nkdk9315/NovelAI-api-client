@@ -323,10 +323,13 @@ impl NovelAIClient {
             constants::api_url()
         };
 
-        let response = retry::fetch_with_retry_multipart(
+        // JSON body: with multipart the server treats image/mask strings as
+        // references to other form parts, so base64 images must go in JSON.
+        let response = retry::fetch_with_retry(
             &self.http_client,
             &api_url,
-            &body,
+            reqwest::Method::POST,
+            Some(&body),
             self.api_key.expose_secret(),
             "Generation",
             &*self.logger,
@@ -619,9 +622,8 @@ impl NovelAIClient {
 
         let payload = serde_json::json!({
             "image": b64_image,
-            "width": width,
-            "height": height,
-            "scale": params.scale,
+            "model": constants::UPSCALE_MODEL,
+            "declared_blur_sigma": constants::UPSCALE_DECLARED_BLUR_SIGMA,
         });
 
         let body = payload.to_string();
@@ -652,8 +654,10 @@ impl NovelAIClient {
         let (anlas_remaining, anlas_consumed) =
             self.get_anlas_after_if_tracking(anlas_before).await;
 
-        let output_width = width * params.scale;
-        let output_height = height * params.scale;
+        // Use the size the server actually returned (normally 2x the input)
+        let (output_width, output_height) = image::load_from_memory(&image_data)
+            .map(|img| (img.width(), img.height()))
+            .unwrap_or((width * params.scale, height * params.scale));
 
         let mut result = UpscaleResult {
             image_data,

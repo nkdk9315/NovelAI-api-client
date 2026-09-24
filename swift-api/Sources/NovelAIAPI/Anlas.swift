@@ -442,19 +442,14 @@ public func calculateAugmentCost(_ params: AugmentCostParams) throws -> AugmentC
 
 // MARK: - Upscale Cost Calculation
 
-/// Calculate upscale Anlas cost using lookup table
+/// Calculate upscale Anlas cost using lookup table (no Opus free tier)
 public func calculateUpscaleCost(_ params: UpscaleCostParams) throws -> UpscaleCostResult {
     // Input validation
     try assertPositiveFiniteInt(params.width, "width")
     try assertPositiveFiniteInt(params.height, "height")
 
-    let tier = params.tier ?? 0
+    // No Opus free tier for upscale; `params.tier` is accepted for compatibility only.
     let pixels = params.width * params.height
-
-    // Opus free check
-    if tier >= OPUS_MIN_TIER && pixels <= UPSCALE_OPUS_FREE_PIXELS {
-        return UpscaleCostResult(pixels: pixels, cost: 0, isOpusFree: true, error: false, errorCode: nil)
-    }
 
     // Look up cost from table (ascending order, first match wins)
     for entry in UPSCALE_COST_TABLE {

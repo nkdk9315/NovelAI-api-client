@@ -14,12 +14,12 @@ describe('URL Constants', () => {
     expect(Constants.API_URL).toBe('https://image.novelai.net/ai/generate-image');
     expect(Constants.STREAM_URL).toBe('https://image.novelai.net/ai/generate-image-stream');
     expect(Constants.ENCODE_URL).toBe('https://image.novelai.net/ai/encode-vibe');
-    expect(Constants.SUBSCRIPTION_URL).toBe('https://api.novelai.net/user/subscription');
+    expect(Constants.SUBSCRIPTION_URL).toBe('https://image.novelai.net/user/subscription');
   });
 
   it('should have valid Augment and Upscale URLs', () => {
     expect(Constants.AUGMENT_URL).toBe('https://image.novelai.net/ai/augment-image');
-    expect(Constants.UPSCALE_URL).toBe('https://api.novelai.net/ai/upscale');
+    expect(Constants.UPSCALE_URL).toBe('https://image.novelai.net/ai/upscale');
   });
 });
 
@@ -54,7 +54,7 @@ describe('Default Values', () => {
   });
 
   it('should have valid upscale defaults', () => {
-    expect(Constants.DEFAULT_UPSCALE_SCALE).toBe(4);
+    expect(Constants.DEFAULT_UPSCALE_SCALE).toBe(2);
     expect(Constants.VALID_UPSCALE_SCALES).toContain(Constants.DEFAULT_UPSCALE_SCALE);
   });
 });
@@ -125,8 +125,9 @@ describe('Augment Tool Constants', () => {
 
   it('should have valid upscale scales', () => {
     expect(Constants.VALID_UPSCALE_SCALES).toContain(2);
-    expect(Constants.VALID_UPSCALE_SCALES).toContain(4);
-    expect(Constants.VALID_UPSCALE_SCALES.length).toBe(2);
+    expect(Constants.VALID_UPSCALE_SCALES.length).toBe(1);
+    expect(Constants.UPSCALE_MODEL).toBe('nai-diffusion-5-curated');
+    expect(Constants.UPSCALE_DECLARED_BLUR_SIGMA).toBe(0);
   });
 });
 
@@ -220,10 +221,9 @@ describe('Anlas Cost Constants', () => {
   });
 
   it('should have valid upscale cost table', () => {
-    expect(Constants.UPSCALE_COST_TABLE).toHaveLength(5);
-    expect(Constants.UPSCALE_COST_TABLE[0]).toEqual([262_144, 1]);
-    expect(Constants.UPSCALE_COST_TABLE[4]).toEqual([1_048_576, 7]);
-    expect(Constants.UPSCALE_OPUS_FREE_PIXELS).toBe(409_600);
+    expect(Constants.UPSCALE_COST_TABLE).toHaveLength(4);
+    expect(Constants.UPSCALE_COST_TABLE[0]).toEqual([1_048_576, 1]);
+    expect(Constants.UPSCALE_COST_TABLE[3]).toEqual([3_145_728, 4]);
   });
 
   it('should have valid grid size and inpaint threshold', () => {

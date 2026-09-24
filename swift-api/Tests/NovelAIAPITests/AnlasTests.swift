@@ -502,47 +502,40 @@ final class AnlasTests: XCTestCase {
 
     func testUpscaleCost_tableLookup_smallImage() throws {
         let result = try calculateUpscaleCost(UpscaleCostParams(width: 256, height: 256))
-        // 256*256 = 65536 <= 262_144 -> cost 1
         XCTAssertEqual(result.cost, 1)
         XCTAssertFalse(result.error)
     }
 
-    func testUpscaleCost_tableLookup_mediumImage() throws {
-        let result = try calculateUpscaleCost(UpscaleCostParams(width: 640, height: 640))
-        // 640*640 = 409_600 <= 409_600 -> cost 2
+    func testUpscaleCost_boundary1024x1024() throws {
+        let result = try calculateUpscaleCost(UpscaleCostParams(width: 1024, height: 1024))
+        // 1_048_576 <= 1_048_576 -> cost 1
+        XCTAssertEqual(result.cost, 1)
+    }
+
+    func testUpscaleCost_aboveFirstTier() throws {
+        let result = try calculateUpscaleCost(UpscaleCostParams(width: 1025, height: 1024))
         XCTAssertEqual(result.cost, 2)
     }
 
-    func testUpscaleCost_tableLookup_largeImage() throws {
-        let result = try calculateUpscaleCost(UpscaleCostParams(width: 1024, height: 1024))
-        // 1024*1024 = 1_048_576 <= 1_048_576 -> cost 7
-        XCTAssertEqual(result.cost, 7)
+    func testUpscaleCost_thirdTier() throws {
+        let result = try calculateUpscaleCost(UpscaleCostParams(width: 1472, height: 1472))
+        XCTAssertEqual(result.cost, 3)
     }
 
-    func testUpscaleCost_opusFree() throws {
-        let result = try calculateUpscaleCost(UpscaleCostParams(width: 640, height: 640, tier: 3))
-        // 640*640 = 409_600 <= UPSCALE_OPUS_FREE_PIXELS (409_600)
-        XCTAssertTrue(result.isOpusFree)
-        XCTAssertEqual(result.cost, 0)
-        XCTAssertFalse(result.error)
+    func testUpscaleCost_maxBoundary() throws {
+        let result = try calculateUpscaleCost(UpscaleCostParams(width: 2048, height: 1536))
+        XCTAssertEqual(result.pixels, 3_145_728)
+        XCTAssertEqual(result.cost, 4)
     }
 
-    func testUpscaleCost_opusFreeExactBoundary() throws {
-        // Exactly at the opus free limit
-        let result = try calculateUpscaleCost(UpscaleCostParams(width: 640, height: 640, tier: 3))
-        XCTAssertEqual(result.pixels, 409_600)
-        XCTAssertTrue(result.isOpusFree)
-    }
-
-    func testUpscaleCost_opusNotFreeAboveLimit() throws {
-        let result = try calculateUpscaleCost(UpscaleCostParams(width: 641, height: 641, tier: 3))
-        // 641*641 = 410_881 > UPSCALE_OPUS_FREE_PIXELS
+    func testUpscaleCost_opusIsNotFree() throws {
+        let result = try calculateUpscaleCost(UpscaleCostParams(width: 512, height: 768, tier: 3))
         XCTAssertFalse(result.isOpusFree)
+        XCTAssertEqual(result.cost, 1)
     }
 
     func testUpscaleCost_exceedsTable_error() throws {
-        let result = try calculateUpscaleCost(UpscaleCostParams(width: 1025, height: 1025))
-        // 1025*1025 = 1_050_625 > 1_048_576 (largest table entry)
+        let result = try calculateUpscaleCost(UpscaleCostParams(width: 2048, height: 1600))
         XCTAssertTrue(result.error)
         XCTAssertEqual(result.errorCode, -3)
         XCTAssertNil(result.cost)

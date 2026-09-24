@@ -1238,15 +1238,16 @@ final class UpscaleParamsValidationTests: XCTestCase {
         XCTAssertNoThrow(try params.validate())
     }
 
-    func testScale4Accepted() {
+    func testScale4Rejected() {
+        // The server always upscales 2x
         let params = UpscaleParams(image: dummyImage, scale: 4)
-        XCTAssertNoThrow(try params.validate())
+        XCTAssertThrowsError(try params.validate())
     }
 
-    func testDefaultScaleIs4() {
+    func testDefaultScaleIs2() {
         let params = UpscaleParams(image: dummyImage)
         XCTAssertEqual(params.scale, DEFAULT_UPSCALE_SCALE)
-        XCTAssertEqual(params.scale, 4)
+        XCTAssertEqual(params.scale, 2)
         XCTAssertNoThrow(try params.validate())
     }
 

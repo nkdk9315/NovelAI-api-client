@@ -10,9 +10,12 @@
 export const API_URL = process.env.NOVELAI_API_URL ?? "https://image.novelai.net/ai/generate-image";
 export const STREAM_URL = process.env.NOVELAI_STREAM_URL ?? "https://image.novelai.net/ai/generate-image-stream";
 export const ENCODE_URL = process.env.NOVELAI_ENCODE_URL ?? "https://image.novelai.net/ai/encode-vibe";
-export const SUBSCRIPTION_URL = process.env.NOVELAI_SUBSCRIPTION_URL ?? "https://api.novelai.net/user/subscription";
+export const SUBSCRIPTION_URL = process.env.NOVELAI_SUBSCRIPTION_URL ?? "https://image.novelai.net/user/subscription";
 export const AUGMENT_URL = process.env.NOVELAI_AUGMENT_URL ?? "https://image.novelai.net/ai/augment-image";
-export const UPSCALE_URL = process.env.NOVELAI_UPSCALE_URL ?? "https://api.novelai.net/ai/upscale";
+export const UPSCALE_URL = process.env.NOVELAI_UPSCALE_URL ?? "https://image.novelai.net/ai/upscale";
+
+// Cloudflare は一部の既定 User-Agent を弾くため明示する
+export const USER_AGENT = "novelai-api-client-ts/1.0.0";
 
 
 // =============================================================================
@@ -146,9 +149,13 @@ export const MIN_DEFRY = 0;
 export const MAX_DEFRY = 5;
 export const DEFAULT_DEFRY = 3;
 
-// Upscaleスケール
-export const VALID_UPSCALE_SCALES = [2, 4] as const;
-export const DEFAULT_UPSCALE_SCALE = 4;
+// Upscaleスケール (サーバーは常に2倍で返す。倍率指定のパラメータはない)
+export const VALID_UPSCALE_SCALES = [2] as const;
+export const DEFAULT_UPSCALE_SCALE = 2;
+
+// Upscaleリクエストの固定値 (公式サイトと同じ)
+export const UPSCALE_MODEL = "nai-diffusion-5-curated";
+export const UPSCALE_DECLARED_BLUR_SIGMA = 0;
 
 // Upscale入力画像の最大ピクセル数（UPSCALE_COST_TABLEの最大値に対応）
 // これを超える画像はAPIが 400 "Image resolution too high" を返す
@@ -211,16 +218,13 @@ export const BG_REMOVAL_MULTIPLIER = 3;
 export const BG_REMOVAL_ADDEND = 5;
 
 // アップスケールコストテーブル [最大ピクセル数, コスト]（昇順）
+// Opus無料はない (2026-09 の公式サイトで確認)
 export const UPSCALE_COST_TABLE: ReadonlyArray<readonly [number, number]> = [
-  [262_144, 1],
-  [409_600, 2],
-  [524_288, 3],
-  [786_432, 5],
-  [1_048_576, 7],
+  [1_048_576, 1],
+  [1_747_627, 2],
+  [2_446_678, 3],
+  [3_145_728, 4],
 ] as const;
-
-// アップスケールOpus無料ピクセル上限
-export const UPSCALE_OPUS_FREE_PIXELS = 409_600;
 
 
 // =============================================================================

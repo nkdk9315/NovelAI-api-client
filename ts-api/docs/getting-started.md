@@ -303,7 +303,7 @@ const result = await client.augmentImage({
 ```typescript
 const result = await client.upscaleImage({
   image: "reference/input.jpeg",
-  scale: 4,          // 2 or 4 (デフォルト: 4)
+  // 倍率は常に2倍 (scale は省略可。2 のみ指定できる)
   save_dir: "output/",
 });
 

@@ -207,7 +207,7 @@ async fn main() -> Result<()> {
     match client
         .upscale_image(&UpscaleParams {
             image: ImageInput::FilePath(input_image.into()),
-            scale: 4,
+            scale: 2,
             save: SaveTarget::Directory { dir: output_dir.into(), filename: None },
         })
         .await

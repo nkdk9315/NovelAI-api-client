@@ -18,7 +18,7 @@ final class ConstantsTests: XCTestCase {
     }
 
     func testSubscriptionURLReturnsDefaultValue() {
-        XCTAssertEqual(subscriptionURL(), "https://api.novelai.net/user/subscription")
+        XCTAssertEqual(subscriptionURL(), "https://image.novelai.net/user/subscription")
     }
 
     func testAugmentURLReturnsDefaultValue() {
@@ -26,7 +26,7 @@ final class ConstantsTests: XCTestCase {
     }
 
     func testUpscaleURLReturnsDefaultValue() {
-        XCTAssertEqual(upscaleURL(), "https://api.novelai.net/ai/upscale")
+        XCTAssertEqual(upscaleURL(), "https://image.novelai.net/ai/upscale")
     }
 
     // MARK: - Default Values
@@ -336,25 +336,19 @@ final class ConstantsTests: XCTestCase {
 
     // MARK: - Upscale Cost Table
 
-    func testUpscaleCostTableHasFiveEntries() {
-        XCTAssertEqual(UPSCALE_COST_TABLE.count, 5)
+    func testUpscaleCostTableHasFourEntries() {
+        XCTAssertEqual(UPSCALE_COST_TABLE.count, 4)
     }
 
     func testUpscaleCostTableValues() {
-        XCTAssertEqual(UPSCALE_COST_TABLE[0].maxPixels, 262_144)
+        XCTAssertEqual(UPSCALE_COST_TABLE[0].maxPixels, 1_048_576)
         XCTAssertEqual(UPSCALE_COST_TABLE[0].cost, 1)
-
-        XCTAssertEqual(UPSCALE_COST_TABLE[1].maxPixels, 409_600)
+        XCTAssertEqual(UPSCALE_COST_TABLE[1].maxPixels, 1_747_627)
         XCTAssertEqual(UPSCALE_COST_TABLE[1].cost, 2)
-
-        XCTAssertEqual(UPSCALE_COST_TABLE[2].maxPixels, 524_288)
+        XCTAssertEqual(UPSCALE_COST_TABLE[2].maxPixels, 2_446_678)
         XCTAssertEqual(UPSCALE_COST_TABLE[2].cost, 3)
-
-        XCTAssertEqual(UPSCALE_COST_TABLE[3].maxPixels, 786_432)
-        XCTAssertEqual(UPSCALE_COST_TABLE[3].cost, 5)
-
-        XCTAssertEqual(UPSCALE_COST_TABLE[4].maxPixels, 1_048_576)
-        XCTAssertEqual(UPSCALE_COST_TABLE[4].cost, 7)
+        XCTAssertEqual(UPSCALE_COST_TABLE[3].maxPixels, 3_145_728)
+        XCTAssertEqual(UPSCALE_COST_TABLE[3].cost, 4)
     }
 
     func testUpscaleCostTableIsAscendingByMaxPixels() {
@@ -367,8 +361,9 @@ final class ConstantsTests: XCTestCase {
         }
     }
 
-    func testUpscaleOpusFreePixels() {
-        XCTAssertEqual(UPSCALE_OPUS_FREE_PIXELS, 409_600)
+    func testUpscaleRequestConstants() {
+        XCTAssertEqual(UPSCALE_MODEL, "nai-diffusion-5-curated")
+        XCTAssertEqual(UPSCALE_DECLARED_BLUR_SIGMA, 0)
     }
 
     // MARK: - Enhance Level Presets
@@ -407,11 +402,11 @@ final class ConstantsTests: XCTestCase {
     // MARK: - Valid Upscale Scales
 
     func testValidUpscaleScales() {
-        XCTAssertEqual(VALID_UPSCALE_SCALES, [2, 4])
+        XCTAssertEqual(VALID_UPSCALE_SCALES, [2])
     }
 
     func testDefaultUpscaleScale() {
-        XCTAssertEqual(DEFAULT_UPSCALE_SCALE, 4)
+        XCTAssertEqual(DEFAULT_UPSCALE_SCALE, 2)
     }
 
     // MARK: - Character Reference Sizes

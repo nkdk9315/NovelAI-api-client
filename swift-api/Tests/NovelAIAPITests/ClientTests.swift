@@ -1454,9 +1454,9 @@ final class URLConstantsTests: XCTestCase {
         XCTAssertTrue(apiURL().contains("image.novelai.net"))
         XCTAssertTrue(streamURL().contains("image.novelai.net"))
         XCTAssertTrue(encodeURL().contains("image.novelai.net"))
-        XCTAssertTrue(subscriptionURL().contains("api.novelai.net"))
+        XCTAssertTrue(subscriptionURL().contains("image.novelai.net"))
         XCTAssertTrue(augmentURL().contains("image.novelai.net"))
-        XCTAssertTrue(upscaleURL().contains("api.novelai.net"))
+        XCTAssertTrue(upscaleURL().contains("image.novelai.net"))
     }
 }
 
@@ -1678,12 +1678,12 @@ final class UpscaleResultTypeTests: XCTestCase {
         let data = Data([0x89, 0x50])
         let result = UpscaleResult(
             imageData: data,
-            scale: 4,
+            scale: 2,
             outputWidth: 2048,
             outputHeight: 2048
         )
         XCTAssertEqual(result.imageData, data)
-        XCTAssertEqual(result.scale, 4)
+        XCTAssertEqual(result.scale, 2)
         XCTAssertEqual(result.outputWidth, 2048)
         XCTAssertEqual(result.outputHeight, 2048)
         XCTAssertNil(result.anlasRemaining)
@@ -2068,7 +2068,7 @@ final class AnlasValidationTests: XCTestCase {
 
         let client = NovelAIClient(apiKey: "test-key", session: mockSession)
         let pngData = makePNG()
-        let params = UpscaleParams(image: .bytes(pngData), scale: 4)
+        let params = UpscaleParams(image: .bytes(pngData), scale: 2)
 
         do {
             _ = try await client.upscaleImage(params)
@@ -2108,6 +2108,71 @@ final class AnlasValidationTests: XCTestCase {
         } catch {
             // Other errors (API, parse, etc.) are acceptable
         }
+    }
+
+    private func bodyData(of request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let n = stream.read(&buffer, maxLength: buffer.count)
+            if n <= 0 { break }
+            data.append(buffer, count: n)
+        }
+        return data
+    }
+
+    func testGenerateSendsJSONBodyToStreamEndpoint() async throws {
+        // multipart makes the server read image fields as form-part names, so generate must send JSON
+        let pngData = makePNG()
+        let zipData = try makeZipWithPNG(pngData)
+        var captured: (contentType: String?, path: String, json: [String: Any]?)?
+
+        MockURLProtocol.requestHandler = { request in
+            if request.url?.path.contains("subscription") == true {
+                return (makeHTTPResponse(url: request.url!.absoluteString, statusCode: 500), Data())
+            }
+            let json = self.bodyData(of: request).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            captured = (request.value(forHTTPHeaderField: "Content-Type"), request.url!.path, json)
+            return (makeHTTPResponse(url: request.url!.absoluteString, statusCode: 200), zipData)
+        }
+
+        let client = NovelAIClient(apiKey: "test-key", session: mockSession)
+        var params = GenerateParams(prompt: "1girl", seed: 1)
+        params.action = .img2img
+        params.sourceImage = .bytes(pngData)
+        _ = try await client.generate(params)
+
+        let c = try XCTUnwrap(captured)
+        XCTAssertEqual(c.contentType, "application/json")
+        XCTAssertTrue(c.path.hasSuffix("/ai/generate-image-stream"))
+        let parameters = try XCTUnwrap(c.json?["parameters"] as? [String: Any])
+        XCTAssertTrue((parameters["image"] as? String)?.hasPrefix("iVBOR") == true)
+        XCTAssertNil(parameters["image_cache_secret_key"])
+    }
+
+    func testUpscaleSendsModelAndBlurSigma() async throws {
+        let pngData = makePNG()
+        let zipData = try makeZipWithPNG(pngData)
+        var capturedJSON: [String: Any]?
+
+        MockURLProtocol.requestHandler = { request in
+            if request.url?.path.contains("subscription") == true {
+                return (makeHTTPResponse(url: request.url!.absoluteString, statusCode: 500), Data())
+            }
+            capturedJSON = self.bodyData(of: request).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            return (makeHTTPResponse(url: request.url!.absoluteString, statusCode: 200), zipData)
+        }
+
+        let client = NovelAIClient(apiKey: "test-key", session: mockSession)
+        _ = try await client.upscaleImage(UpscaleParams(image: .bytes(pngData)))
+
+        let json = try XCTUnwrap(capturedJSON)
+        XCTAssertEqual(Set(json.keys), ["image", "model", "declared_blur_sigma"])
+        XCTAssertEqual(json["model"] as? String, UPSCALE_MODEL)
     }
 
     func testGenerateOpusFreeWithZeroBalance() async throws {

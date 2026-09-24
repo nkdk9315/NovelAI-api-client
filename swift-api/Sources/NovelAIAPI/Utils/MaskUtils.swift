@@ -1,17 +1,8 @@
 import Foundation
-import CryptoKit
 #if canImport(CoreGraphics)
 import CoreGraphics
 import ImageIO
 #endif
-
-// MARK: - Cache Secret Key
-
-/// Calculate SHA256 hash of image data for cache_secret_key.
-public func calculateCacheSecretKey(_ imageData: Data) -> String {
-    let digest = SHA256.hash(data: imageData)
-    return digest.map { String(format: "%02x", $0) }.joined()
-}
 
 // MARK: - Mask Region / Center
 

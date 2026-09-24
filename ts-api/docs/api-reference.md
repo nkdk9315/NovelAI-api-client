@@ -249,14 +249,14 @@ async augmentImage(params: AugmentParams): Promise<AugmentResult>
 async upscaleImage(params: UpscaleParams): Promise<UpscaleResult>
 ```
 
-画像の解像度を2倍または4倍に拡大する。width/height は画像から自動検出。
+画像の解像度を2倍に拡大する (サーバーは常に2倍で返す)。入力は 1024×1024 相当 (1,048,576 px) 以下。コストは 1 Anlas (Opus でも無料ではない)。
 
 ### UpscaleParams
 
 | パラメータ | 型 | デフォルト | 説明 |
 |-----------|-----|-----------|------|
 | `image` | `ImageInput` | — (必須) | 対象画像 |
-| `scale` | `number` | `4` | 拡大倍率 (2 or 4) |
+| `scale` | `number` | `2` | 拡大倍率 (2 のみ。互換のために残している) |
 | `save_path` | `string?` | — | 保存先パス (排他) |
 | `save_dir` | `string?` | — | 保存先ディレクトリ (排他) |
 
@@ -342,7 +342,7 @@ async getAnlasBalance(): Promise<AnlasBalance>
 | `DEFAULT_VIBE_INFO_EXTRACTED` | `0.7` | Vibe情報抽出量 |
 | `DEFAULT_IMG2IMG_STRENGTH` | `0.62` | img2img変化強度 |
 | `DEFAULT_INPAINT_COLOR_CORRECT` | `true` | Inpaint色補正 |
-| `DEFAULT_UPSCALE_SCALE` | `4` | アップスケール倍率 |
+| `DEFAULT_UPSCALE_SCALE` | `2` | アップスケール倍率 |
 | `DEFAULT_DEFRY` | `3` | Augment defry |
 | `MAX_SEED` | `4294967295` | シード最大値 (2^32-1) |
 | `MAX_PIXELS` | `3145728` | 最大ピクセル数 |

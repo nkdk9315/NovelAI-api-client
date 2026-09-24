@@ -26,7 +26,7 @@ mod url_constants {
         );
         assert_eq!(
             constants::subscription_url(),
-            "https://api.novelai.net/user/subscription"
+            "https://image.novelai.net/user/subscription"
         );
     }
 
@@ -38,7 +38,7 @@ mod url_constants {
         );
         assert_eq!(
             constants::upscale_url(),
-            "https://api.novelai.net/ai/upscale"
+            "https://image.novelai.net/ai/upscale"
         );
     }
 }
@@ -96,7 +96,7 @@ mod default_values {
 
     #[test]
     fn should_have_valid_upscale_defaults() {
-        assert_eq!(constants::DEFAULT_UPSCALE_SCALE, 4);
+        assert_eq!(constants::DEFAULT_UPSCALE_SCALE, 2);
         assert!(
             constants::VALID_UPSCALE_SCALES.contains(&constants::DEFAULT_UPSCALE_SCALE),
             "DEFAULT_UPSCALE_SCALE should be in VALID_UPSCALE_SCALES"
@@ -225,8 +225,7 @@ mod augment_tool_constants {
     #[test]
     fn should_have_valid_upscale_scales() {
         assert!(constants::VALID_UPSCALE_SCALES.contains(&2));
-        assert!(constants::VALID_UPSCALE_SCALES.contains(&4));
-        assert_eq!(constants::VALID_UPSCALE_SCALES.len(), 2);
+        assert_eq!(constants::VALID_UPSCALE_SCALES.len(), 1);
     }
 }
 
@@ -375,10 +374,10 @@ mod anlas_cost_constants {
 
     #[test]
     fn should_have_valid_upscale_cost_table() {
-        assert_eq!(constants::UPSCALE_COST_TABLE.len(), 5);
-        assert_eq!(constants::UPSCALE_COST_TABLE[0], (262_144, 1));
-        assert_eq!(constants::UPSCALE_COST_TABLE[4], (1_048_576, 7));
-        assert_eq!(constants::UPSCALE_OPUS_FREE_PIXELS, 409_600);
+        assert_eq!(constants::UPSCALE_COST_TABLE.len(), 4);
+        assert_eq!(constants::UPSCALE_COST_TABLE[0], (1_048_576, 1));
+        assert_eq!(constants::UPSCALE_COST_TABLE[3], (3_145_728, 4));
+        assert_eq!(constants::UPSCALE_MODEL, "nai-diffusion-5-curated");
     }
 
     #[test]

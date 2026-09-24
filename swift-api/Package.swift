@@ -35,5 +35,6 @@ let package = Package(
         .executableTarget(name: "ExampleInfill", dependencies: ["NovelAIAPI"]),
         .executableTarget(name: "ExampleTokenizer", dependencies: ["NovelAIAPI"]),
         .executableTarget(name: "ExampleValidation", dependencies: ["NovelAIAPI"]),
+        .executableTarget(name: "SmokeV45", dependencies: ["NovelAIAPI"]),
     ]
 )

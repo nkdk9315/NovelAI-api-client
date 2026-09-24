@@ -121,7 +121,8 @@ export class NovelAIClient {
 
       let response: Response;
       try {
-        response = await fetch(url, { ...options, signal: controller.signal });
+        const headers = { "User-Agent": Constants.USER_AGENT, ...(options.headers as Record<string, string> | undefined) };
+        response = await fetch(url, { ...options, headers, signal: controller.signal });
       } catch (error) {
         clearTimeout(timeoutId);
         // Retry on network errors (timeout, connection refused, DNS failure, etc.)
@@ -470,7 +471,6 @@ export class NovelAIClient {
       validatedParams.width,
       validatedParams.height
     );
-    const sourceImageBuffer = Buffer.from(sourceImageBase64, 'base64');
 
     // マスク画像を処理（1/8サイズにリサイズ）
     const maskBuffer = Utils.getImageBuffer(validatedParams.mask);
@@ -480,10 +480,6 @@ export class NovelAIClient {
       validatedParams.height
     );
     const maskBase64 = resizedMask.toString('base64');
-
-    // cache_secret_keyを生成
-    const imageCacheSecretKey = Utils.calculateCacheSecretKey(sourceImageBuffer);
-    const maskCacheSecretKey = Utils.calculateCacheSecretKey(resizedMask);
 
     // パラメータ設定
     if (validatedParams.mask_strength == null) {
@@ -504,8 +500,6 @@ export class NovelAIClient {
       strength: maskStrength,
       color_correct: validatedParams.inpaint_color_correct,
     };
-    payload.parameters.image_cache_secret_key = imageCacheSecretKey;
-    payload.parameters.mask_cache_secret_key = maskCacheSecretKey;
   }
 
   /**
@@ -687,25 +681,18 @@ export class NovelAIClient {
     }
 
     // Make Request
-    // 公式サイトはすべての generate フローを stream エンドポイントに送り、
-    // multipart/form-data の `request` フィールド (filename `blob`) に
-    // JSON ペイロードを格納する。レガシー非 stream 経路は早期/中間フレームを
-    // 返すケースがありノイズ・低解像度状の出力につながるため使用しない。
-    const formData = new FormData();
-    formData.append(
-      "request",
-      new Blob([JSON.stringify(payload)], { type: "application/json" }),
-      "blob"
-    );
-
+    // stream エンドポイントに JSON ボディで送る (公式ドキュメントの形式)。
+    // multipart で送るとサーバーは image/mask 等の文字列を別パートの名前として
+    // 解釈するため、base64 を直接入れる場合は JSON でなければならない。
     const response = await this.fetchWithRetry(
       Constants.STREAM_URL,
       {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
         },
-        body: formData,
+        body: JSON.stringify(payload),
       },
       'Generation'
     );
@@ -1059,9 +1046,8 @@ export class NovelAIClient {
 
     const payload = {
       image: b64Image,
-      width: width,
-      height: height,
-      scale: validatedParams.scale,
+      model: Constants.UPSCALE_MODEL,
+      declared_blur_sigma: Constants.UPSCALE_DECLARED_BLUR_SIGMA,
     };
 
     const response = await this.fetchWithRetry(
@@ -1102,8 +1088,16 @@ export class NovelAIClient {
       this.logger.warn('[NovelAI] Failed to get final Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
 
-    const outputWidth = width * validatedParams.scale;
-    const outputHeight = height * validatedParams.scale;
+    // サーバーが返した実際のサイズを使う (通常は入力の2倍)
+    let outputWidth = width * validatedParams.scale;
+    let outputHeight = height * validatedParams.scale;
+    try {
+      const dims = await Utils.getImageDimensions(imageData);
+      outputWidth = dims.width;
+      outputHeight = dims.height;
+    } catch {
+      // 読めない場合は計算値のまま
+    }
 
     const result: Schemas.UpscaleResult = {
       image_data: imageData,

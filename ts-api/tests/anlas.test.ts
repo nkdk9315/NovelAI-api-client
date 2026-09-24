@@ -562,67 +562,46 @@ describe('calculateUpscaleCost', () => {
     expect(result.error).toBe(false);
   });
 
-  it('K-2: 640x640 tier 0 → pixels=409600, cost=2, isOpusFree=false, error=false', () => {
-    const result = calculateUpscaleCost({ width: 640, height: 640, tier: 0 });
-    expect(result.pixels).toBe(409600);
-    expect(result.cost).toBe(2);
-    expect(result.isOpusFree).toBe(false);
-    expect(result.error).toBe(false);
-  });
-
-  it('K-3: 512x1024 tier 0 → pixels=524288, cost=3, error=false', () => {
-    const result = calculateUpscaleCost({ width: 512, height: 1024, tier: 0 });
-    expect(result.pixels).toBe(524288);
-    expect(result.cost).toBe(3);
-    expect(result.error).toBe(false);
-  });
-
-  it('K-4: 1024x768 tier 0 → pixels=786432, cost=5, error=false', () => {
-    const result = calculateUpscaleCost({ width: 1024, height: 768, tier: 0 });
-    expect(result.pixels).toBe(786432);
-    expect(result.cost).toBe(5);
-    expect(result.error).toBe(false);
-  });
-
-  it('K-5: 1024x1024 tier 0 → pixels=1048576, cost=7, error=false', () => {
+  it('K-2: 1024x1024 → pixels=1048576 (boundary), cost=1', () => {
     const result = calculateUpscaleCost({ width: 1024, height: 1024, tier: 0 });
     expect(result.pixels).toBe(1048576);
-    expect(result.cost).toBe(7);
+    expect(result.cost).toBe(1);
     expect(result.error).toBe(false);
   });
 
-  it('K-6: 1025x1024 tier 0 → pixels > 1048576, error=true, errorCode=-3', () => {
+  it('K-3: 1025x1024 → pixels=1049600, cost=2', () => {
     const result = calculateUpscaleCost({ width: 1025, height: 1024, tier: 0 });
     expect(result.pixels).toBe(1049600);
+    expect(result.cost).toBe(2);
+  });
+
+  it('K-4: 1536x1024 → pixels=1572864, cost=2', () => {
+    const result = calculateUpscaleCost({ width: 1536, height: 1024, tier: 0 });
+    expect(result.cost).toBe(2);
+  });
+
+  it('K-5: 1472x1472 → pixels=2166784, cost=3', () => {
+    const result = calculateUpscaleCost({ width: 1472, height: 1472, tier: 0 });
+    expect(result.cost).toBe(3);
+  });
+
+  it('K-6: 2048x1536 → pixels=3145728 (boundary), cost=4', () => {
+    const result = calculateUpscaleCost({ width: 2048, height: 1536, tier: 0 });
+    expect(result.pixels).toBe(3145728);
+    expect(result.cost).toBe(4);
+    expect(result.error).toBe(false);
+  });
+
+  it('K-7: 2048x1600 → pixels > 3145728, error=true, errorCode=-3', () => {
+    const result = calculateUpscaleCost({ width: 2048, height: 1600, tier: 0 });
     expect(result.cost).toBeNull();
     expect(result.error).toBe(true);
     expect(result.errorCode).toBe(-3);
   });
 
-  it('K-7: 512x512 tier 3 → isOpusFree=true, cost=0 (effective)', () => {
-    const result = calculateUpscaleCost({ width: 512, height: 512, tier: 3 });
-    expect(result.pixels).toBe(262144);
-    expect(result.isOpusFree).toBe(true);
-    expect(result.cost).toBe(0);
-  });
-
-  it('K-8: 640x640 tier 3 → isOpusFree=true, cost=0', () => {
-    const result = calculateUpscaleCost({ width: 640, height: 640, tier: 3 });
-    expect(result.pixels).toBe(409600);
-    expect(result.isOpusFree).toBe(true);
-    expect(result.cost).toBe(0);
-  });
-
-  it('K-9: 512x1024 tier 3 → isOpusFree=false, cost=3', () => {
-    const result = calculateUpscaleCost({ width: 512, height: 1024, tier: 3 });
-    expect(result.pixels).toBe(524288);
+  it('K-8: tier 3 (Opus) is not free: 512x768 → cost=1', () => {
+    const result = calculateUpscaleCost({ width: 512, height: 768, tier: 3 });
     expect(result.isOpusFree).toBe(false);
-    expect(result.cost).toBe(3);
-  });
-
-  it('K-10: exact boundary 512x512 = 262144 → cost=1', () => {
-    const result = calculateUpscaleCost({ width: 512, height: 512, tier: 0 });
-    expect(result.pixels).toBe(262144);
     expect(result.cost).toBe(1);
   });
 });

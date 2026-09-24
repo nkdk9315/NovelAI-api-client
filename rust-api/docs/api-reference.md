@@ -272,7 +272,7 @@ pub struct AugmentParams {
 ```rust
 pub struct UpscaleParams {
     pub image: ImageInput,
-    pub scale: u32,  // 2 or 4
+    pub scale: u32,  // 2 のみ (サーバーは常に2倍で返す。デフォルト 2)
     pub save: SaveTarget,
 }
 ```

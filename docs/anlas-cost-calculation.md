@@ -7,6 +7,8 @@ NovelAI フロントエンドの minified JS チャンクから、画像生成�
 **ソースファイル**: `pages/_app-3519e562baaa896c.js` (メインバンドル)
 **対象モジュール位置**: _app ファイル内 position 879000〜899000
 
+> **2026-09-24 更新 (V5):** 現行サイト (`1601-570fd9e21fc1a9a0.js`) で再確認した。変更点は §1.3 (V5 の ×1.5 と使用量による Opus 無料の停止)、§4.1 (ツール追加)、§4.4 (アップスケールの表) の3つ。それ以外の式は変わっていない。
+
 ---
 
 ## 1. 通常画像生成コスト
@@ -65,6 +67,21 @@ adjustedCost = max(⌈ perImageCost × strengthMultiplier ⌉, 2)
 課金対象枚数 = n_samples - (Opus無料の場合 ? 1 : 0)
 最終コスト = adjustedCost × 課金対象枚数
 ```
+
+### 1.3 V5 モデルの変更点 (2026-09-24)
+
+1. **V5 はコストが 1.5 倍**。strength の補正より前にかかる。
+   ```
+   perImageCost = baseCost × smMultiplier × (V5 ? 1.5 : 1)
+   adjustedCost = max(⌈ perImageCost × strengthMultiplier ⌉, 2)
+   ```
+   実測: 1088×1024・steps 1 で V5 = 6 Anlas (⌈4×1.5⌉)、V4.5 = 4 Anlas。
+2. **V5 の Opus 無料は使用量の枠内だけ**。モデルの `opusUsageLimit` が true (V5) で `subscription.usage.isNegative` が true なら、課金対象枚数から 1 を引かない。
+   ```
+   opusFree = isOpusFreeSettings && tier >= 3 && subscriptionActive
+              && !(isV5 && usage.isNegative)
+   ```
+   使用量 (`usage`) の詳細は [api-protocol.md](api-protocol.md) の「V5 の使用量」を参照。
 
 ### 1.2 Inpainting 時のサイズ補正（関数 `tr`、エクスポート名: `re`）
 
@@ -198,7 +215,9 @@ Augment ツールは `naiDiffusionV3` モデルを指定するが、`nai-diffusi
 | カラー化 | `colorize` | 条件付き無料 | `baseCost` |
 | 表情変更 | `emotion` | 条件付き無料 | `baseCost` |
 | デクラッター | `declutter` | 条件付き無料 | `baseCost` |
-| アップスケール | `upscale` | 条件付き無料 | 専用テーブル |
+| デクラッター (吹き出しを残す) | `declutter-keep-bubbles` | 条件付き無料 | `baseCost` (V5 世代で追加。実測 0 Anlas) |
+| ドット絵お直し | `pixel-snap` | — | 常に 0 (ブラウザ内処理で API を呼ばない) |
+| アップスケール | `upscale` | **有料** | 専用テーブル (§4.4) |
 
 ### 4.2 Augment ツールのコスト計算フロー
 
@@ -248,40 +267,39 @@ isOpusFree = (tool !== 'bg-removal') && (width × height ≤ 1048576) && (steps 
 - **bg-removal は Opus でも常に有料**
 - 他のツールは `1024×1024` 以下なら Opus 無料
 
-### 4.4 アップスケールコスト（関数 `e$`、エクスポート名: `tY`）
+### 4.4 アップスケールコスト（エクスポート名: `tY`）
 
-専用のコストテーブルを使用:
+**2026-09-24 に表が変わった。** Opus 無料はなくなり、入力画像の画素数で決まる。
 
 ```javascript
 const UPSCALE_TABLE = [
-    [1048576, 7],
-    [786432,  5],
-    [524288,  3],
-    [409600,  2],
-    [262144,  1]
+    [1048576, 1],
+    [1747627, 2],
+    [2446678, 3],
+    [3145728, 4],
 ];
 
-function upscaleCost(width, height, user) {
-    let pixels = width * height;
-    // Opus 無料: 409600px 以下
-    if (pixels <= 409600 && user.subscription.tier >= 3 && isSubscriptionActive(user.subscription))
-        return 0;
-    let cost = -3; // エラー（テーブルに該当なし）
-    for (let [threshold, price] of UPSCALE_TABLE) {
-        if (pixels <= threshold) cost = price;
+function upscaleCost(width, height) {
+    const pixels = width * height;
+    if (pixels === 0) return -3;
+    for (const [threshold, price] of UPSCALE_TABLE) {
+        if (pixels <= threshold) return price;
     }
-    return cost;
+    return -3; // エラー
 }
 ```
 
-| ピクセル数 (width × height) | コスト | Opus 無料? |
-|---------------------------|-------|-----------|
-| ≤ 262,144 | 1 Anlas | 無料 |
-| ≤ 409,600 | 2 Anlas | 無料 |
-| ≤ 524,288 | 3 Anlas | 有料 |
-| ≤ 786,432 | 5 Anlas | 有料 |
-| ≤ 1,048,576 | 7 Anlas | 有料 |
-| > 1,048,576 | エラー (-3) | - |
+| 入力の画素数 | コスト |
+|---|---|
+| ≤ 1,048,576 | 1 Anlas |
+| ≤ 1,747,627 | 2 Anlas |
+| ≤ 2,446,678 | 3 Anlas |
+| ≤ 3,145,728 | 4 Anlas |
+| それより大きい | エラー (-3) |
+
+- 公式サイトの UI は 1,048,576 px を超える画像のアップスケールを禁止している (-2) ので、実質いつも 1 Anlas。
+- 実測: 512×768 → 1 Anlas (Opus)。
+- 旧表 (`[262144,1]…[1048576,7]`、409,600 px 以下は Opus 無料) は廃止。
 
 ---
 

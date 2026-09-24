@@ -291,7 +291,7 @@ use novelai_api::schemas::UpscaleParams;
 
 let params = UpscaleParams {
     image: ImageInput::FilePath("./input.png".into()),
-    scale: 4,
+    scale: 2, // 常に2倍 (2 のみ指定できる)
     save: SaveTarget::Directory {
         dir: "./output".to_string(),
         filename: None,

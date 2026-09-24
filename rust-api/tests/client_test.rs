@@ -363,7 +363,7 @@ mod payload_building {
 
         let v4p = &payload["parameters"]["v4_prompt"];
         assert_eq!(v4p["caption"]["base_caption"], "1girl");
-        assert_eq!(v4p["use_coords"], false);
+        assert_eq!(v4p["use_coords"], true);
         assert_eq!(v4p["use_order"], true);
         assert_eq!(
             v4p["caption"]["char_captions"]
@@ -486,13 +486,14 @@ mod payload_building {
         let payload = payload::build_base_payload(&params, 999, "neg");
 
         let p = &payload["parameters"];
-        assert_eq!(p["qualityToggle"], false);
+        assert_eq!(p["qualityToggle"], true);
         assert_eq!(p["legacy"], false);
         assert_eq!(p["legacy_v3_extend"], false);
         assert_eq!(p["deliberate_euler_ancestral_bug"], false);
         assert_eq!(p["prefer_brownian"], true);
         assert_eq!(p["n_samples"], 1);
-        assert_eq!(p["ucPreset"], 0);
+        assert_eq!(p["ucPreset"], 2);
+        assert_eq!(p["stream"], "msgpack");
     }
 }
 
@@ -706,9 +707,10 @@ mod integration {
             .create_async()
             .await;
 
-        // Generation endpoint
+        // Generation endpoint (JSON body, not multipart)
         let gen_mock = server
-            .mock("POST", "/ai/generate-image")
+            .mock("POST", "/ai/generate-image-stream")
+            .match_header("content-type", "application/json")
             .with_status(200)
             .with_body(zip)
             .create_async()
@@ -744,7 +746,7 @@ mod integration {
             .await;
 
         let _gen_mock = server
-            .mock("POST", "/ai/generate-image")
+            .mock("POST", "/ai/generate-image-stream")
             .with_status(401)
             .with_body("Unauthorized")
             .create_async()
@@ -782,7 +784,7 @@ mod integration {
             .await;
 
         let _gen_mock = server
-            .mock("POST", "/ai/generate-image")
+            .mock("POST", "/ai/generate-image-stream")
             .with_status(500)
             .with_body("Internal Server Error")
             .create_async()
@@ -823,7 +825,7 @@ mod integration {
             .await;
 
         let _gen_mock = server
-            .mock("POST", "/ai/generate-image")
+            .mock("POST", "/ai/generate-image-stream")
             .with_status(200)
             .with_body(zip)
             .create_async()
@@ -873,7 +875,7 @@ mod integration {
             .await;
 
         let _gen_mock = server
-            .mock("POST", "/ai/generate-image")
+            .mock("POST", "/ai/generate-image-stream")
             .with_status(200)
             .with_body(zip)
             .create_async()
@@ -1396,7 +1398,7 @@ mod integration {
             .await;
 
         let _gen_mock = server
-            .mock("POST", "/ai/generate-image")
+            .mock("POST", "/ai/generate-image-stream")
             .with_status(200)
             .with_body(zip)
             .create_async()
@@ -1439,7 +1441,7 @@ mod integration {
             .await;
 
         let _gen_mock = server
-            .mock("POST", "/ai/generate-image")
+            .mock("POST", "/ai/generate-image-stream")
             .with_status(200)
             .with_body(zip)
             .create_async()
@@ -1627,7 +1629,7 @@ mod integration {
             .await;
 
         let _gen_mock = server
-            .mock("POST", "/ai/generate-image")
+            .mock("POST", "/ai/generate-image-stream")
             .with_status(200)
             .with_body(zip)
             .create_async()
@@ -1668,7 +1670,7 @@ mod integration {
             .await;
 
         let _gen_mock = server
-            .mock("POST", "/ai/generate-image")
+            .mock("POST", "/ai/generate-image-stream")
             .with_status(200)
             .with_body(zip)
             .create_async()

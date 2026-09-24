@@ -381,13 +381,6 @@ export async function processCharacterReferences(
 // =============================================================================
 
 /**
- * 画像データのSHA256ハッシュを計算（cache_secret_key用）
- */
-export function calculateCacheSecretKey(imageData: Buffer): string {
-  return crypto.createHash('sha256').update(imageData).digest('hex');
-}
-
-/**
  * マスク画像を1/8サイズにリサイズ（API仕様に合わせる）
  */
 export async function resizeMaskImage(

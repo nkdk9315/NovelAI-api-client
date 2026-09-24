@@ -103,7 +103,7 @@ print("\n🔍 アップスケールテスト（⚠️ 常にアンラス消費�
 do {
     let upscaleResult = try await client.upscaleImage(UpscaleParams(
         image: .filePath("reference/input.jpeg"),
-        scale: 4,
+        scale: 2,
         saveDir: outputDir
     ))
     print("   ✅ 保存先: \(upscaleResult.savedPath ?? "N/A")")

@@ -382,27 +382,3 @@ final class MaskTests: XCTestCase {
     }
 }
 
-// MARK: - I. calculateCacheSecretKey Tests
-
-final class CacheSecretKeyTests: XCTestCase {
-
-    func testReturnsHexString() {
-        let data = Data("test image data".utf8)
-        let key = calculateCacheSecretKey(data)
-        XCTAssertEqual(key.count, 64) // SHA256 hex = 64 chars
-        XCTAssertTrue(key.allSatisfy { $0.isHexDigit })
-    }
-
-    func testDifferentDataProducesDifferentKeys() {
-        let key1 = calculateCacheSecretKey(Data("data1".utf8))
-        let key2 = calculateCacheSecretKey(Data("data2".utf8))
-        XCTAssertNotEqual(key1, key2)
-    }
-
-    func testSameDataProducesSameKey() {
-        let data = Data("consistent".utf8)
-        let key1 = calculateCacheSecretKey(data)
-        let key2 = calculateCacheSecretKey(data)
-        XCTAssertEqual(key1, key2)
-    }
-}
