@@ -11,7 +11,7 @@ import { Unpackr } from 'msgpackr';
 import * as Constants from './constants';
 import * as Schemas from './schemas';
 import * as Utils from './utils';
-import { clampToMaxPixels, calculateGenerationCost, calculateAugmentCost, calculateUpscaleCost, SubscriptionTier } from './anlas';
+import { clampToMaxPixels, calculateGenerationCost, calculateAugmentCost, calculateUpscaleCost, SubscriptionTier, OpusUsage } from './anlas';
 
 export interface Logger {
   warn(message: string, ...args: unknown[]): void;
@@ -41,6 +41,8 @@ export interface AnlasBalance {
   purchased: number;
   total: number;
   tier: number;
+  /** V5 の Opus 無料生成の使用量。Opus 以外や取得できない場合は null */
+  usage: OpusUsage | null;
 }
 
 interface GenerationPayloadParameters {
@@ -204,6 +206,7 @@ export class NovelAIClient {
       purchased,
       total: fixed + purchased,
       tier: data.tier,
+      usage: data.usage ?? null,
     };
   }
 
@@ -388,15 +391,18 @@ export class NovelAIClient {
    */
   private buildBasePayload(
     validatedParams: Schemas.GenerateParams & { width: number; height: number; model: string },
+    prompt: string,
     seed: number,
     negativePrompt: string
   ): GenerationPayload {
-    return {
-      input: validatedParams.prompt,
+    const v5 = Constants.isV5Model(validatedParams.model);
+    const payload: GenerationPayload = {
+      input: prompt,
       model: validatedParams.model,
       action: validatedParams.action!,
       parameters: {
-        params_version: 3,
+        // V5 は公式サイトと同じく 4 (V4.5 は 3 のままでも受け付けられる)
+        params_version: v5 ? 4 : 3,
         width: validatedParams.width,
         height: validatedParams.height,
         scale: validatedParams.scale!,
@@ -411,7 +417,8 @@ export class NovelAIClient {
         legacy: false,
         add_original_image: true,
         cfg_rescale: validatedParams.cfg_rescale!,
-        noise_schedule: validatedParams.noise_schedule!,
+        // V5 は公式サイトが常に karras に固定している
+        noise_schedule: v5 ? "karras" : validatedParams.noise_schedule!,
         legacy_v3_extend: false,
         skip_cfg_above_sigma: null,
         use_coords: true,
@@ -424,10 +431,18 @@ export class NovelAIClient {
         deliberate_euler_ancestral_bug: false,
         prefer_brownian: true,
         stream: "msgpack",
-        image_format: "png",
+        image_format: validatedParams.image_format ?? Constants.DEFAULT_IMAGE_FORMAT,
       },
       use_new_shared_trial: true,
     };
+
+    if (validatedParams.transparent_background) {
+      // 透過自体はプロンプトの "transparent background" で決まる。以下は公式サイトと同じヒント
+      payload.parameters.straight_alpha = true;
+      payload.parameters.tag_hint_transparent_background = true;
+    }
+
+    return payload;
   }
 
   /**
@@ -460,10 +475,8 @@ export class NovelAIClient {
       return;
     }
 
-    // モデル名に-inpaintingサフィックスを追加（重複防止）
-    if (!validatedParams.model.endsWith('-inpainting')) {
-      payload.model = validatedParams.model + "-inpainting";
-    }
+    // inpaint 用モデルに切り替え (V5 curated は 4.5 curated の inpaint モデル)
+    payload.model = Constants.getInpaintModel(validatedParams.model);
 
     // 元画像をターゲットサイズにリサイズ（img2imgと同様）
     const sourceImageBase64 = await Utils.resizeImageForImg2Img(
@@ -591,7 +604,9 @@ export class NovelAIClient {
     const validatedParams = await Schemas.GenerateParamsSchema.parseAsync(params);
 
     // Defaults
-    const negativePrompt = validatedParams.negative_prompt ?? Constants.DEFAULT_NEGATIVE;
+    const isV5 = Constants.isV5Model(validatedParams.model);
+    const negativePrompt = validatedParams.negative_prompt ?? (isV5 ? Constants.DEFAULT_NEGATIVE_V5 : Constants.DEFAULT_NEGATIVE);
+    const prompt = Schemas.buildEffectivePrompt(validatedParams.prompt, validatedParams.transparent_background);
     const seed = validatedParams.seed ?? Math.floor(Math.random() * Constants.MAX_SEED);
 
     // Process Character Reference
@@ -629,7 +644,7 @@ export class NovelAIClient {
     }
 
     // Build payload using helper methods
-    const payload = this.buildBasePayload(validatedParams, seed, negativePrompt);
+    const payload = this.buildBasePayload(validatedParams, prompt, seed, negativePrompt);
 
     // Apply action-specific parameters
     await this.applyImg2ImgParams(payload, validatedParams);
@@ -643,16 +658,18 @@ export class NovelAIClient {
     }
 
     // Build prompt structures
-    this.buildV4PromptStructure(payload, validatedParams.prompt, negativePrompt, charCaptions, charNegativeCaptions);
+    this.buildV4PromptStructure(payload, prompt, negativePrompt, charCaptions, charNegativeCaptions);
     this.applyCharacterPrompts(payload, charConfigs);
 
     // Get initial balance
     let anlasBefore: number | null = null;
     let balanceTier: SubscriptionTier = 0;
+    let opusUsageExhausted = false;
     try {
       const balance = await this.getAnlasBalance();
       anlasBefore = balance.total;
       balanceTier = balance.tier as SubscriptionTier;
+      opusUsageExhausted = balance.usage?.isNegative ?? false;
     } catch (e) {
       this.logger.warn('[NovelAI] Failed to get initial Anlas balance:', e instanceof Error ? e.message : 'Unknown error');
     }
@@ -674,6 +691,8 @@ export class NovelAIClient {
         tier: balanceTier,
         vibeCount: vibeEncodings.length,
         vibeUnencodedCount: 0,
+        isV5,
+        opusUsageExhausted,
       });
       if (!costResult.error && costResult.totalCost > anlasBefore) {
         throw new InsufficientAnlasError(costResult.totalCost, anlasBefore);
@@ -716,6 +735,7 @@ export class NovelAIClient {
     const result: Schemas.GenerateResult = {
       image_data: imageData,
       seed: seed,
+      image_format: Utils.detectImageFormat(imageData) ?? validatedParams.image_format ?? Constants.DEFAULT_IMAGE_FORMAT,
       anlas_remaining: anlasRemaining,
       anlas_consumed: anlasConsumed,
       saved_path: null,
@@ -734,7 +754,7 @@ export class NovelAIClient {
         if (charConfigs.length > 0) prefix += "_multi";
 
         const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 15);
-        const filename = `${prefix}_${timestamp}_${seed}.png`;
+        const filename = `${prefix}_${timestamp}_${seed}.${result.image_format}`;
         const savePath = path.join(dir, filename);
 
         await this.saveImage(result, savePath);
@@ -779,9 +799,9 @@ export class NovelAIClient {
       return this.parseZipResponse(content);
     }
 
-    // Check for PNG signature
+    // Check for a raw PNG / WebP image
     const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    if (content.length > 8 && content.subarray(0, 8).equals(pngSignature)) {
+    if (Utils.detectImageFormat(content) !== null) {
       return content;
     }
 

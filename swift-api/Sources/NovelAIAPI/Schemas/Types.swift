@@ -182,6 +182,20 @@ public struct GenerateParams: Sendable {
     public var sampler: Sampler
     public var noiseSchedule: NoiseSchedule
 
+    /// V5 only: add "transparent background" to the prompt and request straight alpha
+    public var transparentBackground: Bool
+
+    /// Output image format (default: png)
+    public var imageFormat: ImageFormat
+
+    /// Prompt actually sent to the API (adds the transparent background tag when requested)
+    public var effectivePrompt: String {
+        if !transparentBackground || prompt.contains(TRANSPARENT_BACKGROUND_TAG) {
+            return prompt
+        }
+        return prompt.isEmpty ? TRANSPARENT_BACKGROUND_TAG : "\(prompt), \(TRANSPARENT_BACKGROUND_TAG)"
+    }
+
     public init(
         prompt: String,
         action: GenerateAction = .generate,
@@ -209,10 +223,14 @@ public struct GenerateParams: Sendable {
         cfgRescale: Double = DEFAULT_CFG_RESCALE,
         seed: UInt32? = nil,
         sampler: Sampler = DEFAULT_SAMPLER,
-        noiseSchedule: NoiseSchedule = DEFAULT_NOISE_SCHEDULE
+        noiseSchedule: NoiseSchedule = DEFAULT_NOISE_SCHEDULE,
+        transparentBackground: Bool = false,
+        imageFormat: ImageFormat = .png
     ) {
         self.prompt = prompt
         self.action = action
+        self.transparentBackground = transparentBackground
+        self.imageFormat = imageFormat
         self.sourceImage = sourceImage
         self.img2imgStrength = img2imgStrength
         self.img2imgNoise = img2imgNoise
@@ -247,6 +265,8 @@ public struct GenerateParams: Sendable {
 public struct GenerateResult: Sendable {
     public var imageData: Data
     public var seed: UInt32
+    /// Format of `imageData`, detected from the returned bytes
+    public var imageFormat: ImageFormat
     public var anlasRemaining: Int?
     public var anlasConsumed: Int?
     public var savedPath: String?
@@ -254,12 +274,14 @@ public struct GenerateResult: Sendable {
     public init(
         imageData: Data,
         seed: UInt32,
+        imageFormat: ImageFormat? = nil,
         anlasRemaining: Int? = nil,
         anlasConsumed: Int? = nil,
         savedPath: String? = nil
     ) {
         self.imageData = imageData
         self.seed = seed
+        self.imageFormat = imageFormat ?? ImageFormat.detect(imageData) ?? .png
         self.anlasRemaining = anlasRemaining
         self.anlasConsumed = anlasConsumed
         self.savedPath = savedPath
@@ -406,14 +428,32 @@ public struct AnlasBalance: Sendable {
     public var fixedTrainingStepsLeft: Int
     public var purchasedTrainingSteps: Int
     public var tier: Int
+    /// V5 Opus free-generation usage (nil for non-Opus accounts)
+    public var usage: OpusUsage?
 
     public init(
         fixedTrainingStepsLeft: Int = 0,
         purchasedTrainingSteps: Int = 0,
-        tier: Int = 0
+        tier: Int = 0,
+        usage: OpusUsage? = nil
     ) {
         self.fixedTrainingStepsLeft = fixedTrainingStepsLeft
         self.purchasedTrainingSteps = purchasedTrainingSteps
         self.tier = tier
+        self.usage = usage
+    }
+}
+
+/// V5 Opus free-generation usage (`usage` in the subscription response)
+public struct OpusUsage: Sendable, Equatable {
+    public var percent: Double
+    public var isNegative: Bool
+    /// Seconds needed to refill 1%
+    public var timeUntilNextPercent: Double
+
+    public init(percent: Double, isNegative: Bool = false, timeUntilNextPercent: Double = 0) {
+        self.percent = percent
+        self.isNegative = isNegative
+        self.timeUntilNextPercent = timeUntilNextPercent
     }
 }

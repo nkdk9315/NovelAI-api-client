@@ -102,6 +102,18 @@ impl GenerateParamsBuilder {
         self
     }
 
+    /// Output image format (PNG or WebP).
+    pub fn image_format(mut self, format: OutputFormat) -> Self {
+        self.params.image_format = format;
+        self
+    }
+
+    /// V5 only: request a transparent background.
+    pub fn transparent_background(mut self, enabled: bool) -> Self {
+        self.params.transparent_background = enabled;
+        self
+    }
+
     // -- SaveTarget setters --------------------------------------------------
 
     /// Set save target to an exact file path.

@@ -109,7 +109,7 @@ export const VibeEncodeResultSchema = z.object({
     (val) => /^[A-Za-z0-9+/]+=*$/.test(val),
     { message: "encoding must be valid base64" }
   ),
-  model: z.enum(Constants.VALID_MODELS),
+  model: z.enum(Constants.VIBE_MODELS),
   information_extracted: z.number().min(0.0).max(1.0),
   strength: z.number().min(0.0).max(1.0),
   source_image_hash: z.string().regex(/^[a-fA-F0-9]{64}$/),
@@ -132,6 +132,8 @@ const VibeItemSchema = z.union([VibeEncodeResultSchema, z.string().min(1)]);
 export const GenerateResultSchema = z.object({
   image_data: BinaryDataSchema,
   seed: z.number().int().min(0).max(Constants.MAX_SEED),
+  /** Format of image_data ("png" or "webp"), detected from the returned bytes */
+  image_format: z.enum(Constants.VALID_IMAGE_FORMATS),
   anlas_remaining: z.number().min(0).nullish(),
   anlas_consumed: z.number().min(0).nullish(),
   saved_path: z.string().nullish(),
@@ -167,8 +169,8 @@ const GenerateParamsBaseSchema = z.object({
   /** Img2Img noise when used with mask (0-0.99). */
   hybrid_img2img_noise: z.number().min(0.0).max(0.99).nullish(),
 
-  // === キャラクター設定 ===
-  characters: z.array(CharacterConfigSchema).max(Constants.MAX_CHARACTERS).nullish(),
+  // === キャラクター設定 (V4 / V4.5 は最大6、V5 は最大32) ===
+  characters: z.array(CharacterConfigSchema).max(Constants.MAX_CHARACTERS_V5).nullish(),
 
   // === Vibe Transfer ===
   vibes: z.array(VibeItemSchema).max(Constants.MAX_VIBES).nullish(),
@@ -181,9 +183,15 @@ const GenerateParamsBaseSchema = z.object({
   // === プロンプト ===
   negative_prompt: z.string().nullish(),
 
+  // === 透過背景 (V5 のみ) ===
+  /** Adds "transparent background" to the prompt and requests straight alpha. V5 models only. */
+  transparent_background: z.boolean().default(false),
+
   // === 出力オプション ===
   save_path: SafePathSchema.nullish(),
   save_dir: SafePathSchema.nullish(),
+  /** Output image format. "webp" is lossless with alpha and metadata (what the official site uses). */
+  image_format: z.enum(Constants.VALID_IMAGE_FORMATS).default(Constants.DEFAULT_IMAGE_FORMAT),
 
   // === 生成パラメータ ===
   model: z.enum(Constants.VALID_MODELS).default(Constants.DEFAULT_MODEL),
@@ -270,6 +278,54 @@ function validateActionDependencies(data: GenerateParamsRaw, ctx: RefinementCtx)
 }
 
 /**
+ * Validate features that depend on the model generation (V4 / V4.5 vs V5)
+ */
+function validateModelCapabilities(data: GenerateParamsRaw, ctx: RefinementCtx): void {
+  const v5 = Constants.isV5Model(data.model);
+  if (v5) {
+    if (data.vibes && data.vibes.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Vibe Transfer is not supported by ${data.model}. Use a V4 / V4.5 model.`,
+        path: ["vibes"],
+      });
+    }
+    if (data.character_reference) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Character Reference is not supported by ${data.model}. Use a V4.5 model.`,
+        path: ["character_reference"],
+      });
+    }
+  } else {
+    if (data.characters && data.characters.length > Constants.MAX_CHARACTERS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${data.model} supports at most ${Constants.MAX_CHARACTERS} characters (V5 supports ${Constants.MAX_CHARACTERS_V5})`,
+        path: ["characters"],
+      });
+    }
+    if (data.transparent_background) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `transparent_background is only supported by V5 models`,
+        path: ["transparent_background"],
+      });
+    }
+  }
+}
+
+/**
+ * Prompt actually sent to the API (adds the transparent background tag when requested)
+ */
+export function buildEffectivePrompt(prompt: string, transparentBackground: boolean): string {
+  if (!transparentBackground || prompt.includes(Constants.TRANSPARENT_BACKGROUND_TAG)) {
+    return prompt;
+  }
+  return prompt.length > 0 ? `${prompt}, ${Constants.TRANSPARENT_BACKGROUND_TAG}` : Constants.TRANSPARENT_BACKGROUND_TAG;
+}
+
+/**
  * Validate vibe-related parameters and array length consistency
  */
 function validateVibeParams(data: GenerateParamsRaw, ctx: RefinementCtx): void {
@@ -335,13 +391,15 @@ function validatePixelConstraints(data: GenerateParamsRaw, ctx: RefinementCtx): 
  */
 async function validateTokenCounts(data: GenerateParamsRaw, ctx: RefinementCtx): Promise<void> {
   try {
-    const { getT5Tokenizer, MAX_TOKENS } = await import('./tokenizer');
-    const tokenizer = await getT5Tokenizer();
+    const { countPromptTokens } = await import('./tokenizer');
+    const MAX_TOKENS = Constants.getMaxTokens(data.model);
+    const countTokens = (text: string) => countPromptTokens(text, data.model);
 
     // === ポジティブプロンプトの合計トークン数 ===
     const positivePrompts: string[] = [];
-    if (data.prompt && data.prompt.length > 0) {
-      positivePrompts.push(data.prompt);
+    const effectivePrompt = buildEffectivePrompt(data.prompt, data.transparent_background);
+    if (effectivePrompt.length > 0) {
+      positivePrompts.push(effectivePrompt);
     }
     if (data.characters && data.characters.length > 0) {
       for (const char of data.characters) {
@@ -354,7 +412,7 @@ async function validateTokenCounts(data: GenerateParamsRaw, ctx: RefinementCtx):
     if (positivePrompts.length > 0) {
       let totalPositiveTokens = 0;
       for (const prompt of positivePrompts) {
-        totalPositiveTokens += await tokenizer.countTokens(prompt);
+        totalPositiveTokens += await countTokens(prompt);
       }
       if (totalPositiveTokens > MAX_TOKENS) {
         ctx.addIssue({
@@ -381,7 +439,7 @@ async function validateTokenCounts(data: GenerateParamsRaw, ctx: RefinementCtx):
     if (negativePrompts.length > 0) {
       let totalNegativeTokens = 0;
       for (const prompt of negativePrompts) {
-        totalNegativeTokens += await tokenizer.countTokens(prompt);
+        totalNegativeTokens += await countTokens(prompt);
       }
       if (totalNegativeTokens > MAX_TOKENS) {
         ctx.addIssue({
@@ -414,6 +472,7 @@ export const GenerateParamsSchema = GenerateParamsBaseSchema
 .superRefine(async (data, ctx) => {
   // Delegate to focused validation functions
   validateActionDependencies(data, ctx);
+  validateModelCapabilities(data, ctx);
   validateVibeParams(data, ctx);
   validatePixelConstraints(data, ctx);
   validateSaveOptionsExclusive(data, ctx);
@@ -430,7 +489,8 @@ export type GenerateParams = z.input<typeof GenerateParamsSchema>;
 
 export const EncodeVibeParamsSchema = z.object({
   image: ImageInputSchema,
-  model: z.enum(Constants.VALID_MODELS).default(Constants.DEFAULT_MODEL),
+  // V5 は Vibe Transfer 非対応のため V4 / V4.5 のみ
+  model: z.enum(Constants.VIBE_MODELS).default(Constants.DEFAULT_MODEL),
   information_extracted: z.number().min(0.0).max(1.0).default(0.7),
   strength: z.number().min(0.0).max(1.0).default(0.7),
   save_path: SafePathSchema.nullish(),
@@ -488,7 +548,7 @@ export const AugmentParamsSchema = z.object({
 })
 .superRefine((data, ctx) => {
   const reqTypesRequiringDefry = ["colorize", "emotion"] as const;
-  const reqTypesWithNoExtraParams = ["declutter", "sketch", "lineart", "bg-removal"] as const;
+  const reqTypesWithNoExtraParams = ["declutter", "declutter-keep-bubbles", "sketch", "lineart", "bg-removal"] as const;
 
   // === colorize / emotion の場合 ===
   if ((reqTypesRequiringDefry as readonly string[]).includes(data.req_type)) {
@@ -621,6 +681,12 @@ export const AnlasBalanceResponseSchema = z.object({
     purchasedTrainingSteps: z.number().default(0),
   }).default({}),
   tier: z.number().int().min(0).max(3).default(0),
+  // V5 の Opus 無料生成の使用量 (Opus のみ)
+  usage: z.object({
+    percent: z.number(),
+    isNegative: z.boolean().default(false),
+    timeUntilNextPercent: z.number().default(0),
+  }).nullish(),
 });
 
 export type AnlasBalanceResponse = z.infer<typeof AnlasBalanceResponseSchema>;

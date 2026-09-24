@@ -66,6 +66,19 @@ export function validateImageDataSize(data: Buffer, source?: string): void {
 /**
  * 画像データをBufferに変換
  */
+/**
+ * 画像バイト列の形式を判定する (PNG / WebP)。判定できなければ null
+ */
+export function detectImageFormat(data: Buffer | Uint8Array): 'png' | 'webp' | null {
+  if (data.length >= 8 && data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47) return 'png';
+  if (data.length >= 12
+    && data[0] === 0x52 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x46      // RIFF
+    && data[8] === 0x57 && data[9] === 0x45 && data[10] === 0x42 && data[11] === 0x50) {  // WEBP
+    return 'webp';
+  }
+  return null;
+}
+
 export function getImageBuffer(image: string | Buffer | Uint8Array): Buffer {
   if (Buffer.isBuffer(image)) {
     return image;

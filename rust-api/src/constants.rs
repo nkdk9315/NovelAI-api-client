@@ -106,6 +106,16 @@ pub fn reset_url_cache() {
 
 pub const DEFAULT_NEGATIVE: &str = "nsfw, lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone";
 
+/// Default negative prompt for V5 (the official site's V5 "heavy" UC preset + nsfw)
+pub const DEFAULT_NEGATIVE_V5: &str = "nsfw, lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page";
+
+/// V5 quality tags (appended to the prompt by the official site; the client does not add them automatically)
+pub const V5_QUALITY_TAGS_STANDARD: &str = "very aesthetic, masterpiece, no text";
+pub const V5_QUALITY_TAGS_LIGHT: &str = "very aesthetic, amazing quality, no text";
+
+/// Tag added to the prompt for a transparent background (V5)
+pub const TRANSPARENT_BACKGROUND_TAG: &str = "transparent background";
+
 pub const DEFAULT_MODEL: &str = "nai-diffusion-4-5-full";
 pub const DEFAULT_WIDTH: u32 = 832;
 pub const DEFAULT_HEIGHT: u32 = 1216;
@@ -179,6 +189,12 @@ pub enum Model {
     #[serde(rename = "nai-diffusion-4-5-full")]
     #[strum(serialize = "nai-diffusion-4-5-full")]
     NaiDiffusion45Full,
+    #[serde(rename = "nai-diffusion-5-curated")]
+    #[strum(serialize = "nai-diffusion-5-curated")]
+    NaiDiffusion5Curated,
+    #[serde(rename = "nai-diffusion-5-full")]
+    #[strum(serialize = "nai-diffusion-5-full")]
+    NaiDiffusion5Full,
 }
 
 impl Model {
@@ -186,14 +202,49 @@ impl Model {
         self.into()
     }
 
-    /// Get the model key used in Vibe files
+    /// Get the model key used in Vibe files.
+    /// V5 models do not support Vibe Transfer; their keys never appear in vibe files.
     pub fn model_key(&self) -> &'static str {
         match self {
             Model::NaiDiffusion4CuratedPreview => "v4curated",
             Model::NaiDiffusion4Full => "v4full",
             Model::NaiDiffusion45Curated => "v4-5curated",
             Model::NaiDiffusion45Full => "v4-5full",
+            Model::NaiDiffusion5Curated => "v5curated",
+            Model::NaiDiffusion5Full => "v5full",
         }
+    }
+
+    /// V5 models: no Vibe / CharRef, transparency support, Qwen tokenizer, 1.5x cost
+    pub fn is_v5(&self) -> bool {
+        matches!(self, Model::NaiDiffusion5Curated | Model::NaiDiffusion5Full)
+    }
+
+    /// Model name used for `action: "infill"`.
+    /// V5 curated has no inpainting model; the official site uses the 4.5 curated one.
+    pub fn inpaint_model(&self) -> &'static str {
+        match self {
+            Model::NaiDiffusion4CuratedPreview => "nai-diffusion-4-curated-inpainting",
+            Model::NaiDiffusion4Full => "nai-diffusion-4-full-inpainting",
+            Model::NaiDiffusion45Curated => "nai-diffusion-4-5-curated-inpainting",
+            Model::NaiDiffusion45Full => "nai-diffusion-4-5-full-inpainting",
+            Model::NaiDiffusion5Curated => "nai-diffusion-4-5-curated-inpainting",
+            Model::NaiDiffusion5Full => "nai-diffusion-5-full-inpainting",
+        }
+    }
+
+    /// Prompt token limit used by the official site
+    pub fn max_tokens(&self) -> usize {
+        match self {
+            Model::NaiDiffusion5Full => MAX_TOKENS_V5_FULL,
+            Model::NaiDiffusion5Curated => MAX_TOKENS_V5_CURATED,
+            _ => MAX_TOKENS,
+        }
+    }
+
+    /// Maximum number of character prompts
+    pub fn max_characters(&self) -> usize {
+        if self.is_v5() { MAX_CHARACTERS_V5 } else { MAX_CHARACTERS }
     }
 }
 
@@ -203,6 +254,38 @@ impl Model {
 pub fn model_key_from_str(model: &str) -> Option<&'static str> {
     use std::str::FromStr;
     Model::from_str(model).ok().map(|m| m.model_key())
+}
+
+/// Output image format (official docs: png / webp; webp is lossless with alpha and metadata)
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, Hash,
+    Serialize, Deserialize, AsRefStr, EnumString, Display, IntoStaticStr,
+)]
+pub enum OutputFormat {
+    #[default]
+    #[serde(rename = "png")]
+    #[strum(serialize = "png")]
+    Png,
+    #[serde(rename = "webp")]
+    #[strum(serialize = "webp")]
+    Webp,
+}
+
+impl OutputFormat {
+    pub fn as_str(&self) -> &'static str {
+        self.into()
+    }
+
+    /// Detect the format of image bytes (PNG / WebP)
+    pub fn detect(data: &[u8]) -> Option<Self> {
+        if data.len() >= 8 && data[..4] == [0x89, 0x50, 0x4e, 0x47] {
+            Some(OutputFormat::Png)
+        } else if data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+            Some(OutputFormat::Webp)
+        } else {
+            None
+        }
+    }
 }
 
 /// Noise schedule enum
@@ -256,6 +339,9 @@ pub enum AugmentReqType {
     #[serde(rename = "bg-removal")]
     #[strum(serialize = "bg-removal")]
     BgRemoval,
+    #[serde(rename = "declutter-keep-bubbles")]
+    #[strum(serialize = "declutter-keep-bubbles")]
+    DeclutterKeepBubbles,
 }
 
 impl AugmentReqType {
@@ -276,8 +362,10 @@ pub const EMOTION_KEYWORDS: &[&str] = &[
 // Limits
 // =============================================================================
 
-// Prompt
+// Prompt (V4 / V4.5: T5 tokenizer, V5: Qwen tokenizer)
 pub const MAX_TOKENS: usize = 512;
+pub const MAX_TOKENS_V5_FULL: usize = 1471;
+pub const MAX_TOKENS_V5_CURATED: usize = 703;
 
 // Pixels
 pub const MAX_PIXELS: u64 = 3_145_728; // 2048 * 1536
@@ -285,7 +373,8 @@ pub const MIN_DIMENSION: u32 = 64;
 pub const MAX_GENERATION_DIMENSION: u32 = 2048;
 
 // Characters
-pub const MAX_CHARACTERS: usize = 6;
+pub const MAX_CHARACTERS: usize = 6; // V4 / V4.5
+pub const MAX_CHARACTERS_V5: usize = 32;
 
 // Vibe
 pub const MAX_VIBES: usize = 10;
@@ -380,6 +469,13 @@ pub const INPAINT_THRESHOLD_RATIO: f64 = 0.8;
 // V4 cost calculation coefficients
 pub const V4_COST_COEFF_LINEAR: f64 = 2.951823174884865e-6;
 pub const V4_COST_COEFF_STEP: f64 = 5.753298233447344e-7;
+
+// V5 costs 1.5x the V4 formula
+pub const V5_COST_MULTIPLIER: f64 = 1.5;
+
+// V5 Opus usage: images per percent (official site: 1% ≈ 17.3 images) and "low" threshold
+pub const OPUS_USAGE_IMAGES_PER_PERCENT: f64 = 17.3;
+pub const OPUS_USAGE_LOW_PERCENT: f64 = 5.0;
 
 // Augment fixed parameters
 pub const AUGMENT_FIXED_STEPS: u32 = 28;

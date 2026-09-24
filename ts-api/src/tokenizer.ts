@@ -722,6 +722,167 @@ export function preprocessT5(text: string): string {
     return text;
 }
 
+/**
+ * Qwen byte-level BPE tokenizer used by V5 models.
+ * Mirrors the official site's generic BPE encoder:
+ * NFC normalize → split out special tokens → split regex → byte-to-unicode → BPE merges.
+ * No EOS is appended and prompt weighting syntax is NOT stripped (the site counts raw text).
+ */
+export class NovelAIQwenTokenizer {
+    private vocab: Map<string, number>;
+    private bpeRanks: Map<string, number>;
+    private specials: string[];
+    private splitRegex: RegExp;
+    private normalization: string | null;
+    private byteEncoder: { [key: number]: string };
+    private textEncoder = new TextEncoder();
+    private cache = new Map<string, number[]>();
+
+    constructor(json: { config?: { splitRegex?: string; normalization?: string }; specialTokens?: string[]; vocab: Record<string, number>; merges: [string, string][] }) {
+        if (!json?.vocab || !Array.isArray(json.merges) || !json.config?.splitRegex) {
+            throw new TokenizerError('Qwen tokenizer data missing vocab, merges or config.splitRegex');
+        }
+        this.vocab = new Map(Object.entries(json.vocab));
+        this.bpeRanks = new Map();
+        json.merges.forEach(([left, right], i) => this.bpeRanks.set(left + '\0' + right, i));
+        // Longest first so that overlapping special tokens match greedily
+        this.specials = (json.specialTokens ?? []).filter(s => this.vocab.has(s)).sort((a, b) => b.length - a.length);
+        this.splitRegex = new RegExp(json.config.splitRegex, 'gu');
+        this.normalization = json.config.normalization ?? null;
+        this.byteEncoder = bytesToUnicode();
+    }
+
+    private splitSpecials(text: string): Array<{ text: string; special: boolean }> {
+        const parts: Array<{ text: string; special: boolean }> = [];
+        let buffer = '';
+        let i = 0;
+        outer: while (i < text.length) {
+            for (const s of this.specials) {
+                if (text.startsWith(s, i)) {
+                    if (buffer) parts.push({ text: buffer, special: false });
+                    parts.push({ text: s, special: true });
+                    buffer = '';
+                    i += s.length;
+                    continue outer;
+                }
+            }
+            buffer += text[i];
+            i++;
+        }
+        if (buffer) parts.push({ text: buffer, special: false });
+        return parts;
+    }
+
+    private bpe(word: string): number[] {
+        const cached = this.cache.get(word);
+        if (cached) return cached;
+
+        let symbols = [...word];
+        while (symbols.length > 1) {
+            let bestRank = Infinity;
+            let bestIndex = -1;
+            for (let i = 0; i < symbols.length - 1; i++) {
+                const rank = this.bpeRanks.get(symbols[i] + '\0' + symbols[i + 1]);
+                if (rank !== undefined && rank < bestRank) {
+                    bestRank = rank;
+                    bestIndex = i;
+                }
+            }
+            if (bestIndex === -1) break;
+
+            // Merge every occurrence of the best pair, left to right
+            const left = symbols[bestIndex];
+            const right = symbols[bestIndex + 1];
+            const merged: string[] = [];
+            for (let i = 0; i < symbols.length; i++) {
+                if (i < symbols.length - 1 && symbols[i] === left && symbols[i + 1] === right) {
+                    merged.push(left + right);
+                    i++;
+                } else {
+                    merged.push(symbols[i]);
+                }
+            }
+            symbols = merged;
+        }
+
+        const ids: number[] = [];
+        for (const s of symbols) {
+            const id = this.vocab.get(s);
+            if (id !== undefined) ids.push(id);
+        }
+        if (this.cache.size >= BPE_CACHE_MAX_SIZE) {
+            const firstKey = this.cache.keys().next().value;
+            if (firstKey !== undefined) this.cache.delete(firstKey);
+        }
+        this.cache.set(word, ids);
+        return ids;
+    }
+
+    public encode(text: string): number[] {
+        const normalized = this.normalization ? text.normalize(this.normalization as 'NFC') : text;
+        const ids: number[] = [];
+        for (const part of this.splitSpecials(normalized)) {
+            if (part.special) {
+                ids.push(this.vocab.get(part.text)!);
+                continue;
+            }
+            for (const match of part.text.matchAll(this.splitRegex)) {
+                let unicode = '';
+                for (const b of this.textEncoder.encode(match[0])) {
+                    unicode += this.byteEncoder[b];
+                }
+                ids.push(...this.bpe(unicode));
+            }
+        }
+        return ids;
+    }
+
+    /** Token count as shown by the official site (no EOS). */
+    public countTokens(text: string): number {
+        return this.encode(text).length;
+    }
+}
+
+let cachedQwenTokenizerPromise: Promise<NovelAIQwenTokenizer> | null = null;
+
+export async function getQwenTokenizer(forceRefresh = false): Promise<NovelAIQwenTokenizer> {
+    if (cachedQwenTokenizerPromise && !forceRefresh) {
+        return cachedQwenTokenizerPromise;
+    }
+
+    const promise = (async () => {
+        const tokenUrl = "https://novelai.net/tokenizer/compressed/qwen35_tokenizer.def?v=2&static=true";
+        const dataStr = await fetchData(tokenUrl, forceRefresh);
+        let json: any;
+        try {
+            json = JSON.parse(dataStr);
+        } catch (error) {
+            throw new TokenizerError('Failed to parse Qwen tokenizer data as JSON', error);
+        }
+        return new NovelAIQwenTokenizer(json);
+    })();
+
+    cachedQwenTokenizerPromise = promise;
+    promise.catch(() => {
+        if (cachedQwenTokenizerPromise === promise) {
+            cachedQwenTokenizerPromise = null;
+        }
+    });
+
+    return promise;
+}
+
+/**
+ * Count prompt tokens the way the official site does for the given model.
+ * V5: Qwen BPE on the raw text. V4 / V4.5: T5 after bracket/weight removal, including EOS.
+ */
+export async function countPromptTokens(text: string, model: string): Promise<number> {
+    if (model.startsWith('nai-diffusion-5')) {
+        return (await getQwenTokenizer()).countTokens(text);
+    }
+    return (await getT5Tokenizer()).countTokens(text);
+}
+
 // Main logic for direct execution test?
 // The user asked to transplant, so exporting functions is good.
 // But we can add a main block if run directly.
@@ -751,6 +912,7 @@ export async function validateTokenCount(text: string): Promise<number> {
 export function clearTokenizerCache(): void {
     cachedClipTokenizerPromise = null;
     cachedT5TokenizerPromise = null;
+    cachedQwenTokenizerPromise = null;
     nativeTokenizerModule = null;
     nativeTokenizerUnavailable = false;
 }

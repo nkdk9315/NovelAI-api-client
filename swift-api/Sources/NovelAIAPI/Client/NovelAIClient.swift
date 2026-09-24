@@ -84,10 +84,20 @@ public final class NovelAIClient: @unchecked Sendable {
         let purchased = trainingStepsLeft["purchasedTrainingSteps"] as? Int ?? 0
         let tier = json["tier"] as? Int ?? 0
 
+        var usage: OpusUsage?
+        if let u = json["usage"] as? [String: Any], let percent = (u["percent"] as? NSNumber)?.doubleValue {
+            usage = OpusUsage(
+                percent: percent,
+                isNegative: u["isNegative"] as? Bool ?? false,
+                timeUntilNextPercent: (u["timeUntilNextPercent"] as? NSNumber)?.doubleValue ?? 0
+            )
+        }
+
         return AnlasBalance(
             fixedTrainingStepsLeft: fixed,
             purchasedTrainingSteps: purchased,
-            tier: tier
+            tier: tier,
+            usage: usage
         )
     }
 
@@ -216,7 +226,7 @@ public final class NovelAIClient: @unchecked Sendable {
         try params.validate()
 
         // Defaults
-        let negativePrompt = params.negativePrompt ?? DEFAULT_NEGATIVE
+        let negativePrompt = params.negativePrompt ?? (params.model.isV5 ? DEFAULT_NEGATIVE_V5 : DEFAULT_NEGATIVE)
         let seed = params.seed ?? UInt32.random(in: 0...MAX_SEED)
 
         // Process Character References
@@ -267,7 +277,7 @@ public final class NovelAIClient: @unchecked Sendable {
         // Build prompt structures
         applyV4PromptStructures(
             &payload,
-            prompt: params.prompt,
+            prompt: params.effectivePrompt,
             negativePrompt: negativePrompt,
             charCaptions: charCaptions,
             charNegativeCaptions: charNegativeCaptions
@@ -303,7 +313,9 @@ public final class NovelAIClient: @unchecked Sendable {
                 nSamples: 1,
                 tier: balance.tier,
                 vibeCount: vibeEncodings.count,
-                vibeUnencodedCount: 0
+                vibeUnencodedCount: 0,
+                isV5: params.model.isV5,
+                opusUsageExhausted: balance.usage?.isNegative ?? false
             )), !costResult.error, costResult.totalCost > total {
                 throw NovelAIError.insufficientAnlas(required: costResult.totalCost, available: total)
             }
@@ -346,6 +358,7 @@ public final class NovelAIClient: @unchecked Sendable {
         var result = GenerateResult(
             imageData: imageData,
             seed: seed,
+            imageFormat: ImageFormat.detect(imageData) ?? params.imageFormat,
             anlasRemaining: anlasRemaining,
             anlasConsumed: anlasConsumed,
             savedPath: nil
@@ -365,7 +378,7 @@ public final class NovelAIClient: @unchecked Sendable {
                 if !charConfigs.isEmpty { prefix += "_multi" }
 
                 let timestamp = formatTimestamp()
-                let filename = "\(prefix)_\(timestamp)_\(seed).png"
+                let filename = "\(prefix)_\(timestamp)_\(seed).\(result.imageFormat.rawValue)"
                 let savePath = (saveDir as NSString).appendingPathComponent(filename)
 
                 try saveImage(data: imageData, path: savePath)

@@ -33,7 +33,7 @@ async generate(params: GenerateParams): Promise<GenerateResult>
 |-----------|-----|-----------|------|
 | `prompt` | `string` | — (必須) | プロンプト (空文字列可) |
 | `negative_prompt` | `string?` | デフォルトネガティブ※ | ネガティブプロンプト |
-| `model` | `string` | `"nai-diffusion-4-5-full"` | モデル名 |
+| `model` | `string` | `"nai-diffusion-4-5-full"` | モデル名 (V5 は `"nai-diffusion-5-full"` / `"nai-diffusion-5-curated"`) |
 | `width` | `number` | `832` | 画像幅 (64の倍数, 64〜2048) |
 | `height` | `number` | `1216` | 画像高さ (64の倍数, 64〜2048) |
 | `steps` | `number` | `23` | ステップ数 (1〜50) |
@@ -68,7 +68,7 @@ async generate(params: GenerateParams): Promise<GenerateResult>
 
 | パラメータ | 型 | デフォルト | 説明 |
 |-----------|-----|-----------|------|
-| `characters` | `CharacterConfig[]?` | — | キャラクター配列 (最大6) |
+| `characters` | `CharacterConfig[]?` | — | キャラクター配列 (V4 / V4.5 は最大6、V5 は最大32) |
 
 `CharacterConfig`:
 
@@ -102,12 +102,19 @@ async generate(params: GenerateParams): Promise<GenerateResult>
 | `fidelity` | `number` | `1.0` | 忠実度 (0.0〜1.0) |
 | `mode` | `string` | `"character&style"` | `"character"` / `"character&style"` / `"style"` |
 
+#### 透過背景 (V5 のみ)
+
+| パラメータ | 型 | デフォルト | 説明 |
+|-----------|-----|-----------|------|
+| `transparent_background` | `boolean` | `false` | プロンプトに `transparent background` を追加し、`straight_alpha` 等のヒントを送る。背景が透過した RGBA PNG が返る |
+
 #### 出力オプション
 
 | パラメータ | 型 | デフォルト | 説明 |
 |-----------|-----|-----------|------|
 | `save_path` | `string?` | — | 保存先ファイルパス (排他) |
 | `save_dir` | `string?` | — | 保存先ディレクトリ (自動命名, 排他) |
+| `image_format` | `"png" \| "webp"` | `"png"` | 出力形式。webp はロスレスでアルファ・メタデータ付き (公式サイトと同じ)。自動命名の拡張子も変わる |
 
 ### GenerateResult
 
@@ -115,6 +122,7 @@ async generate(params: GenerateParams): Promise<GenerateResult>
 |-----------|-----|------|
 | `image_data` | `Buffer \| Uint8Array` | PNG画像バイナリ |
 | `seed` | `number` | 使用されたシード値 |
+| `image_format` | `"png" \| "webp"` | `image_data` の形式 (返ってきたバイト列から判定) |
 | `anlas_remaining` | `number \| null` | 残りアンラス |
 | `anlas_consumed` | `number \| null` | 消費アンラス |
 | `saved_path` | `string \| null` | 保存先パス |
@@ -126,7 +134,15 @@ async generate(params: GenerateParams): Promise<GenerateResult>
 - `vibes` と `character_reference` は同時使用不可
 - `action="img2img"` → `source_image` 必須
 - `action="infill"` → `source_image`, `mask`, `mask_strength` 必須
-- ポジティブ/ネガティブプロンプトの合計トークン数 <= 512
+- ポジティブ/ネガティブプロンプトの合計トークン数 <= モデルの上限 (`getMaxTokens`: V4 / V4.5 は 512 (T5)、V5 full は 1471、V5 curated は 703 (Qwen))
+- V5: `vibes` と `character_reference` は使用不可 (サーバーも非対応)
+- V4 / V4.5: `characters` は最大6、`transparent_background` は使用不可
+
+#### V5 での自動調整
+
+- `params_version` は 4、`noise_schedule` は `karras` 固定 (公式サイトと同じ)
+- `negative_prompt` 未指定時は `DEFAULT_NEGATIVE_V5` を使う
+- `action="infill"` のモデルは `getInpaintModel()` で決まる (`nai-diffusion-5-full` → `nai-diffusion-5-full-inpainting`、`nai-diffusion-5-curated` → `nai-diffusion-4-5-curated-inpainting`)
 
 ---
 
@@ -227,6 +243,7 @@ async augmentImage(params: AugmentParams): Promise<AugmentResult>
 | `colorize` | オプション | **必須** | |
 | `emotion` | **必須** (キーワード) | **必須** | `;;` は自動付与 |
 | `declutter` | 使用不可 | 使用不可 | |
+| `declutter-keep-bubbles` | 使用不可 | 使用不可 | 吹き出しを残すデクラッター |
 | `sketch` | 使用不可 | 使用不可 | |
 | `lineart` | 使用不可 | 使用不可 | |
 | `bg-removal` | 使用不可 | 使用不可 | Opus無料対象外 |
@@ -288,6 +305,17 @@ async getAnlasBalance(): Promise<AnlasBalance>
 | `purchased` | `number` | 購入済みアンラス |
 | `total` | `number` | 合計 (`fixed + purchased`) |
 | `tier` | `number` | ティア (0=Free, 1=Tablet, 2=Scroll, 3=Opus) |
+| `usage` | `OpusUsage \| null` | V5 の Opus 無料生成の使用量 (`percent`, `isNegative`, `timeUntilNextPercent`)。Opus 以外は `null` |
+
+`usage` は `summarizeOpusUsage()` (anlas.ts) で公式サイトと同じ表示値に変換できる:
+
+| フィールド | 説明 |
+|-----------|------|
+| `remainingPercent` | 残り (%)。使い切っていれば 0 |
+| `refillPercentPerDay` | 回復速度 (%/日) |
+| `estimatedImagesRemaining` | 残り枚数の目安 (17.3 × 残り%) |
+| `isLow` | 残り少ない (使い切り、または 5% 未満) |
+| `isExhausted` | 使い切っていて V5 の Opus 無料が効かない (V5 は Anlas を消費する) |
 
 ---
 
@@ -315,6 +343,8 @@ async getAnlasBalance(): Promise<AnlasBalance>
 | `"nai-diffusion-4-full"` | V4 Full |
 | `"nai-diffusion-4-5-curated"` | V4.5 Curated |
 | `"nai-diffusion-4-5-full"` | V4.5 Full (デフォルト) |
+| `"nai-diffusion-5-curated"` | V5 Curated (Vibe / CharRef 非対応、inpaint は 4.5 curated を使用) |
+| `"nai-diffusion-5-full"` | V5 Full (Vibe / CharRef 非対応) |
 
 ### サンプラー (`VALID_SAMPLERS`)
 
@@ -346,8 +376,10 @@ async getAnlasBalance(): Promise<AnlasBalance>
 | `DEFAULT_DEFRY` | `3` | Augment defry |
 | `MAX_SEED` | `4294967295` | シード最大値 (2^32-1) |
 | `MAX_PIXELS` | `3145728` | 最大ピクセル数 |
-| `MAX_TOKENS` | `512` | プロンプト最大トークン数 |
-| `MAX_CHARACTERS` | `6` | 最大キャラクター数 |
+| `MAX_TOKENS` | `512` | プロンプト最大トークン数 (V4 / V4.5) |
+| `MAX_TOKENS_V5_FULL` / `MAX_TOKENS_V5_CURATED` | `1471` / `703` | プロンプト最大トークン数 (V5) |
+| `MAX_CHARACTERS` | `6` | 最大キャラクター数 (V4 / V4.5) |
+| `MAX_CHARACTERS_V5` | `32` | 最大キャラクター数 (V5) |
 | `MAX_VIBES` | `10` | 最大Vibe数 |
 
 ---

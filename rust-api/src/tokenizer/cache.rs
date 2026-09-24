@@ -6,6 +6,7 @@ use crate::constants::MAX_TOKENS;
 use crate::error::{NovelAIError, Result};
 
 use super::clip::NovelAIClipTokenizer;
+use super::qwen::NovelAIQwenTokenizer;
 use super::t5::{NovelAIT5Tokenizer, PureUnigram};
 
 /// Cache TTL: 7 days
@@ -25,10 +26,16 @@ const CLIP_TOKENIZER_URL: &str =
 const T5_TOKENIZER_URL: &str =
     "https://novelai.net/tokenizer/compressed/t5_tokenizer.def?v=2&static=true";
 
+/// Qwen tokenizer definition URL (V5 models)
+const QWEN_TOKENIZER_URL: &str =
+    "https://novelai.net/tokenizer/compressed/qwen35_tokenizer.def?v=2&static=true";
+
 // Global singleton caches using tokio::sync::OnceCell (#9/#26 fix)
 static CLIP_TOKENIZER: tokio::sync::OnceCell<Arc<NovelAIClipTokenizer>> =
     tokio::sync::OnceCell::const_new();
 static T5_TOKENIZER: tokio::sync::OnceCell<Arc<NovelAIT5Tokenizer>> =
+    tokio::sync::OnceCell::const_new();
+static QWEN_TOKENIZER: tokio::sync::OnceCell<Arc<NovelAIQwenTokenizer>> =
     tokio::sync::OnceCell::const_new();
 
 /// Cached HTTP client to reuse connection pool (#48 fix)
@@ -346,6 +353,33 @@ pub async fn get_t5_tokenizer(force_refresh: bool) -> Result<Arc<NovelAIT5Tokeni
         .await?;
 
     Ok(tokenizer.clone())
+}
+
+/// Get or create the Qwen tokenizer used by V5 models (fetches from network if not cached).
+pub async fn get_qwen_tokenizer(force_refresh: bool) -> Result<Arc<NovelAIQwenTokenizer>> {
+    if force_refresh {
+        let data_str = fetch_data(QWEN_TOKENIZER_URL, true).await?;
+        return Ok(Arc::new(NovelAIQwenTokenizer::from_json(&data_str)?));
+    }
+
+    let tokenizer = QWEN_TOKENIZER
+        .get_or_try_init(|| async {
+            let data_str = fetch_data(QWEN_TOKENIZER_URL, false).await?;
+            Ok(Arc::new(NovelAIQwenTokenizer::from_json(&data_str)?)) as Result<Arc<NovelAIQwenTokenizer>>
+        })
+        .await?;
+
+    Ok(tokenizer.clone())
+}
+
+/// Count prompt tokens the way the official site does for the given model.
+/// V5: Qwen BPE on the raw text. V4 / V4.5: T5 after bracket/weight removal, including EOS.
+pub async fn count_prompt_tokens(text: &str, model: &str) -> Result<usize> {
+    if model.starts_with("nai-diffusion-5") {
+        Ok(get_qwen_tokenizer(false).await?.count_tokens(text))
+    } else {
+        Ok(get_t5_tokenizer(false).await?.count_tokens(text))
+    }
 }
 
 /// Parse T5 tokenizer JSON data into a tokenizer instance.

@@ -29,6 +29,7 @@ src/
 ├── tokenizer/
 │   ├── clip.rs             # CLIP BPE トークナイザー (GPT-2スタイル)
 │   ├── t5.rs               # T5 Unigram トークナイザー (Viterbi)
+│   ├── qwen.rs             # Qwen バイトレベル BPE トークナイザー (V5, fancy-regex)
 │   ├── preprocess.rs       # T5 前処理 (ブラケット・ウェイト構文除去)
 │   └── cache.rs            # ディスク/メモリキャッシュ + ネットワークDL + deflate解凍
 └── client/
@@ -86,4 +87,6 @@ cargo clippy                        # lint
 cargo run --example example         # 基本例 (txt2img/img2img/vibe/charref)
 cargo run --example example_augment # augment/upscale例
 cargo run --example example_infill  # inpaint例
+cargo run --example smoke_v45       # 実APIスモークテスト (V4.5)
+cargo run --example smoke_v5        # 実APIスモークテスト (V5)
 ```

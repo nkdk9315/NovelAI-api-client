@@ -97,8 +97,8 @@ final class ConstantsTests: XCTestCase {
 
     // MARK: - Model Enum
 
-    func testModelHasFourCases() {
-        XCTAssertEqual(Model.allCases.count, 4, "Model enum case count changed — update MODEL_KEY_MAP and related tests")
+    func testModelHasSixCases() {
+        XCTAssertEqual(Model.allCases.count, 6, "Model enum case count changed — update MODEL_KEY_MAP and related tests")
     }
 
     func testModelRawValues() {
@@ -145,8 +145,8 @@ final class ConstantsTests: XCTestCase {
 
     // MARK: - AugmentReqType Enum
 
-    func testAugmentReqTypeHasSixCases() {
-        XCTAssertEqual(AugmentReqType.allCases.count, 6, "AugmentReqType enum case count changed — update validation logic and tests")
+    func testAugmentReqTypeHasSevenCases() {
+        XCTAssertEqual(AugmentReqType.allCases.count, 7, "AugmentReqType enum case count changed — update validation logic and tests")
     }
 
     func testAugmentReqTypeRawValues() {
@@ -204,8 +204,9 @@ final class ConstantsTests: XCTestCase {
         XCTAssertEqual(MODEL_KEY_MAP[.naiDiffusion45Full], "v4-5full")
     }
 
-    func testModelKeyMapCoversAllModels() {
-        for model in Model.allCases {
+    func testModelKeyMapCoversAllVibeModels() {
+        // V5 models do not support Vibe Transfer, so they have no vibe key
+        for model in Model.allCases where !model.isV5 {
             XCTAssertNotNil(MODEL_KEY_MAP[model], "MODEL_KEY_MAP should have entry for \(model)")
         }
     }

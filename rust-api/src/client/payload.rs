@@ -17,12 +17,15 @@ pub fn build_base_payload(
     } else {
         seed - 1
     };
-    serde_json::json!({
-        "input": params.prompt,
+    let v5 = params.model.is_v5();
+    // V5: params_version 4 and noise_schedule fixed to karras (same as the official site)
+    let noise_schedule = if v5 { "karras" } else { params.noise_schedule.as_str() };
+    let mut payload = serde_json::json!({
+        "input": params.effective_prompt(),
         "model": params.model.as_str(),
         "action": params.action.as_str(),
         "parameters": {
-            "params_version": 3,
+            "params_version": if v5 { 4 } else { 3 },
             "width": params.width,
             "height": params.height,
             "scale": params.scale,
@@ -37,7 +40,7 @@ pub fn build_base_payload(
             "legacy": false,
             "add_original_image": true,
             "cfg_rescale": params.cfg_rescale,
-            "noise_schedule": params.noise_schedule.as_str(),
+            "noise_schedule": noise_schedule,
             "legacy_v3_extend": false,
             "skip_cfg_above_sigma": null,
             "use_coords": true,
@@ -50,10 +53,16 @@ pub fn build_base_payload(
             "deliberate_euler_ancestral_bug": false,
             "prefer_brownian": true,
             "stream": "msgpack",
-            "image_format": "png",
+            "image_format": params.image_format.as_str(),
         },
         "use_new_shared_trial": true,
-    })
+    });
+    if params.transparent_background {
+        // Transparency itself comes from the prompt tag; these are the site's hints
+        payload["parameters"]["straight_alpha"] = serde_json::json!(true);
+        payload["parameters"]["tag_hint_transparent_background"] = serde_json::json!(true);
+    }
+    payload
 }
 
 /// Apply Img2Img parameters to the payload.
@@ -84,14 +93,8 @@ pub fn apply_infill_params(
         hybrid_noise,
     } = params.action
     {
-        // Append -inpainting suffix (prevent duplicates)
-        let model_str = params.model.as_str();
-        let model_name = if model_str.ends_with("-inpainting") {
-            model_str.to_string()
-        } else {
-            format!("{}-inpainting", model_str)
-        };
-        payload["model"] = serde_json::Value::String(model_name);
+        // Switch to the inpainting model (V5 curated uses the 4.5 curated one)
+        payload["model"] = serde_json::Value::String(params.model.inpaint_model().to_string());
 
         // Source image: resize to target dimensions (same as img2img)
         let source_base64 = utils::image::resize_image_for_img2img(

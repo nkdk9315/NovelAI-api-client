@@ -1912,6 +1912,7 @@ mod tests {
             let result = GenerateResult {
                 image_data: vec![1, 2, 3],
                 seed: 12345,
+                image_format: novelai_api::constants::OutputFormat::Png,
                 anlas_remaining: None,
                 anlas_consumed: None,
                 saved_path: None,
@@ -1924,6 +1925,7 @@ mod tests {
             let result = GenerateResult {
                 image_data: vec![1, 2, 3],
                 seed: 12345,
+                image_format: novelai_api::constants::OutputFormat::Png,
                 anlas_remaining: None,
                 anlas_consumed: None,
                 saved_path: None,
@@ -1938,6 +1940,7 @@ mod tests {
             let result = GenerateResult {
                 image_data: vec![],
                 seed: 12345,
+                image_format: novelai_api::constants::OutputFormat::Png,
                 anlas_remaining: None,
                 anlas_consumed: None,
                 saved_path: None,
@@ -1950,6 +1953,7 @@ mod tests {
             let result = GenerateResult {
                 image_data: vec![1, 2, 3],
                 seed: MAX_SEED as u64,
+                image_format: novelai_api::constants::OutputFormat::Png,
                 anlas_remaining: None,
                 anlas_consumed: None,
                 saved_path: None,
@@ -1962,6 +1966,7 @@ mod tests {
             let result = GenerateResult {
                 image_data: vec![1, 2, 3],
                 seed: MAX_SEED as u64 + 1,
+                image_format: novelai_api::constants::OutputFormat::Png,
                 anlas_remaining: None,
                 anlas_consumed: None,
                 saved_path: None,

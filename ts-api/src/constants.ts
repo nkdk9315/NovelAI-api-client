@@ -28,6 +28,14 @@ export const DEFAULT_NEGATIVE = [
   "chromatic aberration", "dithering", "halftone", "screentone"
 ].join(", ");
 
+// V5 のデフォルトネガティブ (公式サイトの V5 "heavy" UC プリセット + nsfw)
+export const DEFAULT_NEGATIVE_V5 = [
+  "nsfw", "lowres", "artistic error", "film grain", "scan artifacts",
+  "worst quality", "bad quality", "jpeg artifacts", "very displeasing",
+  "chromatic aberration", "dithering", "halftone", "screentone",
+  "multiple views", "logo", "too many watermarks", "negative space", "blank page"
+].join(", ");
+
 export const DEFAULT_MODEL = "nai-diffusion-4-5-full";
 export const DEFAULT_WIDTH = 832;
 export const DEFAULT_HEIGHT = 1216;
@@ -39,6 +47,11 @@ export const DEFAULT_VIBE_STRENGTH = 0.7;
 export const DEFAULT_VIBE_INFO_EXTRACTED = 0.7;
 export const DEFAULT_IMG2IMG_STRENGTH = 0.62;
 export const DEFAULT_CFG_RESCALE = 0;
+
+// 出力画像形式 (公式ドキュメント: png / webp。webp はロスレスでアルファ・メタデータ付き)
+export const VALID_IMAGE_FORMATS = ["png", "webp"] as const;
+export type ImageFormat = typeof VALID_IMAGE_FORMATS[number];
+export const DEFAULT_IMAGE_FORMAT: ImageFormat = "png";
 
 // Inpaint defaults
 export const DEFAULT_INPAINT_STRENGTH = 0.7;
@@ -66,7 +79,48 @@ export const VALID_MODELS = [
   "nai-diffusion-4-full",
   "nai-diffusion-4-5-curated",
   "nai-diffusion-4-5-full",
+  "nai-diffusion-5-curated",
+  "nai-diffusion-5-full",
 ] as const;
+
+export type Model = typeof VALID_MODELS[number];
+
+// V5 モデル (Vibe / CharRef 非対応、透過対応、Qwen トークナイザー、コスト1.5倍)
+export const V5_MODELS = [
+  "nai-diffusion-5-curated",
+  "nai-diffusion-5-full",
+] as const;
+
+export function isV5Model(model: string): boolean {
+  return (V5_MODELS as readonly string[]).includes(model);
+}
+
+// Vibe Transfer / Character Reference に対応するモデル (V4 / V4.5)
+export const VIBE_MODELS = [
+  "nai-diffusion-4-curated-preview",
+  "nai-diffusion-4-full",
+  "nai-diffusion-4-5-curated",
+  "nai-diffusion-4-5-full",
+] as const;
+
+// inpaint 用モデル名。V5 curated には inpaint モデルがなく、公式サイトも 4.5 curated を使う
+const INPAINT_MODEL_OVERRIDES: Record<string, string> = {
+  "nai-diffusion-5-curated": "nai-diffusion-4-5-curated-inpainting",
+};
+
+export function getInpaintModel(model: string): string {
+  if (model.endsWith("-inpainting")) return model;
+  return INPAINT_MODEL_OVERRIDES[model] ?? `${model}-inpainting`;
+}
+
+// V5 の品質タグ (プロンプト末尾に追加するもの。クライアントは自動では付けない)
+export const V5_QUALITY_TAGS = {
+  standard: "very aesthetic, masterpiece, no text",
+  light: "very aesthetic, amazing quality, no text",
+} as const;
+
+// 透過背景 (V5) でプロンプトに追加するタグ
+export const TRANSPARENT_BACKGROUND_TAG = "transparent background";
 
 // ノイズスケジュール
 export const VALID_NOISE_SCHEDULES = [
@@ -89,7 +143,16 @@ export const MODEL_KEY_MAP = {
 // =============================================================================
 
 // プロンプト
-export const MAX_TOKENS = 512;  // トークン数制限（T5 Tokenizer）
+export const MAX_TOKENS = 512;  // トークン数制限（V4 / V4.5, T5 Tokenizer）
+export const MAX_TOKENS_V5_FULL = 1471;     // nai-diffusion-5-full (Qwen Tokenizer)
+export const MAX_TOKENS_V5_CURATED = 703;   // nai-diffusion-5-curated (Qwen Tokenizer)
+
+/** モデルごとのプロンプトトークン上限 (公式サイトと同じ値) */
+export function getMaxTokens(model: string): number {
+  if (model.startsWith("nai-diffusion-5-full")) return MAX_TOKENS_V5_FULL;
+  if (model.startsWith("nai-diffusion-5-curated")) return MAX_TOKENS_V5_CURATED;
+  return MAX_TOKENS;
+}
 
 
 // ピクセル
@@ -98,7 +161,8 @@ export const MIN_DIMENSION = 64;
 export const MAX_GENERATION_DIMENSION = 2048;  // 単辺の最大値（MAX_PIXELSと合わせて制約）
 
 // キャラクター
-export const MAX_CHARACTERS = 6;
+export const MAX_CHARACTERS = 6;      // V4 / V4.5
+export const MAX_CHARACTERS_V5 = 32;  // V5
 
 // Vibe
 export const MAX_VIBES = 10;  // 5以上は1Vibeあたり2Anlas消費
@@ -134,6 +198,7 @@ export const AUGMENT_REQ_TYPES = [
   "sketch",
   "lineart",
   "bg-removal",
+  "declutter-keep-bubbles",
 ] as const;
 
 // 表情キーワード (emotion用)
@@ -208,6 +273,14 @@ export const INPAINT_THRESHOLD_RATIO = 0.8;
 // V4コスト計算係数
 export const V4_COST_COEFF_LINEAR = 2.951823174884865e-6;
 export const V4_COST_COEFF_STEP = 5.753298233447344e-7;
+
+// V5 はV4式の1.5倍
+export const V5_COST_MULTIPLIER = 1.5;
+
+// V5 の Opus 使用量から残り枚数を見積もる係数 (公式サイト: 1% ≈ 17.3枚)
+export const OPUS_USAGE_IMAGES_PER_PERCENT = 17.3;
+// 残り少ないとみなす閾値 (%)
+export const OPUS_USAGE_LOW_PERCENT = 5;
 
 // Augment固定パラメータ
 export const AUGMENT_FIXED_STEPS = 28;

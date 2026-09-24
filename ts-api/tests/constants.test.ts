@@ -78,7 +78,9 @@ describe('Validation Constants', () => {
     expect(Constants.VALID_MODELS).toContain('nai-diffusion-4-full');
     expect(Constants.VALID_MODELS).toContain('nai-diffusion-4-5-curated');
     expect(Constants.VALID_MODELS).toContain('nai-diffusion-4-5-full');
-    expect(Constants.VALID_MODELS.length).toBe(4);
+    expect(Constants.VALID_MODELS).toContain('nai-diffusion-5-curated');
+    expect(Constants.VALID_MODELS).toContain('nai-diffusion-5-full');
+    expect(Constants.VALID_MODELS.length).toBe(6);
   });
 
   it('should have valid noise schedules array', () => {
@@ -100,7 +102,8 @@ describe('Augment Tool Constants', () => {
     expect(Constants.AUGMENT_REQ_TYPES).toContain('sketch');
     expect(Constants.AUGMENT_REQ_TYPES).toContain('lineart');
     expect(Constants.AUGMENT_REQ_TYPES).toContain('bg-removal');
-    expect(Constants.AUGMENT_REQ_TYPES.length).toBe(6);
+    expect(Constants.AUGMENT_REQ_TYPES).toContain('declutter-keep-bubbles');
+    expect(Constants.AUGMENT_REQ_TYPES.length).toBe(7);
   });
 
   it('should have all emotion keywords', () => {
@@ -168,8 +171,8 @@ describe('Limit Constants', () => {
 // Model Key Map Tests
 // =============================================================================
 describe('Model Key Map', () => {
-  it('should have mappings for all valid models', () => {
-    Constants.VALID_MODELS.forEach(model => {
+  it('should have mappings for all vibe-capable models', () => {
+    Constants.VIBE_MODELS.forEach(model => {
       expect(Constants.MODEL_KEY_MAP[model]).toBeDefined();
     });
   });

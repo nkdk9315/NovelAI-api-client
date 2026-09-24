@@ -25,6 +25,7 @@ Sources/NovelAIAPI/
 ├── Tokenizer/
 │   ├── CLIPTokenizer.swift  # CLIP BPE トークナイザー (LRU キャッシュ付き)
 │   ├── T5Tokenizer.swift    # T5 Unigram (PureUnigram + Viterbi)
+│   ├── QwenTokenizer.swift  # Qwen バイトレベル BPE (V5)
 │   ├── Preprocess.swift     # T5 前処理 (ブラケット・ウェイト構文除去)
 │   └── TokenizerCache.swift # TokenizerCacheManager actor (DL + ディスクキャッシュ)
 ├── Utils/
@@ -77,4 +78,6 @@ swift run ExampleAugment       # augment/upscale例
 swift run ExampleInfill        # inpaint例
 swift run ExampleTokenizer     # トークナイザー例
 swift run ExampleValidation    # バリデーション例
+swift run SmokeV45             # 実APIスモークテスト (V4.5)
+swift run SmokeV5              # 実APIスモークテスト (V5)
 ```

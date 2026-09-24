@@ -1927,8 +1927,8 @@ final class RequestBuildingTests: XCTestCase {
 
 final class ModelKeyMapTests: XCTestCase {
 
-    func testModelKeyMapContainsAllModels() {
-        for model in Model.allCases {
+    func testModelKeyMapContainsAllVibeModels() {
+        for model in Model.allCases where !model.isV5 {
             XCTAssertNotNil(MODEL_KEY_MAP[model], "MODEL_KEY_MAP should contain key for \(model.rawValue)")
         }
     }

@@ -45,6 +45,8 @@ pub struct AnlasBalance {
     pub purchased: u64,
     pub total: u64,
     pub tier: u32,
+    /// V5 Opus free-generation usage (None for non-Opus accounts)
+    pub usage: Option<crate::schemas::OpusUsage>,
 }
 
 // =============================================================================
@@ -129,6 +131,7 @@ impl NovelAIClient {
             purchased,
             total: fixed + purchased,
             tier: data.tier,
+            usage: data.usage,
         })
     }
 
@@ -305,6 +308,8 @@ impl NovelAIClient {
                 tier: balance.tier,
                 vibe_count,
                 vibe_unencoded_count: 0,
+                is_v5: params.model.is_v5(),
+                opus_usage_exhausted: balance.usage.as_ref().is_some_and(|u| u.is_negative),
                 ..Default::default()
             }) {
                 if cost_result.total_cost > balance.total {
@@ -343,9 +348,11 @@ impl NovelAIClient {
             self.get_anlas_after_if_tracking(anlas_before).await;
 
         let char_configs = params.characters.as_deref().unwrap_or(&[]);
+        let image_format = constants::OutputFormat::detect(&image_data).unwrap_or(params.image_format);
         let mut result = GenerateResult {
             image_data,
             seed,
+            image_format,
             anlas_remaining,
             anlas_consumed,
             saved_path: None,
@@ -367,10 +374,13 @@ impl NovelAIClient {
         params: &GenerateParams,
         seed: u64,
     ) -> Result<(String, bool)> {
-        let negative_prompt = params
-            .negative_prompt
-            .as_deref()
-            .unwrap_or(constants::DEFAULT_NEGATIVE);
+        let default_negative = if params.model.is_v5() {
+            constants::DEFAULT_NEGATIVE_V5
+        } else {
+            constants::DEFAULT_NEGATIVE
+        };
+        let negative_prompt = params.negative_prompt.as_deref().unwrap_or(default_negative);
+        let prompt = params.effective_prompt();
 
         // Process character reference
         let char_ref_data = if let Some(ref char_ref) = params.character_reference {
@@ -421,7 +431,7 @@ impl NovelAIClient {
         }
         payload::build_v4_prompt_structure(
             &mut payload_val,
-            &params.prompt,
+            &prompt,
             negative_prompt,
             &char_captions,
             &char_neg_captions,
@@ -486,6 +496,7 @@ impl NovelAIClient {
                 constants::AugmentReqType::Sketch => AugmentToolType::Sketch,
                 constants::AugmentReqType::Lineart => AugmentToolType::Lineart,
                 constants::AugmentReqType::BgRemoval => AugmentToolType::BgRemoval,
+                constants::AugmentReqType::DeclutterKeepBubbles => AugmentToolType::DeclutterKeepBubbles,
             };
             if let Ok(cost_result) = crate::anlas::calculate_augment_cost(&AugmentCostParams {
                 tool,
@@ -823,7 +834,7 @@ impl NovelAIClient {
                     prefix.push_str("_multi");
                 }
                 let ts = file_timestamp();
-                let filename = format!("{}_{}_{}.png", prefix, ts, seed);
+                let filename = format!("{}_{}_{}.{}", prefix, ts, seed, result.image_format.as_str());
                 let save_path = Path::new(save_dir)
                     .join(&filename)
                     .to_string_lossy()

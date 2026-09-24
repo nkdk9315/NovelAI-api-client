@@ -17,6 +17,9 @@ import {
   INPAINT_THRESHOLD_RATIO,
   V4_COST_COEFF_LINEAR,
   V4_COST_COEFF_STEP,
+  V5_COST_MULTIPLIER,
+  OPUS_USAGE_IMAGES_PER_PERCENT,
+  OPUS_USAGE_LOW_PERCENT,
   AUGMENT_FIXED_STEPS,
   AUGMENT_MIN_PIXELS,
   BG_REMOVAL_MULTIPLIER,
@@ -40,7 +43,7 @@ export type SmeaMode = 'off' | 'smea' | 'smea_dyn';
 export type GenerationMode = 'txt2img' | 'img2img' | 'inpaint';
 
 /** Augmentツールタイプ */
-export type AugmentToolType = 'colorize' | 'declutter' | 'emotion' | 'sketch' | 'lineart' | 'bg-removal';
+export type AugmentToolType = 'colorize' | 'declutter' | 'declutter-keep-bubbles' | 'emotion' | 'sketch' | 'lineart' | 'bg-removal';
 
 /** 画像生成コスト計算パラメータ (基本) */
 type BaseCostParams = {
@@ -52,6 +55,8 @@ type BaseCostParams = {
   tier?: SubscriptionTier;      // デフォルト: 0
   vibeCount?: number;           // デフォルト: 0
   vibeUnencodedCount?: number;  // デフォルト: 0
+  isV5?: boolean;               // デフォルト: false (V5 はコスト1.5倍)
+  opusUsageExhausted?: boolean; // デフォルト: false (V5 の Opus 使用量を使い切ると Opus 無料なし)
 };
 
 type Txt2ImgCostParams = BaseCostParams & { mode?: 'txt2img'; charRefCount?: number; };
@@ -69,6 +74,7 @@ export type GenerationCostParams = Txt2ImgCostParams | Img2ImgCostParams | Inpai
 export type GenerationCostResult = {
   baseCost: number;
   smeaMultiplier: number;
+  modelMultiplier: number;
   perImageCost: number;
   strengthMultiplier: number;
   adjustedCost: number;
@@ -117,6 +123,28 @@ export type UpscaleCostResult = {
   isOpusFree: boolean;
   error: boolean;
   errorCode: number | null;
+};
+
+/** V5 の Opus 無料生成の使用量 (subscription の usage) */
+export type OpusUsage = {
+  percent: number;
+  isNegative: boolean;
+  /** 1% 回復するのにかかる秒数 */
+  timeUntilNextPercent: number;
+};
+
+/** 公式サイトと同じ方法で求めた使用量の要約 */
+export type OpusUsageSummary = {
+  /** 残り (%)。使い切った状態 (isNegative) なら 0 */
+  remainingPercent: number;
+  /** 回復速度 (%/日)。回復しない場合は 0 */
+  refillPercentPerDay: number;
+  /** 残り枚数の目安 */
+  estimatedImagesRemaining: number;
+  /** 残り少ない (isNegative または 5% 未満) */
+  isLow: boolean;
+  /** 使い切っていて V5 の Opus 無料が効かない */
+  isExhausted: boolean;
 };
 
 /** Inpaintサイズ補正結果 */
@@ -342,6 +370,8 @@ export function calculateGenerationCost(params: GenerationCostParams): Generatio
   const charRefCount = ('charRefCount' in params ? params.charRefCount : 0) ?? 0;
   const vibeCount = params.vibeCount ?? 0;
   const vibeUnencodedCount = params.vibeUnencodedCount ?? 0;
+  const isV5 = params.isV5 ?? false;
+  const opusUsageExhausted = params.opusUsageExhausted ?? false;
 
   // Validate maskWidth/maskHeight pair
   if (mode === 'inpaint') {
@@ -369,7 +399,8 @@ export function calculateGenerationCost(params: GenerationCostParams): Generatio
 
   // SMEA乗数
   const smeaMultiplier = getSmeaMultiplier(smea);
-  const perImageCost = baseCost * smeaMultiplier;
+  const modelMultiplier = isV5 ? V5_COST_MULTIPLIER : 1.0;
+  const perImageCost = baseCost * smeaMultiplier * modelMultiplier;
 
   // strength乗数（txt2imgは常に1.0）
   let strengthMultiplier: number;
@@ -395,7 +426,8 @@ export function calculateGenerationCost(params: GenerationCostParams): Generatio
   const errorCode = error ? -3 : null;
 
   // Opus無料判定（元のリクエストサイズで判定）
-  const isOpusFree = isOpusFreeGeneration(
+  // V5 は使用量を使い切っていると Opus 無料にならない
+  const isOpusFree = !(isV5 && opusUsageExhausted) && isOpusFreeGeneration(
     params.width,
     params.height,
     params.steps,
@@ -425,6 +457,7 @@ export function calculateGenerationCost(params: GenerationCostParams): Generatio
   return {
     baseCost,
     smeaMultiplier,
+    modelMultiplier,
     perImageCost,
     strengthMultiplier,
     adjustedCost,
@@ -524,4 +557,29 @@ export function calculateUpscaleCost(params: UpscaleCostParams): UpscaleCostResu
 
   // テーブルに該当なし → エラー
   return { pixels, cost: null, isOpusFree: false, error: true, errorCode: -3 };
+}
+
+
+// =============================================================================
+// V5 Opus 使用量
+// =============================================================================
+
+/**
+ * subscription の usage を公式サイトと同じ式で要約する
+ * - 残り% = isNegative ? 0 : max(0, percent)
+ * - 回復速度 (%/日) = 86400 / timeUntilNextPercent (小数1桁)
+ * - 残り枚数の目安 = round(17.3 × 残り%)
+ */
+export function summarizeOpusUsage(usage: OpusUsage): OpusUsageSummary {
+  const remainingPercent = usage.isNegative ? 0 : Math.max(0, usage.percent);
+  const refillPercentPerDay = usage.timeUntilNextPercent <= 0
+    ? 0
+    : Math.round((86400 / usage.timeUntilNextPercent) * 10) / 10;
+  return {
+    remainingPercent,
+    refillPercentPerDay,
+    estimatedImagesRemaining: Math.round(OPUS_USAGE_IMAGES_PER_PERCENT * remainingPercent),
+    isLow: usage.isNegative || usage.percent < OPUS_USAGE_LOW_PERCENT,
+    isExhausted: usage.isNegative,
+  };
 }

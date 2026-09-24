@@ -16,7 +16,7 @@ src/
 ├── schemas.ts       # Zod スキーマ定義・バリデーション (GenerateParams, AugmentParams, UpscaleParams 等)
 ├── constants.ts     # 全定数・デフォルト値・API URL・制限値
 ├── utils.ts         # 画像処理ヘルパー (Buffer変換, リサイズ, マスク生成, Vibe/CharRef処理)
-├── tokenizer.ts     # CLIP BPE + T5 Unigram トークナイザー (native/pure JS fallback)
+├── tokenizer.ts     # CLIP BPE + T5 Unigram + Qwen BPE (V5) トークナイザー
 ├── anlas.ts         # Anlas コスト計算 (純粋関数, API呼び出しなし)
 └── anlas-browser.ts # ブラウザ用エントリーポイント (anlas.ts + 定数の再エクスポート)
 examples/            # 使用例 (example.ts, example_augment.ts, example_infill.ts, example_tokenizer.ts)
@@ -66,4 +66,6 @@ pnpm exec tsx examples/example.ts           # 基本例
 pnpm exec tsx examples/example_augment.ts   # augment/upscale例
 pnpm exec tsx examples/example_infill.ts    # inpaint例
 pnpm exec tsx examples/example_tokenizer.ts # トークナイザー例
+pnpm exec tsx examples/smoke_v45.ts         # 実APIスモークテスト (V4.5)
+pnpm exec tsx examples/smoke_v5.ts          # 実APIスモークテスト (V5)
 ```

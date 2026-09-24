@@ -111,8 +111,8 @@ pub fn parse_stream_response(content: &[u8], logger: &dyn Logger) -> Result<Vec<
         return parse_zip_response(content);
     }
 
-    // 2. Check for PNG signature at start
-    if content.len() > 8 && content[..8] == PNG_SIGNATURE {
+    // 2. Raw PNG / WebP image
+    if crate::constants::OutputFormat::detect(content).is_some() {
         return Ok(content.to_vec());
     }
 

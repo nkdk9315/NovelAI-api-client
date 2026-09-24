@@ -124,8 +124,8 @@ func parseStreamResponse(_ data: Data, logger: Logger? = nil) throws -> Data {
         return try parseZipResponse(data)
     }
 
-    // 2. Check for PNG signature at start
-    if data.count >= 8 && data.starts(with: pngSignature) {
+    // 2. Raw PNG / WebP image
+    if ImageFormat.detect(data) != nil {
         return data
     }
 

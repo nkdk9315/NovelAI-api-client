@@ -358,7 +358,8 @@ final class EnumValidationTests: XCTestCase {
     }
 
     func testAllAugmentReqTypeCases() {
-        XCTAssertEqual(AugmentReqType.allCases.count, 6)
+        XCTAssertEqual(AugmentReqType.allCases.count, 7)
+        XCTAssertEqual(AugmentReqType.declutterKeepBubbles.rawValue, "declutter-keep-bubbles")
         XCTAssertEqual(AugmentReqType.colorize.rawValue, "colorize")
         XCTAssertEqual(AugmentReqType.declutter.rawValue, "declutter")
         XCTAssertEqual(AugmentReqType.emotion.rawValue, "emotion")

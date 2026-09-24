@@ -57,10 +57,12 @@ pub async fn upscale_image(&self, params: &UpscaleParams) -> Result<UpscaleResul
 #### get_anlas_balance
 
 ```rust
-pub async fn get_anlas_balance(&self) -> Result<AnlasBalanceResponse>
+pub async fn get_anlas_balance(&self) -> Result<AnlasBalance>
 ```
 
-Anlas残高とサブスクリプション情報を取得。
+Anlas残高とサブスクリプション情報を取得。`AnlasBalance { fixed, purchased, total, tier, usage }`。
+
+`usage: Option<OpusUsage>` は V5 の Opus 無料生成の使用量 (`percent`, `is_negative`, `time_until_next_percent`)。`novelai_api::anlas::summarize_opus_usage()` で公式サイトと同じ値 (`remaining_percent`, `refill_percent_per_day`, `estimated_images_remaining`, `is_low`, `is_exhausted`) に変換できる。`is_exhausted` のとき V5 は Anlas を消費する。
 
 ---
 
@@ -98,9 +100,11 @@ pub trait Logger: Send + Sync {
 | `sampler` | `Sampler` | `KEulerAncestral` | サンプラー |
 | `noise_schedule` | `NoiseSchedule` | `Karras` | ノイズスケジュール |
 | `seed` | `Option<u64>` | `None` (ランダム) | シード値 (0-4294967295) |
-| `characters` | `Option<Vec<CharacterConfig>>` | `None` | キャラクター配置 (最大6) |
+| `characters` | `Option<Vec<CharacterConfig>>` | `None` | キャラクター配置 (V4 / V4.5 は最大6、V5 は最大32) |
 | `vibes` | `Option<Vec<VibeConfig>>` | `None` | Vibe Transfer (最大10) |
 | `character_reference` | `Option<Vec<CharacterReferenceConfig>>` | `None` | キャラクター参照 |
+| `transparent_background` | `bool` | `false` | V5 のみ。プロンプトに `transparent background` を追加し、`straight_alpha` 等のヒントを送る (背景が透過した RGBA PNG) |
+| `image_format` | `OutputFormat` | `Png` | 出力形式 (`Png` / `Webp`)。Webp はロスレスでアルファ・メタデータ付き。自動命名の拡張子も変わる |
 | `save` | `SaveTarget` | `None` | 保存先 |
 
 ### Builder
@@ -215,7 +219,13 @@ pub struct CharacterConfig {
 }
 ```
 
-最大6キャラクター。
+V4 / V4.5 は最大6キャラクター、V5 は最大32キャラクター。
+
+### V5 での扱い
+
+- `vibes` / `character_reference` は使えない (検証エラー。サーバーも非対応)
+- `params_version` は 4、`noise_schedule` は `karras` 固定、`negative_prompt` 未指定時は `DEFAULT_NEGATIVE_V5`
+- トークン上限は Qwen トークナイザーで V5 full 1471 / V5 curated 703 (V4.x は T5 で 512)
 
 ---
 
@@ -287,6 +297,7 @@ pub struct UpscaleParams {
 pub struct GenerateResult {
     pub image_data: Vec<u8>,
     pub seed: u64,
+    pub image_format: OutputFormat,  // image_data の形式 (返ってきたバイト列から判定)
     pub anlas_used: Option<i64>,
     pub saved_path: Option<String>,
 }
@@ -337,14 +348,16 @@ pub struct UpscaleResult {
 
 ```rust
 pub enum Model {
-    NaiDiffusion45Full,
-    NaiDiffusion45Curated,
-    NaiDiffusion4Full,
-    NaiDiffusion4Curated,
     NaiDiffusion4CuratedPreview,
-    NaiDiffusion3,
+    NaiDiffusion4Full,
+    NaiDiffusion45Curated,
+    NaiDiffusion45Full,   // デフォルト
+    NaiDiffusion5Curated, // V5 (Vibe / CharRef 非対応、inpaint は 4.5 curated を使用)
+    NaiDiffusion5Full,    // V5 (Vibe / CharRef 非対応)
 }
 ```
+
+`Model` のヘルパー: `is_v5()`, `inpaint_model()` (infill 時のモデル名), `max_tokens()` (512 / V5 full 1471 / V5 curated 703), `max_characters()` (6 / V5 32)。
 
 ### Sampler
 
@@ -380,6 +393,7 @@ pub enum AugmentReqType {
     Lineart,
     Declutter,
     BgRemoval,
+    DeclutterKeepBubbles, // 吹き出しを残すデクラッター
 }
 ```
 
@@ -422,13 +436,14 @@ pub type Result<T> = std::result::Result<T, NovelAIError>;
 
 | 定数 | 値 | 説明 |
 |------|-----|------|
-| `MAX_TOKENS` | 512 | プロンプトトークン上限 |
+| `MAX_TOKENS` | 512 | プロンプトトークン上限 (V4 / V4.5) |
+| `MAX_TOKENS_V5_FULL` / `MAX_TOKENS_V5_CURATED` | 1471 / 703 | プロンプトトークン上限 (V5) |
 | `MAX_PIXELS` | 3,145,728 | 最大ピクセル数 (2048x1536) |
 | `MAX_SEED` | 4,294,967,295 | 最大シード値 |
 | `MIN_DIMENSION` / `MAX_GENERATION_DIMENSION` | 64 / 2048 | 寸法範囲 |
 | `MIN_STEPS` / `MAX_STEPS` | 1 / 50 | ステップ数範囲 |
 | `MIN_SCALE` / `MAX_SCALE` | 0.0 / 10.0 | CFGスケール範囲 |
-| `MAX_CHARACTERS` | 6 | 最大キャラクター数 |
+| `MAX_CHARACTERS` / `MAX_CHARACTERS_V5` | 6 / 32 | 最大キャラクター数 |
 | `MAX_VIBES` | 10 | 最大Vibe数 |
 
 ### ネットワーク

@@ -40,6 +40,35 @@ public enum Model: String, CaseIterable, Codable, Sendable {
     case naiDiffusion4Full = "nai-diffusion-4-full"
     case naiDiffusion45Curated = "nai-diffusion-4-5-curated"
     case naiDiffusion45Full = "nai-diffusion-4-5-full"
+    case naiDiffusion5Curated = "nai-diffusion-5-curated"
+    case naiDiffusion5Full = "nai-diffusion-5-full"
+
+    /// V5 models: no Vibe / CharRef, transparency support, Qwen tokenizer, 1.5x cost
+    public var isV5: Bool {
+        self == .naiDiffusion5Curated || self == .naiDiffusion5Full
+    }
+
+    /// Model name used for `action: "infill"`.
+    /// V5 curated has no inpainting model; the official site uses the 4.5 curated one.
+    public var inpaintModel: String {
+        switch self {
+        case .naiDiffusion5Curated: return "nai-diffusion-4-5-curated-inpainting"
+        case .naiDiffusion4CuratedPreview: return "nai-diffusion-4-curated-inpainting"
+        default: return rawValue + "-inpainting"
+        }
+    }
+
+    /// Prompt token limit used by the official site
+    public var maxTokens: Int {
+        switch self {
+        case .naiDiffusion5Full: return MAX_TOKENS_V5_FULL
+        case .naiDiffusion5Curated: return MAX_TOKENS_V5_CURATED
+        default: return MAX_TOKENS
+        }
+    }
+
+    /// Maximum number of character prompts
+    public var maxCharacters: Int { isV5 ? MAX_CHARACTERS_V5 : MAX_CHARACTERS }
 }
 
 /// Supported samplers
@@ -50,6 +79,24 @@ public enum Sampler: String, CaseIterable, Codable, Sendable {
     case kDpmpp2mSde = "k_dpmpp_2m_sde"
     case kDpmpp2m = "k_dpmpp_2m"
     case kDpmppSde = "k_dpmpp_sde"
+}
+
+/// Output image format (official docs: png / webp; webp is lossless with alpha and metadata)
+public enum ImageFormat: String, CaseIterable, Codable, Sendable {
+    case png
+    case webp
+
+    /// Detect the format of image bytes (PNG / WebP)
+    public static func detect(_ data: Data) -> ImageFormat? {
+        let bytes = [UInt8](data.prefix(12))
+        if bytes.count >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47 {
+            return .png
+        }
+        if bytes.count >= 12 && bytes[0..<4] == [0x52, 0x49, 0x46, 0x46] && bytes[8..<12] == [0x57, 0x45, 0x42, 0x50] {
+            return .webp
+        }
+        return nil
+    }
 }
 
 /// Supported noise schedules
@@ -67,6 +114,7 @@ public enum AugmentReqType: String, CaseIterable, Codable, Sendable {
     case sketch
     case lineart
     case bgRemoval = "bg-removal"
+    case declutterKeepBubbles = "declutter-keep-bubbles"
 }
 
 /// Emotion keywords for augment emotion tool
@@ -84,6 +132,21 @@ public let DEFAULT_NEGATIVE: String = [
     "worst quality", "bad quality", "jpeg artifacts", "very displeasing",
     "chromatic aberration", "dithering", "halftone", "screentone",
 ].joined(separator: ", ")
+
+/// Default negative prompt for V5 (the official site's V5 "heavy" UC preset + nsfw)
+public let DEFAULT_NEGATIVE_V5: String = [
+    "nsfw", "lowres", "artistic error", "film grain", "scan artifacts",
+    "worst quality", "bad quality", "jpeg artifacts", "very displeasing",
+    "chromatic aberration", "dithering", "halftone", "screentone",
+    "multiple views", "logo", "too many watermarks", "negative space", "blank page",
+].joined(separator: ", ")
+
+/// V5 quality tags (appended to the prompt by the official site; the client does not add them automatically)
+public let V5_QUALITY_TAGS_STANDARD: String = "very aesthetic, masterpiece, no text"
+public let V5_QUALITY_TAGS_LIGHT: String = "very aesthetic, amazing quality, no text"
+
+/// Tag added to the prompt for a transparent background (V5)
+public let TRANSPARENT_BACKGROUND_TAG: String = "transparent background"
 
 public let DEFAULT_MODEL: Model = .naiDiffusion45Full
 public let DEFAULT_WIDTH: Int = 832
@@ -114,8 +177,10 @@ public let MODEL_KEY_MAP: [Model: String] = [
 
 // MARK: - Limits
 
-// Prompt
+// Prompt (V4 / V4.5: T5 tokenizer, V5: Qwen tokenizer)
 public let MAX_TOKENS: Int = 512
+public let MAX_TOKENS_V5_FULL: Int = 1471
+public let MAX_TOKENS_V5_CURATED: Int = 703
 
 // Pixels
 public let MAX_PIXELS: Int = 3_145_728  // 2048 * 1536
@@ -123,7 +188,8 @@ public let MIN_DIMENSION: Int = 64
 public let MAX_GENERATION_DIMENSION: Int = 2048
 
 // Characters
-public let MAX_CHARACTERS: Int = 6
+public let MAX_CHARACTERS: Int = 6  // V4 / V4.5
+public let MAX_CHARACTERS_V5: Int = 32
 
 // Vibes
 public let MAX_VIBES: Int = 10
@@ -209,6 +275,13 @@ public let INPAINT_THRESHOLD_RATIO: Double = 0.8
 // V4 cost coefficients — empirically derived from NovelAI pricing model
 public let V4_COST_COEFF_LINEAR: Double = 2.951823174884865e-6
 public let V4_COST_COEFF_STEP: Double = 5.753298233447344e-7
+
+// V5 costs 1.5x the V4 formula
+public let V5_COST_MULTIPLIER: Double = 1.5
+
+// V5 Opus usage: images per percent (official site: 1% ≈ 17.3 images) and "low" threshold
+public let OPUS_USAGE_IMAGES_PER_PERCENT: Double = 17.3
+public let OPUS_USAGE_LOW_PERCENT: Double = 5
 
 // Augment fixed parameters
 public let AUGMENT_FIXED_STEPS: Int = 28

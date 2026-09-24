@@ -928,8 +928,12 @@ describe('EncodeVibeParamsSchema', () => {
   });
 
   describe('model バリデーション', () => {
+    it('should reject V5 models (no Vibe Transfer)', () => {
+      expect(Schemas.EncodeVibeParamsSchema.safeParse({ image: 'test.png', model: 'nai-diffusion-5-full' }).success).toBe(false);
+    });
+
     it('should accept valid models', () => {
-      Constants.VALID_MODELS.forEach(model => {
+      Constants.VIBE_MODELS.forEach(model => {
         expect(Schemas.EncodeVibeParamsSchema.safeParse({ image: 'test.png', model }).success).toBe(true);
       });
     });
@@ -1507,6 +1511,7 @@ describe('GenerateResultSchema', () => {
     const result = Schemas.GenerateResultSchema.safeParse({
       image_data: Buffer.from('test'),
       seed: 12345,
+      image_format: 'png',
     });
     expect(result.success).toBe(true);
   });
@@ -1515,6 +1520,7 @@ describe('GenerateResultSchema', () => {
     const result = Schemas.GenerateResultSchema.safeParse({
       image_data: new Uint8Array([1, 2, 3]),
       seed: 12345,
+      image_format: 'png',
     });
     expect(result.success).toBe(true);
   });
@@ -1523,6 +1529,7 @@ describe('GenerateResultSchema', () => {
     const result = Schemas.GenerateResultSchema.safeParse({
       image_data: Buffer.from('test'),
       seed: 123.45,
+      image_format: 'png',
     });
     expect(result.success).toBe(false);
   });

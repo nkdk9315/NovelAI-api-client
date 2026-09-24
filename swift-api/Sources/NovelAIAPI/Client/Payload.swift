@@ -18,8 +18,10 @@ func buildBasePayload(
     negativePrompt: String
 ) -> [String: Any] {
     let extraNoiseSeed = Int(seed == 0 ? MAX_SEED : seed - 1)
-    let parameters: [String: Any] = [
-        "params_version": 3,
+    let v5 = params.model.isV5
+    var parameters: [String: Any] = [
+        // V5: params_version 4 (same as the official site)
+        "params_version": v5 ? 4 : 3,
         "width": params.width,
         "height": params.height,
         "scale": params.scale,
@@ -34,7 +36,8 @@ func buildBasePayload(
         "legacy": false,
         "add_original_image": true,
         "cfg_rescale": params.cfgRescale,
-        "noise_schedule": params.noiseSchedule.rawValue,
+        // V5: noise_schedule is always karras on the official site
+        "noise_schedule": v5 ? NoiseSchedule.karras.rawValue : params.noiseSchedule.rawValue,
         "legacy_v3_extend": false,
         "skip_cfg_above_sigma": NSNull(), // Explicit JSON null — API expects this key present with null value
         "use_coords": true,
@@ -47,11 +50,16 @@ func buildBasePayload(
         "deliberate_euler_ancestral_bug": false,
         "prefer_brownian": true,
         "stream": "msgpack",
-        "image_format": "png",
+        "image_format": params.imageFormat.rawValue,
     ]
+    if params.transparentBackground {
+        // Transparency itself comes from the prompt tag; these are the site's hints
+        parameters["straight_alpha"] = true
+        parameters["tag_hint_transparent_background"] = true
+    }
 
     return [
-        "input": params.prompt,
+        "input": params.effectivePrompt,
         "model": params.model.rawValue,
         "action": params.action.rawValue,
         "parameters": parameters,
@@ -100,11 +108,8 @@ func applyInfillParams(
         return
     }
 
-    // Append -inpainting suffix to model name (prevent duplicates)
-    let currentModel = payload["model"] as? String ?? params.model.rawValue
-    if !currentModel.hasSuffix("-inpainting") {
-        payload["model"] = currentModel + "-inpainting"
-    }
+    // Switch to the inpainting model (V5 curated uses the 4.5 curated one)
+    payload["model"] = params.model.inpaintModel
 
     var parameters = payload["parameters"] as? [String: Any] ?? [:]
 

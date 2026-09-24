@@ -270,7 +270,7 @@ JS にある `POST /ai/generate-image/request-price` (サーバー側の見積�
 
 ---
 
-## 13. リポジトリの改修 TODO
+## 13. リポジトリの改修 TODO (2026-09-25 対応済み: PR #31 と PR #32。image_format (png / webp) の選択と webp 応答にも対応)
 
 **優先度 高 (V4.5 でも壊れているもの):**
 - generate の送信を **JSON ボディ** (`Content-Type: application/json`) に戻す。エンドポイントは stream のまま (`stream:"msgpack"`)。3言語共通

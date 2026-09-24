@@ -6,7 +6,7 @@ import sharp from 'sharp';
 import { NovelAIClient, InsufficientAnlasError, AnlasBalance } from '../src/client';
 
 function makeBalance(total: number, tier: number = 0): AnlasBalance {
-  return { fixed: total, purchased: 0, total, tier };
+  return { fixed: total, purchased: 0, total, tier, usage: null };
 }
 
 async function makePng(width: number, height: number): Promise<Buffer> {

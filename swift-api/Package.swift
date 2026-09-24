@@ -28,7 +28,8 @@ let package = Package(
         ),
         .testTarget(
             name: "NovelAIAPITests",
-            dependencies: ["NovelAIAPI"]
+            dependencies: ["NovelAIAPI"],
+            exclude: ["Fixtures"]
         ),
         .executableTarget(name: "ExampleGenerate", dependencies: ["NovelAIAPI"]),
         .executableTarget(name: "ExampleAugment", dependencies: ["NovelAIAPI"]),
@@ -36,5 +37,6 @@ let package = Package(
         .executableTarget(name: "ExampleTokenizer", dependencies: ["NovelAIAPI"]),
         .executableTarget(name: "ExampleValidation", dependencies: ["NovelAIAPI"]),
         .executableTarget(name: "SmokeV45", dependencies: ["NovelAIAPI"]),
+        .executableTarget(name: "SmokeV5", dependencies: ["NovelAIAPI"]),
     ]
 )
