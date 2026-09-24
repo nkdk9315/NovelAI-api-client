@@ -22,6 +22,7 @@ public actor TokenizerCacheManager {
 
     private var clipTokenizer: NovelAIClipTokenizer?
     private var t5Tokenizer: NovelAIT5Tokenizer?
+    private var qwenTokenizer: NovelAIQwenTokenizer?
 
     private init() {}
 
@@ -78,6 +79,32 @@ public actor TokenizerCacheManager {
         return tokenizer
     }
 
+    /// Get or create the Qwen tokenizer used by V5 models (cached).
+    public func getQwenTokenizer(forceRefresh: Bool = false) async throws -> NovelAIQwenTokenizer {
+        if let cached = qwenTokenizer, !forceRefresh {
+            return cached
+        }
+
+        let tokenUrl = "https://novelai.net/tokenizer/compressed/qwen35_tokenizer.def?v=2&static=true"
+        let dataStr = try await fetchData(targetUrl: tokenUrl, forceRefresh: forceRefresh)
+        guard let jsonData = dataStr.data(using: .utf8) else {
+            throw NovelAIError.tokenizer("Qwen tokenizer data is not valid UTF-8")
+        }
+
+        let tokenizer = try NovelAIQwenTokenizer(jsonData: jsonData)
+        self.qwenTokenizer = tokenizer
+        return tokenizer
+    }
+
+    /// Count prompt tokens the way the official site does for the given model.
+    /// V5: Qwen BPE on the raw text. V4 / V4.5: T5 after bracket/weight removal, including EOS.
+    public func countPromptTokens(_ text: String, model: Model) async throws -> Int {
+        if model.isV5 {
+            return try await getQwenTokenizer().countTokens(text)
+        }
+        return try await getT5Tokenizer().countTokens(text)
+    }
+
     /// Validate that the token count does not exceed MAX_TOKENS.
     public func validateTokenCount(_ text: String) async throws -> Int {
         let tokenizer = try await getT5Tokenizer()
@@ -96,6 +123,7 @@ public actor TokenizerCacheManager {
     public func clearCache() {
         clipTokenizer = nil
         t5Tokenizer = nil
+        qwenTokenizer = nil
     }
 }
 
@@ -286,6 +314,16 @@ public func getClipTokenizer(forceRefresh: Bool = false) async throws -> NovelAI
 /// Get or create T5 tokenizer (convenience wrapper).
 public func getT5Tokenizer(forceRefresh: Bool = false) async throws -> NovelAIT5Tokenizer {
     return try await TokenizerCacheManager.shared.getT5Tokenizer(forceRefresh: forceRefresh)
+}
+
+/// Get or create the Qwen tokenizer used by V5 models (convenience wrapper).
+public func getQwenTokenizer(forceRefresh: Bool = false) async throws -> NovelAIQwenTokenizer {
+    return try await TokenizerCacheManager.shared.getQwenTokenizer(forceRefresh: forceRefresh)
+}
+
+/// Count prompt tokens for the given model (convenience wrapper).
+public func countPromptTokens(_ text: String, model: Model) async throws -> Int {
+    return try await TokenizerCacheManager.shared.countPromptTokens(text, model: model)
 }
 
 /// Validate token count (convenience wrapper).

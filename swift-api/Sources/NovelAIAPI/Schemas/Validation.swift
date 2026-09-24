@@ -90,6 +90,43 @@ extension GenerateParams {
         try validateCharacters()
         try validateCharacterReference()
         try validateVibes()
+        try validateModelCapabilities()
+    }
+
+    /// Validate features that depend on the model generation (V4 / V4.5 vs V5)
+    private func validateModelCapabilities() throws {
+        if model.isV5 {
+            if let vibes = vibes, !vibes.isEmpty {
+                throw NovelAIError.validation("Vibe Transfer is not supported by \(model.rawValue). Use a V4 / V4.5 model.")
+            }
+            if characterReference != nil {
+                throw NovelAIError.validation("Character Reference is not supported by \(model.rawValue). Use a V4.5 model.")
+            }
+        } else if transparentBackground {
+            throw NovelAIError.validation("transparentBackground is only supported by V5 models")
+        }
+    }
+
+    /// Validate prompt token counts against the model's limit (V5: Qwen, V4.x: T5).
+    /// Not called by `generate` automatically; skipped (no error) when the tokenizer is unavailable.
+    public func validateTokenCounts() async throws {
+        let limit = model.maxTokens
+        var positive = [effectivePrompt]
+        var negative = [negativePrompt ?? ""]
+        for c in characters ?? [] {
+            positive.append(c.prompt)
+            negative.append(c.negativePrompt)
+        }
+        for (texts, label) in [(positive, "positive"), (negative, "negative")] {
+            var total = 0
+            for text in texts where !text.isEmpty {
+                guard let n = try? await countPromptTokens(text, model: model) else { return }
+                total += n
+            }
+            if total > limit {
+                throw NovelAIError.tokenValidation("Total \(label) prompt token count (\(total)) exceeds maximum (\(limit))")
+            }
+        }
     }
 
     private func validateDimensions() throws {
@@ -272,9 +309,9 @@ extension GenerateParams {
 
     private func validateCharacters() throws {
         if let characters = characters {
-            if characters.count > MAX_CHARACTERS {
+            if characters.count > model.maxCharacters {
                 throw NovelAIError.validation(
-                    "characters count (\(characters.count)) exceeds maximum (\(MAX_CHARACTERS))"
+                    "characters count (\(characters.count)) exceeds maximum (\(model.maxCharacters)) for \(model.rawValue)"
                 )
             }
             for character in characters {
@@ -381,6 +418,10 @@ extension EncodeVibeParams {
         try validateImageInputNotEmpty(image)
         try validateImageInputPath(image)
 
+        if model.isV5 {
+            throw NovelAIError.validation("Vibe Transfer is not supported by \(model.rawValue). Use a V4 / V4.5 model.")
+        }
+
         if informationExtracted < 0.0 || informationExtracted > 1.0 {
             throw NovelAIError.range(
                 "information_extracted must be between 0.0 and 1.0, got \(informationExtracted)"
@@ -430,7 +471,7 @@ extension AugmentParams {
         let requiresDefry = reqType == .colorize || reqType == .emotion
 
         // Types that disallow prompt and defry
-        let noExtraParams = reqType == .declutter || reqType == .sketch
+        let noExtraParams = reqType == .declutter || reqType == .declutterKeepBubbles || reqType == .sketch
             || reqType == .lineart || reqType == .bgRemoval
 
         // colorize / emotion: defry is required

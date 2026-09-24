@@ -33,7 +33,7 @@ func generate(_ params: GenerateParams) async throws -> GenerateResult
 |-----------|-----|-----------|------|
 | `prompt` | `String` | — (必須) | プロンプト (空文字列可) |
 | `negativePrompt` | `String?` | デフォルトネガティブ※ | ネガティブプロンプト |
-| `model` | `Model` | `.naiDiffusion45Full` | モデル |
+| `model` | `Model` | `.naiDiffusion45Full` | モデル (V5 は `.naiDiffusion5Full` / `.naiDiffusion5Curated`) |
 | `width` | `Int` | `832` | 画像幅 (64の倍数, 64〜2048) |
 | `height` | `Int` | `1216` | 画像高さ (64の倍数, 64〜2048) |
 | `steps` | `Int` | `23` | ステップ数 (1〜50) |
@@ -41,7 +41,8 @@ func generate(_ params: GenerateParams) async throws -> GenerateResult
 | `cfgRescale` | `Double` | `0` | CFGリスケール (0〜1) |
 | `seed` | `UInt32?` | ランダム | シード値 (0〜4294967295) |
 | `sampler` | `Sampler` | `.kEulerAncestral` | サンプラー |
-| `noiseSchedule` | `NoiseSchedule` | `.karras` | ノイズスケジュール |
+| `noiseSchedule` | `NoiseSchedule` | `.karras` | ノイズスケジュール (V5 は常に karras) |
+| `transparentBackground` | `Bool` | `false` | V5 のみ。プロンプトに `transparent background` を追加し、`straight_alpha` 等のヒントを送る (背景が透過した RGBA PNG) |
 
 ※デフォルトネガティブ: `"nsfw, lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone"`
 
@@ -68,7 +69,7 @@ func generate(_ params: GenerateParams) async throws -> GenerateResult
 
 | パラメータ | 型 | デフォルト | 説明 |
 |-----------|-----|-----------|------|
-| `characters` | `[CharacterConfig]?` | — | キャラクター配列 (最大6) |
+| `characters` | `[CharacterConfig]?` | — | キャラクター配列 (V4 / V4.5 は最大6、V5 は最大32) |
 
 `CharacterConfig`:
 
@@ -286,6 +287,7 @@ func augmentImage(_ params: AugmentParams) async throws -> AugmentResult
 | `.sketch` | `"sketch"` | スケッチ化 |
 | `.lineart` | `"lineart"` | 線画抽出 |
 | `.bgRemoval` | `"bg-removal"` | 背景除去 |
+| `.declutterKeepBubbles` | `"declutter-keep-bubbles"` | 不要要素除去 (吹き出しを残す) |
 
 ### ツール別必須パラメータ
 
@@ -297,6 +299,7 @@ func augmentImage(_ params: AugmentParams) async throws -> AugmentResult
 | `.sketch` | 使用不可 | 使用不可 | |
 | `.lineart` | 使用不可 | 使用不可 | |
 | `.bgRemoval` | 使用不可 | 使用不可 | Opus無料対象外 |
+| `.declutterKeepBubbles` | 使用不可 | 使用不可 | |
 
 ### AugmentResult
 
@@ -354,6 +357,9 @@ func getAnlasBalance() async throws -> AnlasBalance
 | `fixedTrainingStepsLeft` | `Int` | 固定アンラス (サブスクリプション付与分) |
 | `purchasedTrainingSteps` | `Int` | 購入済みアンラス |
 | `tier` | `Int` | ティア (0=Free, 1=Tablet, 2=Scroll, 3=Opus) |
+| `usage` | `OpusUsage?` | V5 の Opus 無料生成の使用量 (`percent`, `isNegative`, `timeUntilNextPercent`)。Opus 以外は `nil` |
+
+`summarizeOpusUsage(_:)` で公式サイトと同じ表示値 (`remainingPercent`, `refillPercentPerDay`, `estimatedImagesRemaining`, `isLow`, `isExhausted`) に変換できる。`isExhausted` のとき V5 は Anlas を消費する。
 
 TypeScript 版との違い: `total` / `fixed` / `purchased` ではなく、API レスポンスのフィールド名をそのまま使用。合計は `fixedTrainingStepsLeft + purchasedTrainingSteps` で算出。
 
@@ -384,6 +390,12 @@ TypeScript 版との違い: 文字列の自動判別 (`looksLikeFilePath`) で�
 | `.naiDiffusion4Full` | `"nai-diffusion-4-full"` | V4 Full |
 | `.naiDiffusion45Curated` | `"nai-diffusion-4-5-curated"` | V4.5 Curated |
 | `.naiDiffusion45Full` | `"nai-diffusion-4-5-full"` | V4.5 Full (デフォルト) |
+| `.naiDiffusion5Curated` | `"nai-diffusion-5-curated"` | V5 Curated (Vibe / CharRef 非対応、inpaint は 4.5 curated を使用) |
+| `.naiDiffusion5Full` | `"nai-diffusion-5-full"` | V5 Full (Vibe / CharRef 非対応) |
+
+`Model` のプロパティ: `isV5`, `inpaintModel`, `maxTokens` (512 / V5 full 1471 / V5 curated 703), `maxCharacters` (6 / V5 32)。
+
+V5 では `vibes` / `characterReference` は検証エラー、`params_version` は 4、`negativePrompt` 未指定時は `DEFAULT_NEGATIVE_V5`。トークン数は `generate` では検証しない (`GenerateParams.validateTokenCounts()` で明示的に確認できる。V5 は Qwen、V4.x は T5)。
 
 ### Sampler enum
 
@@ -435,8 +447,9 @@ TypeScript 版との違い: 文字列の自動判別 (`looksLikeFilePath`) で�
 | `DEFAULT_DEFRY` | `3` | Augment defry |
 | `MAX_SEED` | `4_294_967_295` | シード最大値 (2^32-1) |
 | `MAX_PIXELS` | `3_145_728` | 最大ピクセル数 |
-| `MAX_TOKENS` | `512` | プロンプト最大トークン数 |
-| `MAX_CHARACTERS` | `6` | 最大キャラクター数 |
+| `MAX_TOKENS` | `512` | プロンプト最大トークン数 (V4 / V4.5) |
+| `MAX_TOKENS_V5_FULL` / `MAX_TOKENS_V5_CURATED` | `1471` / `703` | プロンプト最大トークン数 (V5) |
+| `MAX_CHARACTERS` / `MAX_CHARACTERS_V5` | `6` / `32` | 最大キャラクター数 |
 | `MAX_VIBES` | `10` | 最大Vibe数 |
 
 ---

@@ -36,6 +36,10 @@ public struct GenerationCostParams: Sendable {
     public var vibeUnencodedCount: Int?
     public var maskWidth: Int?
     public var maskHeight: Int?
+    /// V5 models cost 1.5x
+    public var isV5: Bool
+    /// V5 Opus usage exhausted (`usage.isNegative`): no Opus free generation for V5
+    public var opusUsageExhausted: Bool
 
     public init(
         width: Int,
@@ -50,8 +54,12 @@ public struct GenerationCostParams: Sendable {
         vibeCount: Int? = nil,
         vibeUnencodedCount: Int? = nil,
         maskWidth: Int? = nil,
-        maskHeight: Int? = nil
+        maskHeight: Int? = nil,
+        isV5: Bool = false,
+        opusUsageExhausted: Bool = false
     ) {
+        self.isV5 = isV5
+        self.opusUsageExhausted = opusUsageExhausted
         self.width = width
         self.height = height
         self.steps = steps
@@ -102,6 +110,7 @@ public struct UpscaleCostParams: Sendable {
 public struct GenerationCostResult: Sendable {
     public let baseCost: Int
     public let smeaMultiplier: Double
+    public let modelMultiplier: Double
     public let perImageCost: Double
     public let strengthMultiplier: Double
     public let adjustedCost: Int
@@ -328,7 +337,8 @@ public func calculateGenerationCost(_ params: GenerationCostParams) throws -> Ge
 
     // SMEA multiplier
     let smeaMultiplier = getSmeaMultiplier(smea)
-    let perImageCost = Double(baseCost) * smeaMultiplier
+    let modelMultiplier = params.isV5 ? V5_COST_MULTIPLIER : 1.0
+    let perImageCost = Double(baseCost) * smeaMultiplier * modelMultiplier
 
     // Strength multiplier (txt2img is always 1.0)
     let strengthMultiplier: Double
@@ -347,7 +357,8 @@ public func calculateGenerationCost(_ params: GenerationCostParams) throws -> Ge
     let errorCode: Int? = error ? -3 : nil
 
     // Opus free check (uses original request size)
-    let isOpusFree = isOpusFreeGeneration(
+    // V5 is not Opus-free once the usage is exhausted
+    let isOpusFree = !(params.isV5 && params.opusUsageExhausted) && isOpusFreeGeneration(
         width: params.width,
         height: params.height,
         steps: params.steps,
@@ -377,6 +388,7 @@ public func calculateGenerationCost(_ params: GenerationCostParams) throws -> Ge
     return GenerationCostResult(
         baseCost: baseCost,
         smeaMultiplier: smeaMultiplier,
+        modelMultiplier: modelMultiplier,
         perImageCost: perImageCost,
         strengthMultiplier: strengthMultiplier,
         adjustedCost: adjustedCost,
@@ -460,4 +472,34 @@ public func calculateUpscaleCost(_ params: UpscaleCostParams) throws -> UpscaleC
 
     // No match in table -> error
     return UpscaleCostResult(pixels: pixels, cost: nil, isOpusFree: false, error: true, errorCode: -3)
+}
+
+
+// MARK: - V5 Opus Usage
+
+/// Summary of the V5 Opus usage, computed like the official site
+public struct OpusUsageSummary: Sendable, Equatable {
+    /// Remaining (%); 0 when exhausted
+    public let remainingPercent: Double
+    /// Refill rate (%/day); 0 when not refilling
+    public let refillPercentPerDay: Double
+    /// Estimated number of images remaining
+    public let estimatedImagesRemaining: Int
+    /// Low (exhausted or below 5%)
+    public let isLow: Bool
+    /// Exhausted: V5 generations consume Anlas
+    public let isExhausted: Bool
+}
+
+/// Summarize `usage` with the official site's formulas.
+public func summarizeOpusUsage(_ usage: OpusUsage) -> OpusUsageSummary {
+    let remaining = usage.isNegative ? 0 : max(0, usage.percent)
+    let refill = usage.timeUntilNextPercent <= 0 ? 0 : (86400 / usage.timeUntilNextPercent * 10).rounded() / 10
+    return OpusUsageSummary(
+        remainingPercent: remaining,
+        refillPercentPerDay: refill,
+        estimatedImagesRemaining: Int((OPUS_USAGE_IMAGES_PER_PERCENT * remaining).rounded()),
+        isLow: usage.isNegative || usage.percent < OPUS_USAGE_LOW_PERCENT,
+        isExhausted: usage.isNegative
+    )
 }
