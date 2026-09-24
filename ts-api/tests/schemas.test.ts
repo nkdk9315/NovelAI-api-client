@@ -928,8 +928,12 @@ describe('EncodeVibeParamsSchema', () => {
   });
 
   describe('model バリデーション', () => {
+    it('should reject V5 models (no Vibe Transfer)', () => {
+      expect(Schemas.EncodeVibeParamsSchema.safeParse({ image: 'test.png', model: 'nai-diffusion-5-full' }).success).toBe(false);
+    });
+
     it('should accept valid models', () => {
-      Constants.VALID_MODELS.forEach(model => {
+      Constants.VIBE_MODELS.forEach(model => {
         expect(Schemas.EncodeVibeParamsSchema.safeParse({ image: 'test.png', model }).success).toBe(true);
       });
     });
