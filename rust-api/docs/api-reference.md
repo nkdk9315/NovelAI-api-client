@@ -104,6 +104,7 @@ pub trait Logger: Send + Sync {
 | `vibes` | `Option<Vec<VibeConfig>>` | `None` | Vibe Transfer (最大10) |
 | `character_reference` | `Option<Vec<CharacterReferenceConfig>>` | `None` | キャラクター参照 |
 | `transparent_background` | `bool` | `false` | V5 のみ。プロンプトに `transparent background` を追加し、`straight_alpha` 等のヒントを送る (背景が透過した RGBA PNG) |
+| `image_format` | `OutputFormat` | `Png` | 出力形式 (`Png` / `Webp`)。Webp はロスレスでアルファ・メタデータ付き。自動命名の拡張子も変わる |
 | `save` | `SaveTarget` | `None` | 保存先 |
 
 ### Builder
@@ -296,6 +297,7 @@ pub struct UpscaleParams {
 pub struct GenerateResult {
     pub image_data: Vec<u8>,
     pub seed: u64,
+    pub image_format: OutputFormat,  // image_data の形式 (返ってきたバイト列から判定)
     pub anlas_used: Option<i64>,
     pub saved_path: Option<String>,
 }

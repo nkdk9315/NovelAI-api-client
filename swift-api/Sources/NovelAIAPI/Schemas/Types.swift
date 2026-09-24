@@ -185,6 +185,9 @@ public struct GenerateParams: Sendable {
     /// V5 only: add "transparent background" to the prompt and request straight alpha
     public var transparentBackground: Bool
 
+    /// Output image format (default: png)
+    public var imageFormat: ImageFormat
+
     /// Prompt actually sent to the API (adds the transparent background tag when requested)
     public var effectivePrompt: String {
         if !transparentBackground || prompt.contains(TRANSPARENT_BACKGROUND_TAG) {
@@ -221,11 +224,13 @@ public struct GenerateParams: Sendable {
         seed: UInt32? = nil,
         sampler: Sampler = DEFAULT_SAMPLER,
         noiseSchedule: NoiseSchedule = DEFAULT_NOISE_SCHEDULE,
-        transparentBackground: Bool = false
+        transparentBackground: Bool = false,
+        imageFormat: ImageFormat = .png
     ) {
         self.prompt = prompt
         self.action = action
         self.transparentBackground = transparentBackground
+        self.imageFormat = imageFormat
         self.sourceImage = sourceImage
         self.img2imgStrength = img2imgStrength
         self.img2imgNoise = img2imgNoise
@@ -260,6 +265,8 @@ public struct GenerateParams: Sendable {
 public struct GenerateResult: Sendable {
     public var imageData: Data
     public var seed: UInt32
+    /// Format of `imageData`, detected from the returned bytes
+    public var imageFormat: ImageFormat
     public var anlasRemaining: Int?
     public var anlasConsumed: Int?
     public var savedPath: String?
@@ -267,12 +274,14 @@ public struct GenerateResult: Sendable {
     public init(
         imageData: Data,
         seed: UInt32,
+        imageFormat: ImageFormat? = nil,
         anlasRemaining: Int? = nil,
         anlasConsumed: Int? = nil,
         savedPath: String? = nil
     ) {
         self.imageData = imageData
         self.seed = seed
+        self.imageFormat = imageFormat ?? ImageFormat.detect(imageData) ?? .png
         self.anlasRemaining = anlasRemaining
         self.anlasConsumed = anlasConsumed
         self.savedPath = savedPath

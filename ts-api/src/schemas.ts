@@ -132,6 +132,8 @@ const VibeItemSchema = z.union([VibeEncodeResultSchema, z.string().min(1)]);
 export const GenerateResultSchema = z.object({
   image_data: BinaryDataSchema,
   seed: z.number().int().min(0).max(Constants.MAX_SEED),
+  /** Format of image_data ("png" or "webp"), detected from the returned bytes */
+  image_format: z.enum(Constants.VALID_IMAGE_FORMATS),
   anlas_remaining: z.number().min(0).nullish(),
   anlas_consumed: z.number().min(0).nullish(),
   saved_path: z.string().nullish(),
@@ -188,6 +190,8 @@ const GenerateParamsBaseSchema = z.object({
   // === 出力オプション ===
   save_path: SafePathSchema.nullish(),
   save_dir: SafePathSchema.nullish(),
+  /** Output image format. "webp" is lossless with alpha and metadata (what the official site uses). */
+  image_format: z.enum(Constants.VALID_IMAGE_FORMATS).default(Constants.DEFAULT_IMAGE_FORMAT),
 
   // === 生成パラメータ ===
   model: z.enum(Constants.VALID_MODELS).default(Constants.DEFAULT_MODEL),

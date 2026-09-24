@@ -81,6 +81,24 @@ public enum Sampler: String, CaseIterable, Codable, Sendable {
     case kDpmppSde = "k_dpmpp_sde"
 }
 
+/// Output image format (official docs: png / webp; webp is lossless with alpha and metadata)
+public enum ImageFormat: String, CaseIterable, Codable, Sendable {
+    case png
+    case webp
+
+    /// Detect the format of image bytes (PNG / WebP)
+    public static func detect(_ data: Data) -> ImageFormat? {
+        let bytes = [UInt8](data.prefix(12))
+        if bytes.count >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47 {
+            return .png
+        }
+        if bytes.count >= 12 && bytes[0..<4] == [0x52, 0x49, 0x46, 0x46] && bytes[8..<12] == [0x57, 0x45, 0x42, 0x50] {
+            return .webp
+        }
+        return nil
+    }
+}
+
 /// Supported noise schedules
 public enum NoiseSchedule: String, CaseIterable, Codable, Sendable {
     case karras

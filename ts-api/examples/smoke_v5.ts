@@ -49,6 +49,18 @@ const anlas = (r: { anlas_consumed?: number | null; anlas_remaining?: number | n
     const r = await client.generate({ ...base, seed: 1, transparent_background: true, save_path: src });
     return `${await alphaRatio(src)} ${anlas(r)}`;
   });
+  await step("t2i_webp", async () => {
+    const out = path.join(OUT, "webp_dir");
+    const r = await client.generate({ ...base, seed: 8, transparent_background: true, image_format: "webp", save_dir: out });
+    const meta = await sharp(r.saved_path!).metadata();
+    return `format=${r.image_format} file=${path.basename(r.saved_path!)} ${meta.format} ${meta.width}x${meta.height} alpha=${meta.hasAlpha} ${anlas(r)}`;
+  });
+  await step("i2i_from_webp", async () => {
+    const webpSrc = fs.readdirSync(path.join(OUT, "webp_dir")).find(f => f.endsWith(".webp"));
+    if (!webpSrc) return "skipped (no webp)";
+    const r = await client.generate({ ...base, seed: 9, action: "img2img", source_image: path.join(OUT, "webp_dir", webpSrc), img2img_strength: 0.5, save_path: path.join(OUT, "i2i_from_webp.png") });
+    return `format=${r.image_format} ${anlas(r)}`;
+  });
   await step("i2i", async () => {
     const out = path.join(OUT, "i2i.png");
     const r = await client.generate({ ...base, seed: 2, action: "img2img", source_image: src, img2img_strength: 0.6, transparent_background: true, save_path: out });

@@ -358,6 +358,7 @@ public final class NovelAIClient: @unchecked Sendable {
         var result = GenerateResult(
             imageData: imageData,
             seed: seed,
+            imageFormat: ImageFormat.detect(imageData) ?? params.imageFormat,
             anlasRemaining: anlasRemaining,
             anlasConsumed: anlasConsumed,
             savedPath: nil
@@ -377,7 +378,7 @@ public final class NovelAIClient: @unchecked Sendable {
                 if !charConfigs.isEmpty { prefix += "_multi" }
 
                 let timestamp = formatTimestamp()
-                let filename = "\(prefix)_\(timestamp)_\(seed).png"
+                let filename = "\(prefix)_\(timestamp)_\(seed).\(result.imageFormat.rawValue)"
                 let savePath = (saveDir as NSString).appendingPathComponent(filename)
 
                 try saveImage(data: imageData, path: savePath)

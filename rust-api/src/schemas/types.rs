@@ -217,6 +217,8 @@ pub struct GenerateParams {
     pub noise_schedule: NoiseSchedule,
     /// V5 only: add "transparent background" to the prompt and request straight alpha
     pub transparent_background: bool,
+    /// Output image format (default: PNG)
+    pub image_format: OutputFormat,
 }
 
 impl GenerateParams {
@@ -253,6 +255,7 @@ impl Default for GenerateParams {
             sampler: Sampler::default(),
             noise_schedule: NoiseSchedule::default(),
             transparent_background: false,
+            image_format: OutputFormat::default(),
         }
     }
 }
@@ -265,6 +268,8 @@ impl Default for GenerateParams {
 pub struct GenerateResult {
     pub image_data: Vec<u8>,
     pub seed: u64,
+    /// Format of `image_data`, detected from the returned bytes
+    pub image_format: OutputFormat,
     pub anlas_remaining: Option<u64>,
     pub anlas_consumed: Option<u64>,
     pub saved_path: Option<String>,

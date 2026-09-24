@@ -53,7 +53,7 @@ pub fn build_base_payload(
             "deliberate_euler_ancestral_bug": false,
             "prefer_brownian": true,
             "stream": "msgpack",
-            "image_format": "png",
+            "image_format": params.image_format.as_str(),
         },
         "use_new_shared_trial": true,
     });

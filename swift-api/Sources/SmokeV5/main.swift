@@ -55,6 +55,16 @@ await step("t2i_transparent") {
     let r = try await client.generate(p)
     return "\(alphaRatio(src)) \(anlas(r.anlasConsumed, r.anlasRemaining))"
 }
+await step("t2i_webp") {
+    var p = params(prompt, seed: 8, save: "unused.png")
+    p.savePath = nil
+    p.saveDir = "\(out)/webp_dir"
+    p.transparentBackground = true
+    p.imageFormat = .webp
+    let r = try await client.generate(p)
+    let path = r.savedPath ?? ""
+    return "format=\(r.imageFormat.rawValue) file=\((path as NSString).lastPathComponent) \(alphaRatio(path)) \(anlas(r.anlasConsumed, r.anlasRemaining))"
+}
 await step("i2i") {
     var p = params(prompt, seed: 2, save: "i2i.png", action: .img2img)
     p.sourceImage = .filePath(src)

@@ -1511,6 +1511,7 @@ describe('GenerateResultSchema', () => {
     const result = Schemas.GenerateResultSchema.safeParse({
       image_data: Buffer.from('test'),
       seed: 12345,
+      image_format: 'png',
     });
     expect(result.success).toBe(true);
   });
@@ -1519,6 +1520,7 @@ describe('GenerateResultSchema', () => {
     const result = Schemas.GenerateResultSchema.safeParse({
       image_data: new Uint8Array([1, 2, 3]),
       seed: 12345,
+      image_format: 'png',
     });
     expect(result.success).toBe(true);
   });
@@ -1527,6 +1529,7 @@ describe('GenerateResultSchema', () => {
     const result = Schemas.GenerateResultSchema.safeParse({
       image_data: Buffer.from('test'),
       seed: 123.45,
+      image_format: 'png',
     });
     expect(result.success).toBe(false);
   });

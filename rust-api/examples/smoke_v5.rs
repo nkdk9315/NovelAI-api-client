@@ -91,6 +91,17 @@ async fn main() -> anyhow::Result<()> {
         Ok(format!("{} {}", alpha_ratio(&src), anlas(r.anlas_consumed, r.anlas_remaining)))
     })
     .await;
+    step(&wanted, "t2i_webp", || async {
+        let p = base(PROMPT, Model::NaiDiffusion5Full, 8, "unused.png")
+            .transparent_background(true)
+            .image_format(novelai_api::constants::OutputFormat::Webp)
+            .save_dir(format!("{}/webp_dir", OUT))
+            .build()?;
+        let r = client.generate(&p).await?;
+        let path = r.saved_path.clone().unwrap_or_default();
+        Ok(format!("format={} file={} {} {}", r.image_format, path.rsplit('/').next().unwrap_or(""), alpha_ratio(&path), anlas(r.anlas_consumed, r.anlas_remaining)))
+    })
+    .await;
     step(&wanted, "i2i", || async {
         let p = base(PROMPT, Model::NaiDiffusion5Full, 2, "i2i.png")
             .transparent_background(true)

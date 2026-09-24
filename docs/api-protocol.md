@@ -157,7 +157,7 @@ Content-Type: application/json
 ```
 
 - `extra_noise_seed`: `seed === 0` なら `4294967295`、それ以外は `seed - 1`。
-- `image_format`: `png` か `webp`【公式】。公式サイトは常に `webp` (ロスレス、アルファ・EXIF 付き)。
+- `image_format`: `png` か `webp`【公式】。公式サイトは常に `webp` (ロスレス、アルファ・EXIF 付き)。クライアントは既定 `png` で、`image_format` / `imageFormat` で選べる。結果の形式は返ってきたバイト列の先頭 (`\x89PNG` / `RIFF....WEBP`) で判定する。
 - `k_euler_ancestral` で `noise_schedule` が `native` 以外のとき、サイトは `deliberate_euler_ancestral_bug:false`, `prefer_brownian:true` にする【観察】。
 - 公式サイトは V4.5 / V5 とも `ucPresetId` / `qualityPresetId` (文字列) と、`tag_hint_qt` / `tag_hint_uc_preset` (数値) を付ける。サーバーにとっては任意 (付けなくても動く)。旧形式の `ucPreset` / `qualityToggle` も受け付けられる。
 

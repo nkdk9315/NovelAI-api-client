@@ -125,4 +125,18 @@ final class V5Tests: XCTestCase {
         try applyInfillParams(&payload, params: p)
         XCTAssertEqual(payload["model"] as? String, "nai-diffusion-4-5-curated-inpainting")
     }
+
+    func testImageFormatPayloadAndDetection() {
+        var p = GenerateParams(prompt: "1girl")
+        XCTAssertEqual((buildBasePayload(p, seed: 1, negativePrompt: "neg")["parameters"] as? [String: Any])?["image_format"] as? String, "png")
+        p.imageFormat = .webp
+        XCTAssertEqual((buildBasePayload(p, seed: 1, negativePrompt: "neg")["parameters"] as? [String: Any])?["image_format"] as? String, "webp")
+
+        XCTAssertEqual(ImageFormat.detect(makeMinimalPNG()), .png)
+        var webp = Data("RIFF".utf8) + Data([0, 0, 0, 0]) + Data("WEBPVP8L".utf8)
+        webp.append(Data(repeating: 0, count: 8))
+        XCTAssertEqual(ImageFormat.detect(webp), .webp)
+        XCTAssertNil(ImageFormat.detect(Data("not an image".utf8)))
+        XCTAssertEqual(GenerateResult(imageData: webp, seed: 1).imageFormat, .webp)
+    }
 }

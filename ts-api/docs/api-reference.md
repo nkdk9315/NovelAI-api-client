@@ -114,6 +114,7 @@ async generate(params: GenerateParams): Promise<GenerateResult>
 |-----------|-----|-----------|------|
 | `save_path` | `string?` | — | 保存先ファイルパス (排他) |
 | `save_dir` | `string?` | — | 保存先ディレクトリ (自動命名, 排他) |
+| `image_format` | `"png" \| "webp"` | `"png"` | 出力形式。webp はロスレスでアルファ・メタデータ付き (公式サイトと同じ)。自動命名の拡張子も変わる |
 
 ### GenerateResult
 
@@ -121,6 +122,7 @@ async generate(params: GenerateParams): Promise<GenerateResult>
 |-----------|-----|------|
 | `image_data` | `Buffer \| Uint8Array` | PNG画像バイナリ |
 | `seed` | `number` | 使用されたシード値 |
+| `image_format` | `"png" \| "webp"` | `image_data` の形式 (返ってきたバイト列から判定) |
 | `anlas_remaining` | `number \| null` | 残りアンラス |
 | `anlas_consumed` | `number \| null` | 消費アンラス |
 | `saved_path` | `string \| null` | 保存先パス |

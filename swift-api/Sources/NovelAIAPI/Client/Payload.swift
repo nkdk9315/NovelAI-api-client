@@ -50,7 +50,7 @@ func buildBasePayload(
         "deliberate_euler_ancestral_bug": false,
         "prefer_brownian": true,
         "stream": "msgpack",
-        "image_format": "png",
+        "image_format": params.imageFormat.rawValue,
     ]
     if params.transparentBackground {
         // Transparency itself comes from the prompt tag; these are the site's hints

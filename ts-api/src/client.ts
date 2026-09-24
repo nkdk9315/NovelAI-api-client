@@ -431,7 +431,7 @@ export class NovelAIClient {
         deliberate_euler_ancestral_bug: false,
         prefer_brownian: true,
         stream: "msgpack",
-        image_format: "png",
+        image_format: validatedParams.image_format ?? Constants.DEFAULT_IMAGE_FORMAT,
       },
       use_new_shared_trial: true,
     };
@@ -735,6 +735,7 @@ export class NovelAIClient {
     const result: Schemas.GenerateResult = {
       image_data: imageData,
       seed: seed,
+      image_format: Utils.detectImageFormat(imageData) ?? validatedParams.image_format ?? Constants.DEFAULT_IMAGE_FORMAT,
       anlas_remaining: anlasRemaining,
       anlas_consumed: anlasConsumed,
       saved_path: null,
@@ -753,7 +754,7 @@ export class NovelAIClient {
         if (charConfigs.length > 0) prefix += "_multi";
 
         const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 15);
-        const filename = `${prefix}_${timestamp}_${seed}.png`;
+        const filename = `${prefix}_${timestamp}_${seed}.${result.image_format}`;
         const savePath = path.join(dir, filename);
 
         await this.saveImage(result, savePath);
@@ -798,9 +799,9 @@ export class NovelAIClient {
       return this.parseZipResponse(content);
     }
 
-    // Check for PNG signature
+    // Check for a raw PNG / WebP image
     const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    if (content.length > 8 && content.subarray(0, 8).equals(pngSignature)) {
+    if (Utils.detectImageFormat(content) !== null) {
       return content;
     }
 

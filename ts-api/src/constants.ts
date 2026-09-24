@@ -48,6 +48,11 @@ export const DEFAULT_VIBE_INFO_EXTRACTED = 0.7;
 export const DEFAULT_IMG2IMG_STRENGTH = 0.62;
 export const DEFAULT_CFG_RESCALE = 0;
 
+// 出力画像形式 (公式ドキュメント: png / webp。webp はロスレスでアルファ・メタデータ付き)
+export const VALID_IMAGE_FORMATS = ["png", "webp"] as const;
+export type ImageFormat = typeof VALID_IMAGE_FORMATS[number];
+export const DEFAULT_IMAGE_FORMAT: ImageFormat = "png";
+
 // Inpaint defaults
 export const DEFAULT_INPAINT_STRENGTH = 0.7;
 export const DEFAULT_INPAINT_NOISE = 0;

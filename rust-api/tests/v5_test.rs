@@ -183,3 +183,18 @@ fn v5_curated_infill_uses_45_curated_inpainting() {
     payload::apply_infill_params(&mut payload, &p).unwrap();
     assert_eq!(payload["model"], "nai-diffusion-4-5-curated-inpainting");
 }
+
+#[test]
+fn image_format_payload_and_detection() {
+    use novelai_api::constants::OutputFormat;
+    let p = GenerateParams { prompt: "1girl".into(), image_format: OutputFormat::Webp, ..Default::default() };
+    assert_eq!(payload::build_base_payload(&p, 1, "neg")["parameters"]["image_format"], "webp");
+    let d = GenerateParams { prompt: "1girl".into(), ..Default::default() };
+    assert_eq!(payload::build_base_payload(&d, 1, "neg")["parameters"]["image_format"], "png");
+
+    assert_eq!(OutputFormat::detect(&png(8, 8)), Some(OutputFormat::Png));
+    let mut webp = b"RIFF\x00\x00\x00\x00WEBPVP8L".to_vec();
+    webp.extend_from_slice(&[0; 8]);
+    assert_eq!(OutputFormat::detect(&webp), Some(OutputFormat::Webp));
+    assert_eq!(OutputFormat::detect(b"not an image"), None);
+}

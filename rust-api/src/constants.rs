@@ -256,6 +256,38 @@ pub fn model_key_from_str(model: &str) -> Option<&'static str> {
     Model::from_str(model).ok().map(|m| m.model_key())
 }
 
+/// Output image format (official docs: png / webp; webp is lossless with alpha and metadata)
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, Hash,
+    Serialize, Deserialize, AsRefStr, EnumString, Display, IntoStaticStr,
+)]
+pub enum OutputFormat {
+    #[default]
+    #[serde(rename = "png")]
+    #[strum(serialize = "png")]
+    Png,
+    #[serde(rename = "webp")]
+    #[strum(serialize = "webp")]
+    Webp,
+}
+
+impl OutputFormat {
+    pub fn as_str(&self) -> &'static str {
+        self.into()
+    }
+
+    /// Detect the format of image bytes (PNG / WebP)
+    pub fn detect(data: &[u8]) -> Option<Self> {
+        if data.len() >= 8 && data[..4] == [0x89, 0x50, 0x4e, 0x47] {
+            Some(OutputFormat::Png)
+        } else if data.len() >= 12 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+            Some(OutputFormat::Webp)
+        } else {
+            None
+        }
+    }
+}
+
 /// Noise schedule enum
 #[derive(
     Debug, Default, Clone, Copy, PartialEq, Eq, Hash,

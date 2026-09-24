@@ -348,9 +348,11 @@ impl NovelAIClient {
             self.get_anlas_after_if_tracking(anlas_before).await;
 
         let char_configs = params.characters.as_deref().unwrap_or(&[]);
+        let image_format = constants::OutputFormat::detect(&image_data).unwrap_or(params.image_format);
         let mut result = GenerateResult {
             image_data,
             seed,
+            image_format,
             anlas_remaining,
             anlas_consumed,
             saved_path: None,
@@ -832,7 +834,7 @@ impl NovelAIClient {
                     prefix.push_str("_multi");
                 }
                 let ts = file_timestamp();
-                let filename = format!("{}_{}_{}.png", prefix, ts, seed);
+                let filename = format!("{}_{}_{}.{}", prefix, ts, seed, result.image_format.as_str());
                 let save_path = Path::new(save_dir)
                     .join(&filename)
                     .to_string_lossy()

@@ -155,6 +155,22 @@ describe('V5 request payload', () => {
     expect(sentBody().model).toBe('nai-diffusion-4-5-curated-inpainting');
   });
 
+  it('image_format webp is sent and detected from the returned bytes', async () => {
+    const webp = await sharp({ create: { width: 64, height: 64, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).webp({ lossless: true }).toBuffer();
+    fetchMock.mockResolvedValue(new Response(new Uint8Array(webp), { status: 200 }));
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'nai-webp-'));
+    const result = await client.generate({ prompt: '1girl', model: 'nai-diffusion-5-full', width: 512, height: 768, image_format: 'webp', save_dir: dir });
+    expect(sentBody().parameters.image_format).toBe('webp');
+    expect(result.image_format).toBe('webp');
+    expect(result.saved_path?.endsWith('.webp')).toBe(true);
+  });
+
+  it('defaults to png', async () => {
+    const result = await client.generate({ prompt: '1girl', width: 512, height: 768 });
+    expect(sentBody().parameters.image_format).toBe('png');
+    expect(result.image_format).toBe('png');
+  });
+
   it('V4.5 payload is unchanged (params_version 3, no transparency hints)', async () => {
     await client.generate({ prompt: '1girl', width: 512, height: 768 });
     const body = sentBody();

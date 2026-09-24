@@ -42,6 +42,7 @@ func generate(_ params: GenerateParams) async throws -> GenerateResult
 | `seed` | `UInt32?` | ランダム | シード値 (0〜4294967295) |
 | `sampler` | `Sampler` | `.kEulerAncestral` | サンプラー |
 | `noiseSchedule` | `NoiseSchedule` | `.karras` | ノイズスケジュール (V5 は常に karras) |
+| `imageFormat` | `ImageFormat` | `.png` | 出力形式 (`.png` / `.webp`)。webp はロスレスでアルファ・メタデータ付き。自動命名の拡張子も変わる |
 | `transparentBackground` | `Bool` | `false` | V5 のみ。プロンプトに `transparent background` を追加し、`straight_alpha` 等のヒントを送る (背景が透過した RGBA PNG) |
 
 ※デフォルトネガティブ: `"nsfw, lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone"`
@@ -121,8 +122,9 @@ func generate(_ params: GenerateParams) async throws -> GenerateResult
 
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
-| `imageData` | `Data` | PNG画像バイナリ |
+| `imageData` | `Data` | 画像バイナリ (PNG または WebP) |
 | `seed` | `UInt32` | 使用されたシード値 |
+| `imageFormat` | `ImageFormat` | `imageData` の形式 (返ってきたバイト列から判定) |
 | `anlasRemaining` | `Int?` | 残りアンラス |
 | `anlasConsumed` | `Int?` | 消費アンラス |
 | `savedPath` | `String?` | 保存先パス |
