@@ -72,11 +72,14 @@ swift-api/Sources/NovelAIAPI/
 
 ### 機能セット
 
+- **モデル**: V4 / V4.5 / V5 (`nai-diffusion-5-full`, `nai-diffusion-5-curated`)
 - **txt2img / img2img / inpaint**: 統合 generate メソッドで action パラメータにより切り替え
-- **Vibe Transfer**: .naiv4vibe ファイルによるスタイル転写
-- **Character Reference**: 参照画像からキャラクター/スタイルを反映
-- **Augment**: 6種の画像加工ツール (colorize, emotion, sketch, lineart, declutter, bg-removal)
-- **Upscale**: 2x/4x 画像拡大
+- **透過背景 (V5)**: `transparent_background` でプロンプトに `transparent background` を追加
+- **Vibe Transfer**: .naiv4vibe ファイルによるスタイル転写 (V4 / V4.5 のみ)
+- **Character Reference**: 参照画像からキャラクター/スタイルを反映 (V4.5 のみ)
+- **Augment**: 7種の画像加工ツール (colorize, emotion, sketch, lineart, declutter, declutter-keep-bubbles, bg-removal)
+- **Upscale**: 2x 画像拡大 (サーバーは常に2倍)
+- **V5 使用量**: 残高取得時に Opus 無料生成の使用量 (`usage`) を返す
 - **Anlas コスト計算**: 純粋関数として実装 (API呼び出し不要)
 
 ### 画像入力の抽象化
@@ -108,9 +111,15 @@ ZIP → msgpack stream → raw PNG の3形式フォールバック:
 
 ### トークナイザー
 
-- CLIP BPE + T5 Unigram (SentencePiece Viterbi)
+- CLIP BPE + T5 Unigram (SentencePiece Viterbi) + Qwen バイトレベル BPE (V5)
 - 定義ファイルはネットワークDL + ディスクキャッシュ (7日TTL)
-- プロンプト上限: 512 トークン
+- プロンプト上限: V4 / V4.5 は 512 (T5)、V5 full は 1471 / V5 curated は 703 (Qwen)
+- Qwen の実装は公式サイトのエンコーダで作った正解データ (`tests/fixtures/qwen_expected.json`) で検証する
+
+### リクエスト形式
+
+- 生成を含む全エンドポイントに JSON ボディで送る (multipart は使わない。理由は docs/api-protocol.md)
+- 実 API での確認は各言語の `smoke_v45` / `smoke_v5` (Swift は `SmokeV45` / `SmokeV5`) で行う
 
 ## 共通環境変数
 
