@@ -45,11 +45,9 @@ pub(crate) fn validate_image_input_not_empty(input: &ImageInput) -> Result<()> {
 
 impl CharacterConfig {
     pub fn validate(&self) -> Result<()> {
-        if self.prompt.is_empty() {
-            return Err(NovelAIError::Validation(
-                "prompt must not be empty".to_string(),
-            ));
-        }
+        // An empty character prompt is valid: the API accepts an empty
+        // `char_caption` (negative captions are routinely sent empty), and
+        // the main prompt is likewise allowed to be empty.
         validate_unit_range(self.center_x, "center_x")?;
         validate_unit_range(self.center_y, "center_y")?;
         Ok(())

@@ -75,12 +75,12 @@ mod tests {
         }
 
         #[test]
-        fn should_reject_empty_prompt() {
+        fn should_accept_empty_prompt() {
             let config = CharacterConfig {
                 prompt: "".to_string(),
                 ..Default::default()
             };
-            assert!(config.validate().is_err());
+            assert!(config.validate().is_ok());
         }
 
         #[test]
