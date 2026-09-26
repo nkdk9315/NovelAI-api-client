@@ -13,7 +13,9 @@ use novelai_api::schemas::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenvy::dotenv().ok();
+    // .env takes precedence over shell env vars (e.g. ~/.zshrc) so example
+    // runs reflect the latest pasted credentials.
+    dotenvy::dotenv_override().ok();
 
     let output_dir = "output/augment";
     std::fs::create_dir_all(output_dir)?;

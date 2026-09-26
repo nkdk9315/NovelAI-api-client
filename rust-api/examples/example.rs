@@ -469,7 +469,10 @@ fn print_error(e: &anyhow::Error) {
 
 #[tokio::main]
 async fn main() {
-    dotenvy::dotenv().ok();
+    // Use override so .env wins over any pre-set shell env var (e.g. an old
+    // NOVELAI_API_KEY exported from ~/.zshrc) — examples should reflect the
+    // values the user just pasted into .env.
+    dotenvy::dotenv_override().ok();
 
     // Ensure output directories exist
     let output_dirs = ["output", "output/multi_character", "output/charref", "vibes"];
@@ -483,15 +486,15 @@ async fn main() {
 
     // 実行したい例のコメントを外してください
 
-    // if let Err(e) = example_simple_generate().await { print_error(&e.into()); }
+    if let Err(e) = example_simple_generate().await { print_error(&e.into()); }
 
     // if let Err(e) = example_with_vibes().await { print_error(&e.into()); }
 
     // if let Err(e) = example_img2img().await { print_error(&e.into()); }
 
-    if let Err(e) = example_img2img_with_vibes().await {
-       print_error(&e);
-    }
+    // if let Err(e) = example_img2img_with_vibes().await {
+    //    print_error(&e);
+    //}
 
     // if let Err(e) = example_multi_character().await { print_error(&e.into()); }
 

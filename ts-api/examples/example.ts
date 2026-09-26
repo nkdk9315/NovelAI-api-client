@@ -410,15 +410,15 @@ async function main() {
 
   // await exampleImg2img();
 
-  await exampleImg2imgWithVibes();
+  // await exampleImg2imgWithVibes();
 
   // await exampleMultiCharacter();
 
   // await exampleEncodeVibe();
 
-  await exampleCharacterReference();
+  // await exampleCharacterReference();
 
-  // await exampleCharacterReferenceStyles();
+  await exampleCharacterReferenceStyles();
 
   console.log("\n使用したい例のコード内のコメントを外して実行してください。");
 }

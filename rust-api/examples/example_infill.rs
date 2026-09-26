@@ -116,7 +116,9 @@ async fn test_infill_with_img2img(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenvy::dotenv().ok();
+    // .env takes precedence over shell env vars (e.g. ~/.zshrc) so example
+    // runs reflect the latest pasted credentials.
+    dotenvy::dotenv_override().ok();
 
     let input_image = "./reference/input.jpeg";
     let output_dir = "./output/test/";
