@@ -1,4 +1,8 @@
 import XCTest
+#if canImport(CoreGraphics)
+import CoreGraphics
+import ImageIO
+#endif
 @testable import NovelAIAPI
 
 // MARK: - A. validateImageDataSize Tests
@@ -382,3 +386,90 @@ final class MaskTests: XCTestCase {
     }
 }
 
+
+// MARK: - I. resizeMaskImage Tests
+
+#if canImport(CoreGraphics)
+final class ResizeMaskImageTests: XCTestCase {
+
+    /// Decode a PNG into 8-bit grayscale pixels (row 0 = top).
+    private func decodeGray(_ data: Data) throws -> (pixels: [UInt8], width: Int, height: Int, isGray: Bool) {
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let isGray = image.colorSpace?.model == .monochrome
+        let w = image.width, h = image.height
+        var pixels = [UInt8](repeating: 0, count: w * h)
+        pixels.withUnsafeMutableBytes { raw in
+            let ctx = CGContext(
+                data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w,
+                space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue
+            )!
+            ctx.interpolationQuality = .none
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        }
+        return (pixels, w, h, isGray)
+    }
+
+    /// Antialiased white circle on black, offset so edges fall between 8px cells.
+    private func softCircleMask(width: Int, height: Int) throws -> Data {
+        let ctx = try XCTUnwrap(CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        ctx.setShouldAntialias(true)
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        let r = Double(min(width, height)) / 3
+        ctx.fillEllipse(in: CGRect(x: Double(width) / 2 + 3 - r, y: Double(height) / 2 + 5 - r, width: 2 * r, height: 2 * r))
+        let image = try XCTUnwrap(ctx.makeImage())
+        let out = NSMutableData()
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithData(out as CFMutableData, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        return out as Data
+    }
+
+    private func assertBinaryUniformCells(_ pixels: [UInt8], width: Int, height: Int,
+                                          file: StaticString = #filePath, line: UInt = #line) {
+        for y in 0..<height {
+            for x in 0..<width {
+                let v = pixels[y * width + x]
+                guard v == 0 || v == 255 else {
+                    return XCTFail("non-binary value \(v) at (\(x), \(y))", file: file, line: line)
+                }
+                let origin = pixels[(y - y % MASK_CELL) * width + (x - x % MASK_CELL)]
+                guard v == origin else {
+                    return XCTFail("cell not uniform at (\(x), \(y))", file: file, line: line)
+                }
+            }
+        }
+    }
+
+    func testSoftFullSizeMaskBecomesFullSizeBinaryCells() throws {
+        let mask = try softCircleMask(width: 832, height: 1216)
+        let out = try resizeMaskImage(mask, targetWidth: 832, targetHeight: 1216)
+        let decoded = try decodeGray(out)
+
+        XCTAssertEqual(decoded.width, 832)
+        XCTAssertEqual(decoded.height, 1216)
+        XCTAssertTrue(decoded.isGray)
+        assertBinaryUniformCells(decoded.pixels, width: 832, height: 1216)
+        XCTAssertEqual(decoded.pixels[608 * 832 + 416], 255)
+        XCTAssertEqual(decoded.pixels[0], 0)
+    }
+
+    func testOneEighthMaskIsUpscaledToFullSizeKeepingOrientation() throws {
+        // Top-left quarter white, 1/8-size mask (104x152)
+        let small = try createRectangularMask(width: 832, height: 1216, region: MaskRegion(x: 0, y: 0, w: 0.5, h: 0.5))
+        let out = try resizeMaskImage(small, targetWidth: 832, targetHeight: 1216)
+        let decoded = try decodeGray(out)
+
+        XCTAssertEqual(decoded.width, 832)
+        XCTAssertEqual(decoded.height, 1216)
+        assertBinaryUniformCells(decoded.pixels, width: 832, height: 1216)
+        XCTAssertEqual(decoded.pixels[10 * 832 + 10], 255, "top-left should be white")
+        XCTAssertEqual(decoded.pixels[1200 * 832 + 820], 0, "bottom-right should be black")
+    }
+}
+#endif

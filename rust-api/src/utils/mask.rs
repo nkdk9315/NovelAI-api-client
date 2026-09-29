@@ -25,22 +25,42 @@ pub struct MaskCenter {
 // Public Functions
 // =============================================================================
 
-/// Resize mask image to 1/8 of target dimensions (API specification).
+/// Size of one mask cell in pixels (the model works on an 8x-downscaled latent).
+pub const MASK_CELL: u32 = 8;
+
+/// Normalize a mask for the API: full target size, binary, snapped to 8px cells.
+///
+/// The mask is first reduced to one value per 8x8 cell (area average) and
+/// thresholded at 50%, then scaled back up with nearest-neighbour. Any input
+/// size works (a 1/8 cell grid or a full-size brush mask).
+///
+/// Why: the official site sends the full-size mask. A 1/8-size mask, or a
+/// full-size mask whose edges fall between cells (soft/antialiased or
+/// unaligned), makes V5 inpainting draw a grey frame along the mask border.
 pub fn resize_mask_image(
     mask: &[u8],
     target_width: u32,
     target_height: u32,
 ) -> Result<Vec<u8>> {
-    let mask_width = target_width / 8;
-    let mask_height = target_height / 8;
+    let cols = (target_width / MASK_CELL).max(1);
+    let rows = (target_height / MASK_CELL).max(1);
 
     let img = load_image_safe(mask)?;
 
-    let resized = img.resize_exact(mask_width, mask_height, image::imageops::FilterType::Lanczos3);
-    let gray = resized.to_luma8();
+    let cells = img
+        .resize_exact(cols, rows, image::imageops::FilterType::Triangle)
+        .to_luma8();
+    let binary = GrayImage::from_fn(cols, rows, |x, y| {
+        Luma([if cells.get_pixel(x, y)[0] >= 128 { 255 } else { 0 }])
+    });
+    let full = image::imageops::resize(
+        &binary,
+        target_width,
+        target_height,
+        image::imageops::FilterType::Nearest,
+    );
 
-    let dynamic = DynamicImage::ImageLuma8(gray);
-    encode_to_png(&dynamic)
+    encode_to_png(&DynamicImage::ImageLuma8(full))
 }
 
 /// Create a rectangular mask image programmatically.

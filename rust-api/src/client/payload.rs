@@ -101,7 +101,7 @@ pub fn apply_infill_params(
             source_image, params.width, params.height
         )?;
 
-        // Mask: resize to 1/8 of target dimensions
+        // Mask: full target size, binary, snapped to 8px cells
         let mask_buffer = utils::image::get_image_buffer(mask)?;
         let resized_mask =
             utils::mask::resize_mask_image(&mask_buffer, params.width, params.height)?;

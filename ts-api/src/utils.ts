@@ -393,29 +393,68 @@ export async function processCharacterReferences(
 // Mask/Inpaint Helpers
 // =============================================================================
 
+/** マスクの 1 セルのピクセル数（モデルは 8 分の 1 の latent で処理する） */
+export const MASK_CELL = 8;
+
 /**
- * マスク画像を1/8サイズにリサイズ（API仕様に合わせる）
+ * マスクを API 送信用に正規化する: 元画像と同じサイズ・白黒 2 値・8px セル単位。
+ *
+ * 入力を 8x8 セルごとの面積平均に縮小して 50% (>=128) で 2 値化し、
+ * 最近傍で `targetWidth` x `targetHeight` に拡大する。入力サイズは任意
+ * （1/8 のセルグリッドでも等倍のブラシマスクでも可）。
+ *
+ * 理由: 公式サイトは等倍マスクを送る。1/8 サイズのマスクや、境界が
+ * 8px 格子に乗っていない等倍マスク（アンチエイリアス・ずれ）を送ると、
+ * V5 のインペイントでマスク境界に灰色の枠線が描かれる。
  */
 export async function resizeMaskImage(
   mask: Buffer,
   targetWidth: number,
   targetHeight: number
 ): Promise<Buffer> {
-  // マスクは元画像の1/8サイズにリサイズ
-  const maskWidth = Math.floor(targetWidth / 8);
-  const maskHeight = Math.floor(targetHeight / 8);
+  const cols = Math.max(1, Math.floor(targetWidth / MASK_CELL));
+  const rows = Math.max(1, Math.floor(targetHeight / MASK_CELL));
+  const gridW = cols * MASK_CELL;
+  const gridH = rows * MASK_CELL;
 
-  const resized = await sharp(mask)
-    .resize({
-      width: maskWidth,
-      height: maskHeight,
-      fit: 'fill', // Exact size
-    })
-    .grayscale() // Ensure grayscale
+  // 8px セルの格子サイズに揃えたグレースケール画素を取得
+  const { data } = await sharp(mask)
+    .removeAlpha()
+    .grayscale()
+    .resize({ width: gridW, height: gridH, fit: 'fill' })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const channels = data.length / (gridW * gridH);
+
+  // セルごとに面積平均 → 2 値化
+  const cells = new Uint8Array(cols * rows);
+  const cellArea = MASK_CELL * MASK_CELL;
+  for (let cy = 0; cy < rows; cy++) {
+    for (let cx = 0; cx < cols; cx++) {
+      let sum = 0;
+      for (let y = cy * MASK_CELL; y < (cy + 1) * MASK_CELL; y++) {
+        for (let x = cx * MASK_CELL; x < (cx + 1) * MASK_CELL; x++) {
+          sum += data[(y * gridW + x) * channels];
+        }
+      }
+      cells[cy * cols + cx] = sum / cellArea >= 128 ? 255 : 0;
+    }
+  }
+
+  // 最近傍で元画像サイズに拡大
+  const out = Buffer.alloc(targetWidth * targetHeight);
+  for (let y = 0; y < targetHeight; y++) {
+    const cy = Math.min(rows - 1, Math.floor((y * rows) / targetHeight));
+    for (let x = 0; x < targetWidth; x++) {
+      const cx = Math.min(cols - 1, Math.floor((x * cols) / targetWidth));
+      out[y * targetWidth + x] = cells[cy * cols + cx];
+    }
+  }
+
+  return sharp(out, { raw: { width: targetWidth, height: targetHeight, channels: 1 } })
+    .toColourspace('b-w') // グレースケール PNG として出力
     .png()
     .toBuffer();
-
-  return resized;
 }
 
 /**
