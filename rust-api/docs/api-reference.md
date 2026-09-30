@@ -30,6 +30,29 @@ pub async fn generate(&self, params: &GenerateParams) -> Result<GenerateResult>
 - ペイロード構築 → API リクエスト
 - レスポンスパース → ファイル保存 (SaveTarget指定時)
 
+#### generate_with_progress
+
+```rust
+pub async fn generate_with_progress(
+    &self,
+    params: &GenerateParams,
+    on_progress: Option<&ProgressFn<'_>>,
+) -> Result<GenerateResult>
+```
+
+`generate` と同じ。stream エンドポイントが完成画像の前に送る途中経過 (`intermediate` フレーム、ステップごとの JPEG) を、届いたそばから `on_progress` に渡す。`None` なら `generate` と同じ動作。
+
+```rust
+pub struct GenerateProgress {
+    pub step: u32,           // step_ix
+    pub sigma: Option<f64>,  // 残りのノイズ量 (0 に向かって下がる)
+    pub image: Vec<u8>,      // JPEG
+}
+pub type ProgressFn<'a> = dyn Fn(GenerateProgress) + Send + Sync + 'a;
+```
+
+img2img は `ceil(steps × strength)` 回分しか届かない。本文は全部集めてから従来どおり `parse_stream_response` で完成画像を取り出す。
+
 #### encode_vibe
 
 ```rust

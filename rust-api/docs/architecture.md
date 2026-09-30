@@ -6,6 +6,7 @@
 client/mod.rs
   ├── client/payload.rs   (ペイロード構築)
   ├── client/response.rs  (レスポンスパース)
+  ├── client/stream.rs    (stream 本文を読みながら途中経過を取り出す)
   ├── client/retry.rs     (リトライロジック)
   ├── schemas/*           (型定義, バリデーション)
   ├── utils/*             (画像処理, vibe, charref)

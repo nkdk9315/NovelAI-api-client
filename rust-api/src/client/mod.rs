@@ -14,6 +14,9 @@ use crate::utils;
 pub mod payload;
 pub mod response;
 pub mod retry;
+pub mod stream;
+
+pub use stream::{GenerateProgress, ProgressFn};
 
 // =============================================================================
 // Logger Trait
@@ -273,6 +276,16 @@ impl NovelAIClient {
         &self,
         params: &GenerateParams,
     ) -> Result<GenerateResult> {
+        self.generate_with_progress(params, None).await
+    }
+
+    /// `generate`, calling `on_progress` with each denoising preview (JPEG)
+    /// the streaming endpoint sends before the final image.
+    pub async fn generate_with_progress(
+        &self,
+        params: &GenerateParams,
+        on_progress: Option<&ProgressFn<'_>>,
+    ) -> Result<GenerateResult> {
         let seed = params
             .seed
             .unwrap_or_else(|| rand::random::<u32>() as u64);
@@ -342,7 +355,9 @@ impl NovelAIClient {
         .await?;
 
         // Parse and assemble result
-        let image_data = self.process_generate_response(response, use_stream).await?;
+        let image_data = self
+            .process_generate_response(response, use_stream, on_progress)
+            .await?;
 
         let (anlas_remaining, anlas_consumed) =
             self.get_anlas_after_if_tracking(anlas_before).await;
@@ -452,8 +467,12 @@ impl NovelAIClient {
         &self,
         response: reqwest::Response,
         use_stream: bool,
+        on_progress: Option<&ProgressFn<'_>>,
     ) -> Result<Vec<u8>> {
-        let response_buffer = response::get_response_buffer(response).await?;
+        let response_buffer = match on_progress {
+            Some(cb) if use_stream => stream::read_with_progress(response, cb).await?,
+            _ => response::get_response_buffer(response).await?,
+        };
         if use_stream {
             response::parse_stream_response(&response_buffer, &*self.logger)
         } else {
