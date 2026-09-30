@@ -45,7 +45,9 @@ function validateSaveOptionsExclusive(
 // =============================================================================
 
 export const CharacterConfigSchema = z.object({
-  prompt: z.string().min(1),
+  // An empty character prompt is valid: the API accepts an empty `char_caption`
+  // (negative captions are routinely sent empty), like the main prompt.
+  prompt: z.string(),
   center_x: z.number().min(0.0).max(1.0).default(0.5),
   center_y: z.number().min(0.0).max(1.0).default(0.5),
   negative_prompt: z.string().default(""),

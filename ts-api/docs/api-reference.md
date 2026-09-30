@@ -88,7 +88,7 @@ type ProgressCallback = (progress: GenerateProgress) => void;
 
 | フィールド | 型 | デフォルト | 説明 |
 |-----------|-----|-----------|------|
-| `prompt` | `string` | — (必須) | キャラクタープロンプト |
+| `prompt` | `string` | — (必須) | キャラクタープロンプト (空文字列可) |
 | `center_x` | `number` | `0.5` | 中心X座標 (0.0〜1.0) |
 | `center_y` | `number` | `0.5` | 中心Y座標 (0.0〜1.0) |
 | `negative_prompt` | `string` | `""` | ネガティブプロンプト |

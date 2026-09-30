@@ -685,16 +685,9 @@ final class CharacterValidationTests: XCTestCase {
         XCTAssertEqual(character.negativePrompt, "")
     }
 
-    func testEmptyPromptRejected() {
+    func testEmptyPromptAccepted() {
         let character = CharacterConfig(prompt: "")
-        XCTAssertThrowsError(try character.validate()) { error in
-            guard case NovelAIError.validation(let msg) = error else {
-                XCTFail("Expected validation error, got \(error)")
-                return
-            }
-            XCTAssertTrue(msg.contains("prompt"))
-            XCTAssertTrue(msg.contains("empty"))
-        }
+        XCTAssertNoThrow(try character.validate())
     }
 
     func testCenterXOutOfRangeRejected() {
@@ -746,15 +739,20 @@ final class CharacterValidationTests: XCTestCase {
     }
 
     func testCharacterInGenerateParamsValidated() {
-        let invalidChar = CharacterConfig(prompt: "")
+        let invalidChar = CharacterConfig(prompt: "a girl", centerX: 1.5)
         let params = GenerateParams(prompt: "test", characters: [invalidChar])
         XCTAssertThrowsError(try params.validate()) { error in
-            guard case NovelAIError.validation(let msg) = error else {
-                XCTFail("Expected validation error, got \(error)")
+            guard case NovelAIError.range(let msg) = error else {
+                XCTFail("Expected range error, got \(error)")
                 return
             }
-            XCTAssertTrue(msg.contains("prompt"))
+            XCTAssertTrue(msg.contains("center_x"))
         }
+    }
+
+    func testEmptyCharacterPromptInGenerateParamsAccepted() {
+        let params = GenerateParams(prompt: "test", characters: [CharacterConfig(prompt: "")])
+        XCTAssertNoThrow(try params.validate())
     }
 
     func testValidCharacterInGenerateParamsAccepted() {

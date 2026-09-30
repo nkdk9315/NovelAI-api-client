@@ -351,9 +351,9 @@ extension GenerateParams {
 
 extension CharacterConfig {
     public func validate() throws {
-        if prompt.isEmpty {
-            throw NovelAIError.validation("Character prompt must not be empty")
-        }
+        // An empty character prompt is valid: the API accepts an empty
+        // `char_caption` (negative captions are routinely sent empty), and
+        // the main prompt is likewise allowed to be empty.
         if centerX < 0.0 || centerX > 1.0 {
             throw NovelAIError.range("center_x must be between 0.0 and 1.0, got \(centerX)")
         }

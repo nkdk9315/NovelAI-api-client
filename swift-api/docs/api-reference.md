@@ -87,7 +87,7 @@ public typealias ProgressHandler = @Sendable (GenerateProgress) -> Void
 
 | フィールド | 型 | デフォルト | 説明 |
 |-----------|-----|-----------|------|
-| `prompt` | `String` | — (必須) | キャラクタープロンプト |
+| `prompt` | `String` | — (必須) | キャラクタープロンプト (空文字列可) |
 | `centerX` | `Double` | `0.5` | 中心X座標 (0.0〜1.0) |
 | `centerY` | `Double` | `0.5` | 中心Y座標 (0.0〜1.0) |
 | `negativePrompt` | `String` | `""` | ネガティブプロンプト |
