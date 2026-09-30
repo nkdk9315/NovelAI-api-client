@@ -65,6 +65,8 @@ private func retryDelay(attempt: Int) -> UInt64 {
 ///   - session: The `URLSession` to use (injected for testability).
 ///   - operationName: A descriptive name for the operation, used in log messages.
 ///   - logger: A `Logger` instance for recording warnings and errors.
+///   - onProgress: If set, the body is read as it arrives and each streamed
+///     generation preview is passed here (see `readWithProgress`).
 /// - Returns: A tuple of the response `Data` and `HTTPURLResponse`.
 /// - Throws: `NovelAIError.api` for HTTP errors, `CancellationError` on timeout,
 ///           or the underlying `URLError` if retries are exhausted.
@@ -72,7 +74,8 @@ public func fetchWithRetry(
     request: URLRequest,
     session: URLSession,
     operationName: String = "Request",
-    logger: Logger = DefaultLogger()
+    logger: Logger = DefaultLogger(),
+    onProgress: ProgressHandler? = nil
 ) async throws -> (Data, HTTPURLResponse) {
     // Overall timeout using a task group
     return try await withThrowingTaskGroup(of: (Data, HTTPURLResponse).self) { group in
@@ -91,7 +94,8 @@ public func fetchWithRetry(
                 request: request,
                 session: session,
                 operationName: operationName,
-                logger: logger
+                logger: logger,
+                onProgress: onProgress
             )
         }
 
@@ -116,7 +120,8 @@ private func performWithRetry(
     request: URLRequest,
     session: URLSession,
     operationName: String,
-    logger: Logger
+    logger: Logger,
+    onProgress: ProgressHandler?
 ) async throws -> (Data, HTTPURLResponse) {
     for attempt in 0...maxRetries {
         // Check for cancellation (e.g. from the overall timeout)
@@ -126,7 +131,19 @@ private func performWithRetry(
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            if let onProgress {
+                let (bytes, streamResponse) = try await session.bytes(for: request)
+                let succeeded = (streamResponse as? HTTPURLResponse).map { (200...299).contains($0.statusCode) } ?? false
+                // An error body is read only for its message
+                data = try await readWithProgress(
+                    bytes,
+                    expectedLength: streamResponse.expectedContentLength,
+                    onProgress: succeeded ? onProgress : { _ in }
+                )
+                response = streamResponse
+            } else {
+                (data, response) = try await session.data(for: request)
+            }
         } catch let urlError as URLError where retryableURLErrorCodes.contains(urlError.code) {
             if attempt < maxRetries {
                 let delay = retryDelay(attempt: attempt)
