@@ -36,6 +36,7 @@ src/
     ├── mod.rs              # NovelAIClient (generate, encode_vibe, augment, upscale, balance)
     ├── payload.rs          # JSON ペイロード構築 (v4_prompt, charRef, vibe等)
     ├── response.rs         # レスポンスパース (ZIP/msgpack/PNG フォールバック)
+    ├── stream.rs           # stream 本文の逐次読み込み + 途中経過 (generate_with_progress)
     └── retry.rs            # Exponential backoff リトライ (429/502/503)
 examples/                   # 使用例 (example.rs, example_augment.rs, example_infill.rs)
 tests/                      # 統合テスト
@@ -67,6 +68,7 @@ tests/                      # 統合テスト
 | カテゴリ | 型名 |
 |---------|------|
 | エントリーポイント | `NovelAIClient`, `Logger` trait, `DefaultLogger` |
+| 途中経過 | `GenerateProgress`, `ProgressFn` (`generate_with_progress`) |
 | パラメータ | `GenerateParams`, `GenerateParamsBuilder`, `EncodeVibeParams`, `AugmentParams`, `UpscaleParams` |
 | 結果 | `GenerateResult`, `AugmentResult`, `UpscaleResult`, `VibeEncodeResult` |
 | 列挙型 | `GenerateAction`, `ImageInput`, `SaveTarget`, `VibeItem`, `CharRefMode`, `Model`, `Sampler`, `NoiseSchedule`, `AugmentReqType` |

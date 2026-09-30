@@ -7,6 +7,7 @@ use std::io::Write;
 use base64::Engine;
 use novelai_api::client::payload;
 use novelai_api::client::response;
+use novelai_api::client::stream::{intermediate_preview, FrameScanner};
 use novelai_api::client::{DefaultLogger, NovelAIClient};
 use novelai_api::constants;
 use novelai_api::error::NovelAIError;
@@ -74,6 +75,36 @@ fn create_test_msgpack(key: &str, data: &[u8]) -> Vec<u8> {
     let mut buf = Vec::new();
     rmpv::encode::write_value(&mut buf, &val).unwrap();
     buf
+}
+
+/// One `[u32 BE length][msgpack map]` frame of the streaming endpoint.
+fn stream_frame(fields: Vec<(&str, rmpv::Value)>) -> Vec<u8> {
+    let map = rmpv::Value::Map(fields.into_iter().map(|(k, v)| (rmpv::Value::String(k.into()), v)).collect());
+    let mut payload = Vec::new();
+    rmpv::encode::write_value(&mut payload, &map).unwrap();
+    let mut out = (payload.len() as u32).to_be_bytes().to_vec();
+    out.extend(payload);
+    out
+}
+
+fn intermediate_frame(step: u64, jpeg: &[u8]) -> Vec<u8> {
+    stream_frame(vec![
+        ("event_type", rmpv::Value::String("intermediate".into())),
+        ("samp_ix", rmpv::Value::from(0)),
+        ("step_ix", rmpv::Value::from(step)),
+        ("gen_id", rmpv::Value::String("g".into())),
+        ("sigma", rmpv::Value::F64(14.6 / (step as f64 + 1.0))),
+        ("image", rmpv::Value::Binary(jpeg.to_vec())),
+    ])
+}
+
+fn final_frame(image: &[u8]) -> Vec<u8> {
+    stream_frame(vec![
+        ("event_type", rmpv::Value::String("final".into())),
+        ("samp_ix", rmpv::Value::from(0)),
+        ("gen_id", rmpv::Value::String("g".into())),
+        ("image", rmpv::Value::Binary(image.to_vec())),
+    ])
 }
 
 // =============================================================================
@@ -1688,5 +1719,108 @@ mod integration {
         assert_eq!(result.image_data, png);
 
         clear_mock_urls();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn generate_with_progress_reports_each_preview() {
+        let mut server = mockito::Server::new_async().await;
+        set_mock_urls(&server.url());
+
+        let png = create_test_png(64, 64);
+        let mut body = intermediate_frame(0, b"jpeg-0");
+        body.extend(intermediate_frame(1, b"jpeg-1"));
+        body.extend(final_frame(&png));
+
+        let _balance_mock = server
+            .mock("GET", "/user/subscription")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(mock_balance_json())
+            .create_async()
+            .await;
+        let _gen_mock = server
+            .mock("POST", "/ai/generate-image-stream")
+            .with_status(200)
+            .with_header("content-type", "application/msgpack")
+            .with_body(body)
+            .create_async()
+            .await;
+
+        let client = NovelAIClient::new(Some("test-key"), None).unwrap();
+        let params = GenerateParams {
+            prompt: "1girl".to_string(),
+            seed: Some(7),
+            ..Default::default()
+        };
+        let seen = std::sync::Mutex::new(Vec::new());
+        let on_progress = |p: novelai_api::client::GenerateProgress| seen.lock().unwrap().push((p.step, p.image));
+        let result = client.generate_with_progress(&params, Some(&on_progress)).await.unwrap();
+
+        assert_eq!(result.image_data, png);
+        assert_eq!(
+            seen.into_inner().unwrap(),
+            vec![(0, b"jpeg-0".to_vec()), (1, b"jpeg-1".to_vec())]
+        );
+
+        clear_mock_urls();
+    }
+}
+
+// =============================================================================
+// Stream Progress Tests
+// =============================================================================
+
+mod stream_progress {
+    use super::*;
+
+    #[test]
+    fn scanner_waits_for_whole_frames() {
+        let first = intermediate_frame(0, b"a");
+        let second = intermediate_frame(1, b"b");
+        let mut body = first.clone();
+        body.extend(&second);
+        body.extend(final_frame(b"png"));
+
+        let mut scanner = FrameScanner::default();
+        // Only part of the first frame: nothing yet
+        assert!(scanner.scan(&body[..first.len() - 1]).is_empty());
+        // First frame complete, second cut short
+        let got = scanner.scan(&body[..first.len() + 3]);
+        assert_eq!(got.iter().map(|p| p.step).collect::<Vec<_>>(), vec![0]);
+        // The rest: the second preview once, and the final frame is not a preview
+        let got = scanner.scan(&body);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].step, 1);
+        assert_eq!(got[0].image, b"b".to_vec());
+        assert!(got[0].sigma.is_some());
+        assert!(scanner.scan(&body).is_empty());
+    }
+
+    #[test]
+    fn scanner_ignores_unframed_bodies() {
+        let png = create_test_png(8, 8);
+        let zip = create_test_zip_with_png(&png);
+        assert!(FrameScanner::default().scan(&png).is_empty());
+        assert!(FrameScanner::default().scan(&zip).is_empty());
+    }
+
+    #[test]
+    fn only_intermediate_frames_are_previews() {
+        let payload = |frame: Vec<u8>| frame[4..].to_vec();
+        assert!(intermediate_preview(&payload(intermediate_frame(3, b"x"))).is_some());
+        assert!(intermediate_preview(&payload(final_frame(b"x"))).is_none());
+        let error = stream_frame(vec![("event_type", rmpv::Value::String("error".into()))]);
+        assert!(intermediate_preview(&payload(error)).is_none());
+        assert!(intermediate_preview(b"not msgpack").is_none());
+    }
+
+    #[test]
+    fn final_image_still_parsed_from_streamed_body() {
+        let png = create_test_png(16, 16);
+        let mut body = intermediate_frame(0, b"jpeg");
+        body.extend(final_frame(&png));
+        let result = response::parse_stream_response(&body, &DefaultLogger).unwrap();
+        assert_eq!(result, png);
     }
 }

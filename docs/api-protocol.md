@@ -359,6 +359,7 @@ UC プリセット (V5。ネガティブの先頭に追加):
 | `error` | `message`, `samp_ix` | 生成エラー |
 
 - `final` フレームの `image` を使う。`error` フレームがあれば例外にする。
+- `intermediate` は 1 ステップごとに届くので、本文を少しずつ読めば生成中のプレビューに使える (Rust 版 `generate_with_progress`)。
 - 公式ドキュメントは SSE と書いているが、`stream: "sse"` は未検証。
 - 使用量などの情報はレスポンスに含まれない。
 
