@@ -34,38 +34,79 @@ public struct MaskCenter: Sendable {
 
 // MARK: - Mask Resize
 
-/// Resize a mask image to 1/8 of target dimensions (API specification).
+/// Size of one mask cell in pixels (the model works on an 8x-downscaled latent).
+public let MASK_CELL = 8
+
+/// Normalize a mask for the API: full target size, binary, snapped to 8px cells.
+///
+/// The mask is first reduced to one value per 8x8 cell (area average) and
+/// thresholded at 50%, then scaled back up with nearest-neighbour to exactly
+/// `targetWidth` x `targetHeight`. Any input size works (a 1/8 cell grid or a
+/// full-size brush mask).
+///
+/// Why: the official site sends the full-size mask. A 1/8-size mask, or a
+/// full-size mask whose edges fall between cells (soft/antialiased or
+/// unaligned), makes V5 inpainting draw a grey frame along the mask border.
 public func resizeMaskImage(_ maskData: Data, targetWidth: Int, targetHeight: Int) throws -> Data {
     #if canImport(CoreGraphics)
-    let maskWidth = targetWidth / 8
-    let maskHeight = targetHeight / 8
+    guard targetWidth > 0 && targetHeight > 0 else {
+        throw NovelAIError.validation("Invalid dimensions: width (\(targetWidth)) and height (\(targetHeight)) must be positive")
+    }
+    let cols = max(1, targetWidth / MASK_CELL)
+    let rows = max(1, targetHeight / MASK_CELL)
+    let gridWidth = cols * MASK_CELL
+    let gridHeight = rows * MASK_CELL
 
     guard let imageSource = CGImageSourceCreateWithData(maskData as CFData, nil),
           let sourceImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
         throw NovelAIError.image("Failed to load mask image")
     }
 
-    let colorSpace = CGColorSpaceCreateDeviceGray()
-    guard let context = CGContext(
-        data: nil,
-        width: maskWidth,
-        height: maskHeight,
-        bitsPerComponent: 8,
-        bytesPerRow: maskWidth,
-        space: colorSpace,
-        bitmapInfo: CGImageAlphaInfo.none.rawValue
-    ) else {
-        throw NovelAIError.image("Failed to create graphics context for mask resize")
+    // Draw the mask as grayscale on a grid of whole 8px cells
+    var grid = [UInt8](repeating: 0, count: gridWidth * gridHeight)
+    try grid.withUnsafeMutableBytes { rawBuffer in
+        guard let context = CGContext(
+            data: rawBuffer.baseAddress,
+            width: gridWidth,
+            height: gridHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: gridWidth,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ) else {
+            throw NovelAIError.image("Failed to create graphics context for mask resize")
+        }
+        context.interpolationQuality = .high
+        context.draw(sourceImage, in: CGRect(x: 0, y: 0, width: gridWidth, height: gridHeight))
     }
 
-    context.interpolationQuality = .high
-    context.draw(sourceImage, in: CGRect(x: 0, y: 0, width: maskWidth, height: maskHeight))
-
-    guard let resizedImage = context.makeImage() else {
-        throw NovelAIError.image("Failed to create resized mask image")
+    // Area-average each cell, then threshold at 50%
+    var cells = [UInt8](repeating: 0, count: cols * rows)
+    let cellArea = MASK_CELL * MASK_CELL
+    for cy in 0..<rows {
+        for cx in 0..<cols {
+            var sum = 0
+            for y in (cy * MASK_CELL)..<((cy + 1) * MASK_CELL) {
+                let rowOffset = y * gridWidth
+                for x in (cx * MASK_CELL)..<((cx + 1) * MASK_CELL) {
+                    sum += Int(grid[rowOffset + x])
+                }
+            }
+            cells[cy * cols + cx] = sum / cellArea >= 128 ? 255 : 0
+        }
     }
 
-    return try encodeCGImageAsPNG(resizedImage)
+    // Nearest-neighbour upscale back to the full target size
+    var pixels = [UInt8](repeating: 0, count: targetWidth * targetHeight)
+    for y in 0..<targetHeight {
+        let cy = min(rows - 1, y * rows / targetHeight)
+        for x in 0..<targetWidth {
+            let cx = min(cols - 1, x * cols / targetWidth)
+            pixels[y * targetWidth + x] = cells[cy * cols + cx]
+        }
+    }
+
+    return try encodeGrayscalePixelsAsPNG(pixels, width: targetWidth, height: targetHeight)
     #else
     throw NovelAIError.image("CoreGraphics is not available on this platform")
     #endif

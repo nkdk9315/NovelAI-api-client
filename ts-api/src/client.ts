@@ -485,7 +485,7 @@ export class NovelAIClient {
       validatedParams.height
     );
 
-    // マスク画像を処理（1/8サイズにリサイズ）
+    // マスク画像を処理（8px セル単位の白黒に丸め、元画像と同じサイズで送る）
     const maskBuffer = Utils.getImageBuffer(validatedParams.mask);
     const resizedMask = await Utils.resizeMaskImage(
       maskBuffer,

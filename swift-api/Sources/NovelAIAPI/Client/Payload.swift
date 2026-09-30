@@ -118,7 +118,7 @@ func applyInfillParams(
         sourceImage, targetWidth: params.width, targetHeight: params.height
     )
 
-    // Resize mask to 1/8 dimensions
+    // Normalize mask: binary, snapped to 8px cells, same size as the source image
     let maskBuffer = try getImageBuffer(params.mask!)
     let resizedMask = try resizeMaskImage(maskBuffer, targetWidth: params.width, targetHeight: params.height)
     let maskBase64 = resizedMask.base64EncodedString()

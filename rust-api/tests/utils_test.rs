@@ -618,12 +618,43 @@ fn n4_invalid_image_data_throws() {
 // =============================================================================
 
 #[test]
-fn p1_resizes_to_one_eighth() {
-    let png_data = create_test_png(800, 600);
+fn p1_resizes_to_full_target_size() {
+    let png_data = create_test_png(100, 75);
     let result = utils::mask::resize_mask_image(&png_data, 800, 600).unwrap();
     let img = image::load_from_memory(&result).unwrap();
-    assert_eq!(img.width(), 100); // 800/8
-    assert_eq!(img.height(), 75);  // 600/8
+    assert_eq!(img.width(), 800);
+    assert_eq!(img.height(), 600);
+}
+
+#[test]
+fn p3_output_is_binary_and_snapped_to_8px_cells() {
+    // Full-size mask with a soft, unaligned edge: a filled circle drawn at 3px offsets.
+    let mut src = image::GrayImage::new(64, 64);
+    for (x, y, p) in src.enumerate_pixels_mut() {
+        let (dx, dy) = (x as f64 - 29.0, y as f64 - 35.0);
+        let d = (dx * dx + dy * dy).sqrt();
+        p.0 = [((20.0 - d).clamp(0.0, 1.0) * 255.0) as u8];
+    }
+    let mut buf = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageLuma8(src).write_to(&mut buf, image::ImageFormat::Png).unwrap();
+
+    let out = utils::mask::resize_mask_image(&buf.into_inner(), 64, 64).unwrap();
+    let img = image::load_from_memory(&out).unwrap().to_luma8();
+    assert_eq!(img.dimensions(), (64, 64));
+    for cy in 0..8 {
+        for cx in 0..8 {
+            let v = img.get_pixel(cx * 8, cy * 8)[0];
+            assert!(v == 0 || v == 255, "non-binary value {v}");
+            for y in 0..8 {
+                for x in 0..8 {
+                    assert_eq!(img.get_pixel(cx * 8 + x, cy * 8 + y)[0], v, "cell ({cx},{cy}) not uniform");
+                }
+            }
+        }
+    }
+    // The circle's centre cell is masked, a corner cell is not.
+    assert_eq!(img.get_pixel(28, 36)[0], 255);
+    assert_eq!(img.get_pixel(0, 0)[0], 0);
 }
 
 #[test]
