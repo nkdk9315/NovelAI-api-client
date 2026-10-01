@@ -13,6 +13,7 @@
 ```
 src/
 ├── client.ts        # NovelAIClient クラス (generate, encodeVibe, augmentImage, upscaleImage, getAnlasBalance)
+├── stream.ts        # stream 本文の逐次読み込み + 途中経過 (generate の onProgress)
 ├── schemas.ts       # Zod スキーマ定義・バリデーション (GenerateParams, AugmentParams, UpscaleParams 等)
 ├── constants.ts     # 全定数・デフォルト値・API URL・制限値
 ├── utils.ts         # 画像処理ヘルパー (Buffer変換, リサイズ, マスク生成, Vibe/CharRef処理)

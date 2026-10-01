@@ -17,6 +17,7 @@ Sources/NovelAIAPI/
 │   ├── NovelAIClient.swift  # メインクラス (generate, encodeVibe, augmentImage, upscaleImage, getAnlasBalance)
 │   ├── Payload.swift        # JSON ペイロード構築ヘルパー
 │   ├── Response.swift       # レスポンスパース (ZIP/msgpack/PNG)
+│   ├── Stream.swift         # stream 本文の逐次読み込み + 途中経過 (generate の onProgress)
 │   └── Retry.swift          # fetchWithRetry + Logger protocol + exponential backoff
 ├── Schemas/
 │   ├── Types.swift          # 全構造体・enum 定義 (GenerateParams, ImageInput 等)

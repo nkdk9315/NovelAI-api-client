@@ -81,6 +81,7 @@ swift-api/Sources/NovelAIAPI/
 - **Upscale**: 2x 画像拡大 (サーバーは常に2倍)
 - **V5 使用量**: 残高取得時に Opus 無料生成の使用量 (`usage`) を返す
 - **Anlas コスト計算**: 純粋関数として実装 (API呼び出し不要)
+- **生成中の途中経過**: stream の `intermediate` フレーム (ステップごとの JPEG) をコールバックで受け取れる (Rust `generate_with_progress` / TS `onProgress` / Swift `onProgress:`)
 
 ### 画像入力の抽象化
 

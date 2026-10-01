@@ -235,7 +235,7 @@ pub struct VibeConfig {
 
 ```rust
 pub struct CharacterConfig {
-    pub prompt: String,            // キャラクタープロンプト
+    pub prompt: String,            // キャラクタープロンプト (空文字列可)
     pub center_x: f64,            // 0.0-1.0 (画面上の横位置)
     pub center_y: f64,            // 0.0-1.0 (画面上の縦位置)
     pub negative_prompt: String,   // キャラクターネガティブ

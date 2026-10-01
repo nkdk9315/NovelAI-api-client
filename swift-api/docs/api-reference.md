@@ -20,10 +20,21 @@ APIキーが未指定かつ環境変数にもない場合は `NovelAIError.api` 
 ## generate()
 
 ```swift
-func generate(_ params: GenerateParams) async throws -> GenerateResult
+func generate(_ params: GenerateParams, onProgress: ProgressHandler? = nil) async throws -> GenerateResult
 ```
 
 画像生成の統合メソッド。txt2img / img2img / inpaint を `action` パラメータで切り替える。
+
+`onProgress` を渡すと、stream エンドポイントが完成画像の前に送る途中経過 (`intermediate` フレーム、ステップごとの JPEG) を届いたそばから受け取る (`URLSession.bytes(for:)` で読む)。img2img は `ceil(steps × strength)` 回分だけ届く。本文は全部集めてから従来どおり完成画像を取り出す。
+
+```swift
+public struct GenerateProgress: Sendable, Equatable {
+    public let step: Int        // step_ix
+    public let sigma: Double?   // 残りのノイズ量 (0 に向かって下がる)
+    public let image: Data      // JPEG
+}
+public typealias ProgressHandler = @Sendable (GenerateProgress) -> Void
+```
 
 ### GenerateParams
 
@@ -76,7 +87,7 @@ func generate(_ params: GenerateParams) async throws -> GenerateResult
 
 | フィールド | 型 | デフォルト | 説明 |
 |-----------|-----|-----------|------|
-| `prompt` | `String` | — (必須) | キャラクタープロンプト |
+| `prompt` | `String` | — (必須) | キャラクタープロンプト (空文字列可) |
 | `centerX` | `Double` | `0.5` | 中心X座標 (0.0〜1.0) |
 | `centerY` | `Double` | `0.5` | 中心Y座標 (0.0〜1.0) |
 | `negativePrompt` | `String` | `""` | ネガティブプロンプト |

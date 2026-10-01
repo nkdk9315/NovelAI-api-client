@@ -218,10 +218,13 @@ public final class NovelAIClient: @unchecked Sendable {
     /// Supports text-to-image, image-to-image (img2img), and inpainting (infill) modes.
     /// Can optionally use vibe transfer, character references, and character prompts.
     ///
-    /// - Parameter params: Generation parameters including prompt, model, dimensions, etc.
+    /// - Parameters:
+    ///   - params: Generation parameters including prompt, model, dimensions, etc.
+    ///   - onProgress: Receives each denoising preview (JPEG) the streaming endpoint
+    ///     sends before the final image, as soon as it arrives. `nil` skips them.
     /// - Returns: The generated image data with metadata.
     /// - Throws: `NovelAIError` on validation, API, or I/O errors.
-    public func generate(_ params: GenerateParams) async throws -> GenerateResult {
+    public func generate(_ params: GenerateParams, onProgress: ProgressHandler? = nil) async throws -> GenerateResult {
         // Validate parameters (synchronous validation)
         try params.validate()
 
@@ -334,7 +337,8 @@ public final class NovelAIClient: @unchecked Sendable {
             request: request,
             session: session,
             operationName: "Generation",
-            logger: logger
+            logger: logger,
+            onProgress: onProgress
         )
 
         // Validate response size

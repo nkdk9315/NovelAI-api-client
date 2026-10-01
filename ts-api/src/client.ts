@@ -11,6 +11,8 @@ import { Unpackr } from 'msgpackr';
 import * as Constants from './constants';
 import * as Schemas from './schemas';
 import * as Utils from './utils';
+import { readWithProgress, type ProgressCallback } from './stream';
+export type { GenerateProgress, ProgressCallback } from './stream';
 import { clampToMaxPixels, calculateGenerationCost, calculateAugmentCost, calculateUpscaleCost, SubscriptionTier, OpusUsage } from './anlas';
 
 export interface Logger {
@@ -598,8 +600,12 @@ export class NovelAIClient {
 
   /**
    * 統合画像生成メソッド
+   * @param options.onProgress stream が完成画像の前に送る途中経過 (ステップごとの JPEG) を届いたそばから受け取る
    */
-  async generate(params: Schemas.GenerateParams): Promise<Schemas.GenerateResult> {
+  async generate(
+    params: Schemas.GenerateParams,
+    options?: { onProgress?: ProgressCallback },
+  ): Promise<Schemas.GenerateResult> {
     // Validate parameters
     const validatedParams = await Schemas.GenerateParamsSchema.parseAsync(params);
 
@@ -716,7 +722,9 @@ export class NovelAIClient {
       'Generation'
     );
 
-    const responseBuffer = await this.getResponseBuffer(response);
+    const responseBuffer = options?.onProgress
+      ? await readWithProgress(response, options.onProgress)
+      : await this.getResponseBuffer(response);
     const imageData = this.parseStreamResponse(responseBuffer);
 
     // Get final balance

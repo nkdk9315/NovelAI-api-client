@@ -13,6 +13,7 @@ Client/NovelAIClient.swift
 ├── Client/Payload.swift         (JSON ペイロード構築)
 │   └── Constants.swift
 ├── Client/Response.swift        (ZIP/msgpack/PNG パース)
+├── Client/Stream.swift          (stream 本文を読みながら途中経過を取り出す)
 ├── Client/Retry.swift           (fetchWithRetry + Logger)
 └── Utils/
     ├── ImageUtils.swift         (ImageInput → Data/base64 変換)
@@ -70,6 +71,8 @@ Anlas.swift                      (純粋関数, 外部依存なし)
     │
     ▼
 [4] レスポンスパース (Response.swift)
+    │   - onProgress があれば fetchWithRetry が session.bytes(for:) で本文を読み (Stream.swift の
+    │     readWithProgress)、そろった intermediate フレームから順に途中経過を渡す
     │   - 常に parseStreamResponse (ZIP → PNG → フレーム化msgpack → 埋め込みPNG → raw msgpack フォールバック)
     │
     ▼

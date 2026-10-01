@@ -20,10 +20,24 @@ APIキーが未指定かつ環境変数にもない場合は `Error` をスロ�
 ## generate()
 
 ```typescript
-async generate(params: GenerateParams): Promise<GenerateResult>
+async generate(
+  params: GenerateParams,
+  options?: { onProgress?: ProgressCallback },
+): Promise<GenerateResult>
 ```
 
 画像生成の統合メソッド。txt2img / img2img / inpaint を `action` パラメータで切り替える。
+
+`onProgress` を渡すと、stream エンドポイントが完成画像の前に送る途中経過 (`intermediate` フレーム、ステップごとの JPEG) を届いたそばから受け取る。img2img は `ceil(steps × strength)` 回分だけ届く。本文は全部集めてから従来どおり完成画像を取り出す。
+
+```typescript
+interface GenerateProgress {
+  step: number;          // step_ix
+  sigma: number | null;  // 残りのノイズ量 (0 に向かって下がる)
+  image: Buffer;         // JPEG
+}
+type ProgressCallback = (progress: GenerateProgress) => void;
+```
 
 ### GenerateParams
 
@@ -74,7 +88,7 @@ async generate(params: GenerateParams): Promise<GenerateResult>
 
 | フィールド | 型 | デフォルト | 説明 |
 |-----------|-----|-----------|------|
-| `prompt` | `string` | — (必須) | キャラクタープロンプト |
+| `prompt` | `string` | — (必須) | キャラクタープロンプト (空文字列可) |
 | `center_x` | `number` | `0.5` | 中心X座標 (0.0〜1.0) |
 | `center_y` | `number` | `0.5` | 中心Y座標 (0.0〜1.0) |
 | `negative_prompt` | `string` | `""` | ネガティブプロンプト |

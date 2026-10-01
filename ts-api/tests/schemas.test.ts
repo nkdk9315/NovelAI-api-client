@@ -33,10 +33,10 @@ describe('CharacterConfigSchema', () => {
     expect(result.negative_prompt).toBe('');
   });
 
-  it('should reject empty prompt', () => {
+  it('should accept empty prompt', () => {
     const config = { prompt: '' };
     const result = Schemas.CharacterConfigSchema.safeParse(config);
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   it('should reject center_x outside 0-1 range', () => {
@@ -659,6 +659,14 @@ describe('GenerateParamsSchema', () => {
       });
       expect(result).toBeDefined();
       expect(result.prompt).toBe('');
+    });
+
+    it('should accept an empty character prompt', async () => {
+      const result = await Schemas.GenerateParamsSchema.parseAsync({
+        prompt: '1girl',
+        characters: [{ prompt: '' }],
+      });
+      expect(result.characters?.[0].prompt).toBe('');
     });
 
     it('should work with parseAsync (async validation)', async () => {

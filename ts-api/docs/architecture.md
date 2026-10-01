@@ -10,6 +10,7 @@ client.ts
 ├── schemas.ts       (Zodバリデーション)
 │   ├── constants.ts
 │   └── tokenizer.ts (非同期トークンカウント)
+├── stream.ts        (stream 本文を読みながら途中経過を取り出す)
 └── utils.ts         (画像処理)
     ├── constants.ts
     └── schemas.ts   (型のみ)
@@ -62,6 +63,8 @@ anlas-browser.ts     (再エクスポートのみ)
     │
     ▼
 [4] レスポンスパース
+    │   - onProgress があれば stream.ts の readWithProgress で本文を少しずつ読み、
+    │     そろった intermediate フレームから順に途中経過を渡す
     │   - 常に parseStreamResponse (ZIP → PNG → フレーム化msgpack → raw msgpack → 埋め込みPNG フォールバック)
     │
     ▼
